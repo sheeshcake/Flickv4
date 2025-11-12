@@ -1,97 +1,114 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Flickv4
 
-# Getting Started
+A modern React Native streaming experience that brings ad-free movies and TV shows to mobile devices with offline downloads, subtitle controls, and a polished Netflix-inspired UI.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## Overview
 
-## Step 1: Start Metro
+- **Stack**: React Native 0.82, React 19, TypeScript, React Navigation, Axios
+- **Platforms**: Android and iOS (Apple Silicon and Intel Macs supported)
+- **Data**: Powered by TMDB with local caching for resilient offline UX
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+## Screenshots
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+| Home | Detail | Downloads |
+| --- | --- | --- |
+| ![Home screen](screenshots/screenshot-01.png) | ![Detail screen](screenshots/screenshot-02.png) | ![Downloads screen](screenshots/screenshot-03.png) |
 
-```sh
-# Using npm
-npm start
+| Search | Settings |
+| --- | --- |
+| ![Search screen](screenshots/screenshot-04.png) | ![Settings screen](screenshots/screenshot-05.png) |
 
-# OR using Yarn
-yarn start
+## Features
+
+- Personalized home screen with trending, continue watching, and curated rows
+- Deep TMDB integration for metadata, credits, trailers, and artwork
+- High quality video playback with `react-native-video`, Google Cast, and subtitle selection
+- Background downloads with pause/resume, progress indicators, and offline playback
+- Optimized image loading and caching strategies for low bandwidth environments
+- Dark theme-first UI with responsive layouts and accessibility helpers
+
+## Prerequisites
+
+- Node.js 20+ and npm 10+ (or yarn 1.22+ if preferred)
+- Watchman (recommended on macOS) and Xcode 15+ for iOS builds
+- Android Studio with Android SDK 34, NDK (side by side), and an emulator/device
+- Ruby 3.x with CocoaPods (`sudo gem install cocoapods`) for iOS dependencies
+- TMDB API key (configure in `src/utils/constants.ts` before shipping)
+
+## Getting Started
+
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/sheeshcake/Flickv4.git
+cd Flickv4
+npm install
 ```
 
-## Step 2: Build and run your app
+Install native dependencies:
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
+```bash
+# iOS
+cd ios
+pod install
+cd ..
 ```
 
-### iOS
+For Android, open the project in Android Studio the first time so Gradle can install any missing SDK components.
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+Launch the Metro bundler and run on your target platform:
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+```bash
+npm start        # Metro bundler
+npm run android  # Android device/emulator
+npm run ios      # iOS simulator (requires Mac)
 ```
 
-Then, and every time you update your native dependencies, run:
+## Configuration
 
-```sh
-bundle exec pod install
-```
+- Update `TMDB_CONFIG.API_KEY` in `src/utils/constants.ts` with your TMDB key.
+- Customize theming colors in `src/utils/theme.ts` and `src/utils/constants.ts`.
+- Supply custom app icons and splashes under `android/app/src/main/res` and `ios/Flickv4/Images.xcassets`.
+- Download storage defaults to the app sandbox; change paths in `src/services/DownloadService.ts` if needed.
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## Scripts
 
-```sh
-# Using npm
-npm run ios
+- `npm run android`: Build and launch the Android app in debug
+- `npm run ios`: Build and launch the iOS app (requires simulator or device)
+- `npm start`: Start Metro bundler without launching a target
+- `npm run build:android`: Generate a release build for Android
+- `npm run lint`: Run ESLint using React Native defaults
+- `npm test`: Execute Jest unit tests in `__tests__/`
 
-# OR using Yarn
-yarn ios
-```
+## Testing
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+- Unit tests reside in `__tests__` and `src/**/__tests__`; run `npm test`.
+- Component behavior relies on cached data and downloads; consider using mocks under `src/utils/__mocks__`.
+- For end-to-end flows, React Native Testing Library or Detox can be layered on top (not included out of the box).
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+## Project Structure
 
-## Step 3: Modify your app
+- `src/components`: Reusable UI primitives and feature widgets (media player, subtitle selector, offline banner)
+- `src/services`: API, caching, storage, and download service abstractions
+- `src/navigation`: Tab and stack navigators for core screens
+- `src/screens`: Feature screens (Home, Detail, Downloads, Search, Settings)
+- `src/utils`: Responsive helpers, network utilities, theme, and constants
+- `screenshots`: App previews embedded in this README
 
-Now that you have successfully run the app, let's make changes!
+## Credits
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+- [Wendale Franz Dy](https://github.com/sheeshcake) - Creator, maintainer, scraper updates
+- [Elijah Abgao](https://github.com/skeltonmod) - Scraper and data provider
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
+## Support
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+<a href="https://www.paypal.com/paypalme/wfrdee" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/purple_img.png" alt="Buy Me A Coffee" style="height: 41px;width: 174px;box-shadow: 0 3px 2px rgba(190,190,190,0.5);-webkit-box-shadow: 0 3px 2px rgba(190,190,190,0.5);"></a>
 
-## Congratulations! :tada:
+## License
 
-You've successfully run and modified your React Native App. :partying_face:
+MIT
 
-### Now what?
+---
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+> GitHub [@sheeshcake](https://github.com/sheeshcake) · Facebook [@wfrdee](https://facebook.com/wfrdee)
 
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
