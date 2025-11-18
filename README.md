@@ -1,114 +1,131 @@
-# Flickv4
-
-A modern React Native streaming experience that brings ad-free movies and TV shows to mobile devices with offline downloads, subtitle controls, and a polished Netflix-inspired UI.
-
-## Overview
-
-- **Stack**: React Native 0.82, React 19, TypeScript, React Navigation, Axios
-- **Platforms**: Android and iOS (Apple Silicon and Intel Macs supported)
-- **Data**: Powered by TMDB with local caching for resilient offline UX
-
-## Screenshots
-
-| Home | Detail | Downloads |
-| --- | --- | --- |
-| ![Home screen](screenshots/screenshot-01.png) | ![Detail screen](screenshots/screenshot-02.png) | ![Downloads screen](screenshots/screenshot-03.png) |
-
-| Search | Settings |
-| --- | --- |
-| ![Search screen](screenshots/screenshot-04.png) | ![Settings screen](screenshots/screenshot-05.png) |
-
-## Features
-
-- Personalized home screen with trending, continue watching, and curated rows
-- Deep TMDB integration for metadata, credits, trailers, and artwork
-- High quality video playback with `react-native-video`, Google Cast, and subtitle selection
-- Background downloads with pause/resume, progress indicators, and offline playback
-- Optimized image loading and caching strategies for low bandwidth environments
-- Dark theme-first UI with responsive layouts and accessibility helpers
-
-## Prerequisites
-
-- Node.js 20+ and npm 10+ (or yarn 1.22+ if preferred)
-- Watchman (recommended on macOS) and Xcode 15+ for iOS builds
-- Android Studio with Android SDK 34, NDK (side by side), and an emulator/device
-- Ruby 3.x with CocoaPods (`sudo gem install cocoapods`) for iOS dependencies
-- TMDB API key (configure in `src/utils/constants.ts` before shipping)
-
-## Getting Started
-
-Clone the repository and install dependencies:
-
-```bash
-git clone https://github.com/sheeshcake/Flickv4.git
-cd Flickv4
-npm install
-```
-
-Install native dependencies:
-
-```bash
-# iOS
-cd ios
-pod install
-cd ..
-```
-
-For Android, open the project in Android Studio the first time so Gradle can install any missing SDK components.
-
-Launch the Metro bundler and run on your target platform:
-
-```bash
-npm start        # Metro bundler
-npm run android  # Android device/emulator
-npm run ios      # iOS simulator (requires Mac)
-```
-
-## Configuration
-
-- Update `TMDB_CONFIG.API_KEY` in `src/utils/constants.ts` with your TMDB key.
-- Customize theming colors in `src/utils/theme.ts` and `src/utils/constants.ts`.
-- Supply custom app icons and splashes under `android/app/src/main/res` and `ios/Flickv4/Images.xcassets`.
-- Download storage defaults to the app sandbox; change paths in `src/services/DownloadService.ts` if needed.
-
-## Scripts
-
-- `npm run android`: Build and launch the Android app in debug
-- `npm run ios`: Build and launch the iOS app (requires simulator or device)
-- `npm start`: Start Metro bundler without launching a target
-- `npm run build:android`: Generate a release build for Android
-- `npm run lint`: Run ESLint using React Native defaults
-- `npm test`: Execute Jest unit tests in `__tests__/`
-
-## Testing
-
-- Unit tests reside in `__tests__` and `src/**/__tests__`; run `npm test`.
-- Component behavior relies on cached data and downloads; consider using mocks under `src/utils/__mocks__`.
-- For end-to-end flows, React Native Testing Library or Detox can be layered on top (not included out of the box).
-
-## Project Structure
-
-- `src/components`: Reusable UI primitives and feature widgets (media player, subtitle selector, offline banner)
-- `src/services`: API, caching, storage, and download service abstractions
-- `src/navigation`: Tab and stack navigators for core screens
-- `src/screens`: Feature screens (Home, Detail, Downloads, Search, Settings)
-- `src/utils`: Responsive helpers, network utilities, theme, and constants
-- `screenshots`: App previews embedded in this README
-
-## Credits
-
-- [Wendale Franz Dy](https://github.com/sheeshcake) - Creator, maintainer, scraper updates
-- [Elijah Abgao](https://github.com/skeltonmod) - Scraper and data provider
-
-## Support
-
-<a href="https://www.paypal.com/paypalme/wfrdee" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/purple_img.png" alt="Buy Me A Coffee" style="height: 41px;width: 174px;box-shadow: 0 3px 2px rgba(190,190,190,0.5);-webkit-box-shadow: 0 3px 2px rgba(190,190,190,0.5);"></a>
-
-## License
-
-MIT
+<div align="center">
+  <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png" alt="Flickv4 Logo" width="150" />
+  
+  <h1>✨ Flickv4</h1>
+  <p><strong>Your Personal Streaming Sanctuary</strong></p>
+  <p>A premium, ad-free streaming experience that brings thousands of movies and TV shows to your fingertips—with offline downloads, intelligent subtitle controls, and a beautifully crafted Netflix-inspired interface.</p>
+  
+  <p>
+    <img src="https://img.shields.io/badge/React%20Native-0.82-61DAFB?style=flat-square&logo=react" alt="React Native" />
+    <img src="https://img.shields.io/badge/TypeScript-5.0-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
+    <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android-lightgrey?style=flat-square" alt="Platform" />
+    <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
+  </p>
+</div>
 
 ---
 
-> GitHub [@sheeshcake](https://github.com/sheeshcake) · Facebook [@wfrdee](https://facebook.com/wfrdee)
+## 🎬 Why Flickv4?
+
+**No Ads. No Subscriptions, No Bullshits. Just Pure Entertainment.**
+
+In a world cluttered with subscription services and intrusive advertising, Flickv4 offers a refreshingly simple alternative. Built with React Native and powered by TMDB's comprehensive media database, this app delivers a premium streaming experience that respects your time and attention.
+
+### 🚀 What Makes It Special
+
+- **🎯 Zero Friction Streaming** — Instant playback with intelligent caching that adapts to your network conditions
+- **📱 True Offline Mode** — Download your favorites and watch anywhere, even on a plane at 30,000 feet
+- **🎨 Stunning Interface** — Meticulously crafted dark-first UI that rivals Netflix's polish
+- **🌍 Accessibility First** — Comprehensive subtitle support with customizable styling and positioning
+- **⚡ Lightning Fast** — Optimized image loading and data persistence for instant app launches
+- **🔄 Smart Resume** — Pick up exactly where you left off.
+
+### 💎 Premium Features
+
+| Feature | Description |
+|---------|-------------|
+| **Continue Watching** | Smart playback history that remembers your progress across every show and movie |
+| **Google Cast Ready** | Stream seamlessly to your TV with built-in Chromecast support |
+| **Advanced Subtitles** | Choose from multiple languages, adjust size, color, and position |
+| **Download Manager** | Pause, resume, and manage offline content with progress tracking |
+| **TMDB Integration** | Rich metadata including cast, crew, trailers, ratings, and recommendations |
+| **Responsive Design** | Gorgeous layouts that adapt perfectly to phones and tablets |
+
+---
+
+## 📸 See It In Action
+
+<div align="center">
+
+### Home Experience
+<img src="screenshots/screenshot-01.png" width="270" alt="Home screen with trending content" />
+
+*Personalized rows featuring trending content, your watchlist, and genre collections*
+
+### Rich Detail Pages
+<img src="screenshots/screenshot-02.png" width="270" alt="Movie detail screen" />
+
+*Complete metadata, cast info, trailers, and instant playback*
+
+### Smart Downloads
+<img src="screenshots/screenshot-03.png" width="270" alt="Downloads management" />
+
+*Background downloads with progress tracking and offline playback*
+
+### Powerful Search
+<img src="screenshots/screenshot-04.png" width="270" alt="Search functionality" />
+
+*Find anything instantly with real-time TMDB search*
+
+### Your Settings
+<img src="screenshots/screenshot-05.png" width="270" alt="Settings panel" />
+
+*Customize subtitles, downloads, and app preferences*
+
+</div>
+
+---
+
+## 🤝 Contributing
+
+If Flickv4 has enhanced your streaming experience, consider supporting continued development:
+
+<a href="https://www.paypal.com/paypalme/wfrdee" target="_blank">
+  <img src="https://www.buymeacoffee.com/assets/img/custom_images/purple_img.png" alt="Buy Me A Coffee" height="41" width="174">
+</a>
+
+Your support helps maintain the project, add new features, and keep the scraper infrastructure running.
+
+---
+
+## 👨‍💻 Author
+
+**Wendale Franz Dy**
+- GitHub: [@sheeshcake](https://github.com/sheeshcake)
+- Facebook: [@wfrdee](https://facebook.com/wfrdee)
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+```
+MIT License - you're free to use, modify, and distribute this software.
+Commercial use is permitted. No warranty is provided.
+```
+
+---
+
+## ⚖️ Legal Disclaimer
+
+Any legal issues regarding the content on this application should be taken up with the actual file hosts and providers themselves as we are not affiliated with them. In case of copyright infringement, please directly contact the responsible parties or the streaming websites. The app is purely for educational and personal use. Flick(v4) does not host any content on the app, and has no control over what media is put up or taken down. Flick(v4) functions like any other search engine, such as Google. Flick(v4) does not host, upload or manage any videos, films or content. It simply crawls, aggregates and displayes links in a convenient, user-friendly interface. It merely scrapes 3rd-party websites that are publicly accessable via any regular web browser. It is the responsibility of user to avoid any actions that might violate the laws governing his/her locality. Use Flick(v4) at your own risk.
+
+---
+
+## 🌟 Acknowledgments
+
+- **TMDB** for providing a comprehensive and free movie database API
+- **React Native Community** for excellent libraries and tooling
+- **Open Source Contributors** whose work makes projects like this possible
+
+---
+
+<div align="center">
+  
+**Built with ❤️ and React Native**
+
+⭐ Star this repo if you find it useful!
+
+</div>
 

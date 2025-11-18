@@ -68,7 +68,7 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loadingContainer: {
-    width: '50%',
+    width: '100%',
     alignItems: 'center',
   },
   loadingText: {

@@ -33,12 +33,13 @@ import {commonStyles} from '../utils/theme';
 type Props = MainTabScreenProps<'Search'>;
 
 const CARD_WIDTH = getGridItemWidth(3, spacing.md * 1.5);
-const DEBOUNCE_DELAY = 500; // 500ms debounce
+const DEBOUNCE_DELAY = 1000; // 500ms debounce
 const safeArea = getSafeAreaPadding();
 
 export const SearchScreen: React.FC<Props> = ({navigation}) => {
   const {state, dispatch} = useAppContext();
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [popularContent, setPopularContent] = useState<Content[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<AppError | null>(null);
@@ -135,20 +136,28 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
 
   // Debounced search effect
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      if (searchQuery.trim()) {
-        performSearch(searchQuery.trim());
-      } else {
-        // Clear search results when query is empty
-        dispatch({
-          type: AppActionType.SET_SEARCH_RESULTS,
-          payload: [],
-        });
-      }
-    }, DEBOUNCE_DELAY);
+    const trimmedQuery = searchQuery.trim();
+    
+    // Clear results immediately if query is empty
+    if (!trimmedQuery) {
+      setDebouncedQuery('');
+      dispatch({
+        type: AppActionType.SET_SEARCH_RESULTS,
+        payload: [],
+      });
+      return;
+    }
+    
+    // Only apply debounce when query length is 3 or more
+    if (trimmedQuery.length >= 3) {
+      const timeoutId = setTimeout(() => {
+        setDebouncedQuery(trimmedQuery);
+        performSearch(trimmedQuery);
+      }, DEBOUNCE_DELAY);
 
-    return () => clearTimeout(timeoutId);
-  }, [searchQuery, performSearch, dispatch]);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [searchQuery, dispatch, performSearch]);
 
   const handleContentPress = useCallback(
     (content: Content) => {
@@ -158,12 +167,12 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
   );
 
   const handleRetry = useCallback(() => {
-    if (searchQuery.trim()) {
-      performSearch(searchQuery.trim());
+    if (debouncedQuery) {
+      performSearch(debouncedQuery);
     } else {
       loadPopularContent();
     }
-  }, [searchQuery, performSearch, loadPopularContent]);
+  }, [debouncedQuery, performSearch, loadPopularContent]);
 
   const renderContent = useCallback(
     ({item}: {item: Content}) => (
@@ -177,34 +186,42 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
     [handleContentPress],
   );
 
-  const renderHeader = () => (
-    <View style={styles.header}>
-      <Text
-        style={styles.title}
-        accessible={true}
-        accessibilityRole={accessibilityRoles.header}>
-        Search
-      </Text>
-      <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search movies and TV shows..."
-          placeholderTextColor="#666666"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="search"
+  // Memoize search input handler to prevent re-creation
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchQuery(text);
+  }, []);
+
+  const SearchHeader = useMemo(
+    () => (
+      <View style={styles.header}>
+        <Text
+          style={styles.title}
           accessible={true}
-          accessibilityLabel={accessibilityLabels.searchInput}
-          accessibilityHint={accessibilityHints.searchInput}
-          accessibilityRole={accessibilityRoles.search}
-        />
+          accessibilityRole={accessibilityRoles.header}>
+          Search
+        </Text>
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search movies and TV shows..."
+            placeholderTextColor="#666666"
+            value={searchQuery}
+            onChangeText={handleSearchChange}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessible={true}
+            accessibilityLabel={accessibilityLabels.searchInput}
+            accessibilityHint={accessibilityHints.searchInput}
+            accessibilityRole={accessibilityRoles.search}
+          />
+        </View>
       </View>
-    </View>
+    ),
+    [searchQuery, handleSearchChange],
   );
 
-  const renderEmptyState = () => {
+  const renderEmptyState = useCallback(() => {
     if (isSearching) {
       return (
         <View style={styles.centerContainer}>
@@ -232,7 +249,7 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
       );
     }
 
-    if (searchQuery.trim() && state.content.searchResults.length === 0) {
+    if (debouncedQuery && state.content.searchResults.length === 0) {
       return (
         <View style={styles.centerContainer}>
           <Text style={styles.noResultsText}>No results found</Text>
@@ -244,10 +261,29 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
     }
 
     return null;
-  };
+  }, [isSearching, error, handleRetry, debouncedQuery, state.content.searchResults.length]);
 
-  const renderSectionHeader = () => {
-    if (searchQuery.trim()) {
+  const displayData = debouncedQuery
+    ? state.content.searchResults
+    : popularContent;
+
+  const isLoading = state.ui.loading.popularContent || isSearching;
+
+  const OfflineIndicatorComponent = useMemo(() => {
+    if (isOffline && displayData.length > 0) {
+      return (
+        <View style={styles.offlineIndicator}>
+          <Text style={styles.offlineText}>
+            📱 Showing cached content - Connect to search for new content
+          </Text>
+        </View>
+      );
+    }
+    return null;
+  }, [isOffline, displayData.length]);
+
+  const SectionHeaderComponent = useMemo(() => {
+    if (debouncedQuery) {
       return state.content.searchResults.length > 0 ? (
         <Text style={styles.sectionTitle}>
           Search Results ({state.content.searchResults.length})
@@ -258,13 +294,14 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
     return popularContent.length > 0 ? (
       <Text style={styles.sectionTitle}>Popular Movies & TV Shows</Text>
     ) : null;
-  };
+  }, [debouncedQuery, state.content.searchResults.length, popularContent.length]);
 
-  const displayData = searchQuery.trim()
-    ? state.content.searchResults
-    : popularContent;
-
-  const isLoading = state.ui.loading.popularContent || isSearching;
+  const ListHeaderComponent = useMemo(() => (
+    <View>
+      {OfflineIndicatorComponent}
+      {SectionHeaderComponent}
+    </View>
+  ), [OfflineIndicatorComponent, SectionHeaderComponent]);
 
   return (
     <View style={styles.container}>
@@ -273,24 +310,15 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
       {/* Offline Banner */}
       <OfflineBanner onRetry={handleRetry} />
 
+      {/* Sticky Header with Search Bar */}
+      {SearchHeader}
+
       <FlatList
         data={displayData}
         renderItem={renderContent}
         keyExtractor={item => `${item.id}-${'title' in item ? 'movie' : 'tv'}`}
         numColumns={3}
-        ListHeaderComponent={
-          <View>
-            {renderHeader()}
-            {isOffline && displayData.length > 0 && (
-              <View style={styles.offlineIndicator}>
-                <Text style={styles.offlineText}>
-                  📱 Showing cached content - Connect to search for new content
-                </Text>
-              </View>
-            )}
-            {renderSectionHeader()}
-          </View>
-        }
+        ListHeaderComponent={ListHeaderComponent}
         ListEmptyComponent={renderEmptyState}
         contentContainerStyle={[
           styles.contentContainer,
@@ -299,7 +327,9 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
         columnWrapperStyle={displayData.length > 0 ? styles.row : undefined}
         showsVerticalScrollIndicator={false}
         refreshing={isLoading}
-        onRefresh={searchQuery.trim() ? undefined : loadPopularContent}
+        onRefresh={debouncedQuery ? undefined : loadPopularContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       />
     </View>
   );
@@ -319,6 +349,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: safeArea.top + spacing.lg,
     paddingBottom: spacing.lg,
+    backgroundColor: '#000000',
   },
   title: {
     fontSize: typography.h2,
@@ -342,9 +373,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   row: {
-    justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.md,
+    gap: spacing.sm,
   },
   gridItem: {
     width: CARD_WIDTH,

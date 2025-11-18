@@ -437,14 +437,15 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
       
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={styles.scrollViewContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={isLoading}
-            style={styles.refreshControl}
             onRefresh={handleRefresh}
             tintColor={COLORS.NETFLIX_RED}
             colors={[COLORS.NETFLIX_RED]}
+            progressViewOffset={80}
           />
         }>
         {/* Hero Banner */}
@@ -572,6 +573,9 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  scrollViewContent: {
+    paddingTop: 80,
+  },
   heroBanner: {
     height: screenHeight * 0.4,
   },
@@ -651,8 +655,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     fontWeight: '500',
-  },
-  refreshControl: {
-    zIndex: 1,
   },
 });

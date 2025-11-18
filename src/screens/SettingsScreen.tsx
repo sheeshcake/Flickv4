@@ -39,7 +39,7 @@ export const SettingsScreen: React.FC<Props> = () => {
   const [showSubtitleSettings, setShowSubtitleSettings] = useState(false);
 
   const isDarkTheme = state.ui.theme === 'dark';
-  const appVersion = '2.0.0'; // From package.json
+  const appVersion = '1.0.0'; // From package.json
 
   // Load storage info on component mount
   useEffect(() => {
@@ -235,17 +235,17 @@ export const SettingsScreen: React.FC<Props> = () => {
         barStyle={isDarkTheme ? 'light-content' : 'dark-content'}
         backgroundColor={isDarkTheme ? '#000000' : '#FFFFFF'}
       />
+      <View style={styles.header}>
+        <Text style={styles.title}>Settings</Text>
+        <Text style={styles.subtitle}>Manage your preferences</Text>
+      </View>
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}>
         <View style={styles.content}>
-          <Text style={styles.title}>Settings</Text>
-          <Text style={styles.subtitle}>Manage your preferences</Text>
 
           {/* Theme Section */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Appearance</Text>
-
             {/* <View style={styles.settingItem}>
               <View style={styles.settingInfo}>
                 <Text style={styles.settingLabel}>Dark Theme</Text>
@@ -703,13 +703,16 @@ const getStyles = (isDarkTheme: boolean) =>
       flex: 1,
       backgroundColor: isDarkTheme ? '#000000' : '#FFFFFF',
     },
+    header: {
+      paddingTop: 40,
+      paddingHorizontal: 20,
+    },
     scrollView: {
       flex: 1,
     },
     content: {
       flex: 1,
       padding: 20,
-      paddingTop: 60,
     },
     title: {
       fontSize: 28,
@@ -720,7 +723,7 @@ const getStyles = (isDarkTheme: boolean) =>
     subtitle: {
       fontSize: 16,
       color: isDarkTheme ? '#CCCCCC' : '#666666',
-      marginBottom: 30,
+      marginBottom: 10,
     },
     section: {
       marginBottom: 30,

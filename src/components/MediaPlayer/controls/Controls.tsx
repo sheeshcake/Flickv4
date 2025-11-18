@@ -16,7 +16,6 @@ import { CenterOverlay } from './CenterOverlay';
 import { TopBar } from './TopBar';
 import { styles } from './styles';
 import {
-  AUTO_HIDE_DELAY,
   SEEK_INCREMENT_SECONDS,
   formatTime,
 } from './utils';
@@ -60,7 +59,6 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   const [loadingMessage, setLoadingMessage] = useState<string>('Loading...');
   const [isSeeking, setIsSeeking] = useState(false);
   
-  const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Update time label when not seeking
@@ -99,35 +97,10 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   const handleSeekingStateChange = useCallback((isCurrentlySeeking: boolean) => {
     setIsSeeking(isCurrentlySeeking);
     onSeekingStateChange?.(isCurrentlySeeking);
-
-    // Clear auto-hide timer while seeking
-    if (isCurrentlySeeking && autoHideTimerRef.current) {
-      clearTimeout(autoHideTimerRef.current);
-      autoHideTimerRef.current = null;
-    }
   }, [onSeekingStateChange]);
 
-  // Auto-hide controls when playing
-  useEffect(() => {
-    if (!hide && !isSeeking && playing) {
-      // Clear existing timer
-      if (autoHideTimerRef.current) {
-        clearTimeout(autoHideTimerRef.current);
-      }
-
-      // Set new timer
-      autoHideTimerRef.current = setTimeout(() => {
-        onHide();
-      }, AUTO_HIDE_DELAY);
-    }
-
-    // Cleanup
-    return () => {
-      if (autoHideTimerRef.current) {
-        clearTimeout(autoHideTimerRef.current);
-      }
-    };
-  }, [hide, isSeeking, playing, onHide]);
+  // Auto-hide is now handled by the useControlsVisibility hook in MediaPlayer
+  // This component no longer manages its own auto-hide timer
 
   // Time preview handler for progress bar
   const handleTimePreview = useCallback((newTime: number) => {

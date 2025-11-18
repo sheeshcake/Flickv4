@@ -25,6 +25,7 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragPercentage, setDragPercentage] = useState(0);
   const dragPercentageRef = useRef(0);
+  const trackRef = useRef<View>(null);
 
   // Calculate progress percentage
   const progressPercentage = useMemo(() => {
@@ -47,24 +48,29 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
   }, [isDragging, progressPercentage]);
 
   // Update position from touch location
-  const updateFromLocation = useCallback((locationX: number) => {
-    if (!trackWidth || !duration) return;
+  const updateFromLocation = useCallback((pageX: number) => {
+    if (!trackWidth || !duration || !trackRef.current) return;
 
-    const percentage = clamp(locationX / trackWidth, 0, 1);
-    dragPercentageRef.current = percentage;
-    setDragPercentage(percentage);
-    
-    const newTime = percentage * duration;
-    onTimePreview(newTime);
+    // Measure the track position and calculate relative touch position
+    trackRef.current.measure((_x, _y, width, _height, pageXOffset) => {
+      const relativeX = pageX - pageXOffset;
+      const clampedX = clamp(relativeX, 0, width);
+      const percentage = clampedX / width;
+      
+      dragPercentageRef.current = percentage;
+      setDragPercentage(percentage);
+      
+      const newTime = percentage * duration;
+      onTimePreview(newTime);
+    });
   }, [duration, onTimePreview, trackWidth]);
 
   // Commit seek when drag ends
   const commitSeek = useCallback(() => {
     if (!duration) return;
 
-    const newTime = clamp(dragPercentageRef.current * duration, 0, duration);
+    const newTime = dragPercentageRef.current * duration;
     onSeek(newTime);
-    setDragPercentage(dragPercentageRef.current);
   }, [duration, onSeek]);
 
   // Pan responder for touch handling
@@ -74,20 +80,20 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
     onPanResponderGrant: (evt) => {
       setIsDragging(true);
       onSeekingStateChange(true);
-      updateFromLocation(evt.nativeEvent.locationX);
+      updateFromLocation(evt.nativeEvent.pageX);
     },
     onPanResponderMove: (evt) => {
-      updateFromLocation(evt.nativeEvent.locationX);
+      updateFromLocation(evt.nativeEvent.pageX);
     },
     onPanResponderRelease: () => {
-      commitSeek();
       setIsDragging(false);
       onSeekingStateChange(false);
+      commitSeek();
     },
     onPanResponderTerminate: () => {
-      commitSeek();
       setIsDragging(false);
       onSeekingStateChange(false);
+      commitSeek();
     },
   }), [commitSeek, onSeekingStateChange, updateFromLocation]);
 
@@ -109,7 +115,7 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
   }), [displayPercentage, trackWidth]);
 
   const thumbStyle = useMemo(() => ({
-    left: clamp(displayPercentage * trackWidth - 7, 0, trackWidth),
+    left: Math.max(0, Math.min(displayPercentage * trackWidth - 7, trackWidth - 14)),
     opacity: isDragging ? 1 : 0.8,
     transform: [{ scale: isDragging ? 1.2 : 1 }],
   }), [displayPercentage, isDragging, trackWidth]);
@@ -121,7 +127,7 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
       onLayout={handleLayout}
     >
       <View style={styles.progressTouchArea} {...panResponder.panHandlers}>
-        <View style={styles.progressTrack}>
+        <View ref={trackRef} style={styles.progressTrack}>
           <View style={styles.progressBackground} />
           {bufferedPercentage > 0 && <View style={[styles.progressBuffered, bufferedStyle]} />}
           <View style={[styles.progressForeground, progressStyle]} />

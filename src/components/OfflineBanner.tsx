@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useState, useCallback} from 'react';
 import {View, Text, StyleSheet, TouchableOpacity, Animated} from 'react-native';
 import {NetworkUtils, NetworkState} from '../utils/networkUtils';
 import {COLORS} from '../utils/constants';
@@ -42,6 +42,16 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({
     return unsubscribe;
   }, []);
 
+  const hideBanner = useCallback(() => {
+    Animated.timing(slideAnim, {
+      toValue: position === 'top' ? -100 : 100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setIsVisible(false);
+    });
+  }, [slideAnim, position]);
+
   useEffect(() => {
     const shouldShow =
       !networkState.isConnected || !networkState.isInternetReachable;
@@ -56,29 +66,12 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({
           duration: 300,
           useNativeDriver: true,
         }).start();
-
-        // Auto hide if enabled
-        if (autoHide) {
-          setTimeout(() => {
-            hideBanner();
-          }, autoHideDelay);
-        }
       } else {
         // Hide banner
         hideBanner();
       }
     }
-  }, [networkState, isVisible, autoHide, autoHideDelay]);
-
-  const hideBanner = () => {
-    Animated.timing(slideAnim, {
-      toValue: position === 'top' ? -100 : 100,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => {
-      setIsVisible(false);
-    });
-  };
+  }, [networkState, isVisible, autoHide, autoHideDelay, slideAnim, hideBanner]);
 
   const handleRetry = () => {
     if (onRetry) {

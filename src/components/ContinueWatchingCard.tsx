@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,9 @@ import {
   Dimensions,
   ActivityIndicator,
 } from 'react-native';
-import {Movie, TVShow, WatchProgress} from '../types';
-import {TMDBService} from '../services/TMDBService';
-import {TMDB_CONFIG, COLORS} from '../utils/constants';
+import { Movie, TVShow, WatchProgress } from '../types';
+import { TMDBService } from '../services/TMDBService';
+import { TMDB_CONFIG, COLORS } from '../utils/constants';
 
 interface ContinueWatchingCardProps {
   watchProgress: WatchProgress;
@@ -18,7 +18,7 @@ interface ContinueWatchingCardProps {
   size?: 'small' | 'medium' | 'large';
 }
 
-const {width: screenWidth} = Dimensions.get('window');
+const { width: screenWidth } = Dimensions.get('window');
 
 const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
   watchProgress,
@@ -32,13 +32,13 @@ const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
   const getCardDimensions = () => {
     switch (size) {
       case 'small':
-        return {width: screenWidth * 0.25, height: screenWidth * 0.375};
+        return { width: screenWidth * 0.25, height: screenWidth * 0.375 };
       case 'medium':
-        return {width: screenWidth * 0.3, height: screenWidth * 0.45};
+        return { width: screenWidth * 0.3, height: screenWidth * 0.45 };
       case 'large':
-        return {width: screenWidth * 0.4, height: screenWidth * 0.6};
+        return { width: screenWidth * 0.4, height: screenWidth * 0.6 };
       default:
-        return {width: screenWidth * 0.3, height: screenWidth * 0.45};
+        return { width: screenWidth * 0.3, height: screenWidth * 0.45 };
     }
   };
 
@@ -82,7 +82,7 @@ const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
   };
 
   const renderLoadingState = () => (
-    <View style={[styles.container, {width: cardDimensions.width}]}>
+    <View style={[styles.container, { width: cardDimensions.width }]}>
       <View style={[styles.imageContainer, cardDimensions]}>
         <ActivityIndicator size="small" color={COLORS.NETFLIX_RED} />
       </View>
@@ -90,9 +90,10 @@ const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
   );
 
   const renderErrorState = () => (
-    <View style={[styles.container, {width: cardDimensions.width}]}>
+    <View style={[styles.container, { width: cardDimensions.width }]}>
       <View
-        style={[styles.imageContainer, cardDimensions, styles.errorContainer]}>
+        style={[styles.imageContainer, cardDimensions, styles.errorContainer]}
+      >
         <Text style={styles.errorText}>Failed to load</Text>
       </View>
     </View>
@@ -115,13 +116,14 @@ const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
 
   return (
     <TouchableOpacity
-      style={[styles.container, {width: cardDimensions.width}]}
+      style={[styles.container, { width: cardDimensions.width }]}
       onPress={handlePress}
-      activeOpacity={0.8}>
+      activeOpacity={0.8}
+    >
       <View style={[styles.imageContainer, cardDimensions]}>
         {imageUrl ? (
           <Image
-            source={{uri: imageUrl}}
+            source={{ uri: imageUrl }}
             style={[styles.image, cardDimensions]}
             resizeMode="cover"
           />
@@ -135,10 +137,19 @@ const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
         <View style={styles.progressOverlay}>
           <View style={styles.progressBarContainer}>
             <View
-              style={[styles.progressBar, {width: `${progressPercentage}%`}]}
+              style={[styles.progressBar, { width: `${progressPercentage}%` }]}
             />
           </View>
-          <Text style={styles.progressText}>{progressPercentage}%</Text>
+          <View
+            style={{ flexDirection: 'row', justifyContent: 'space-between' }}
+          >
+            <Text style={styles.progressText}>{progressPercentage}%</Text>
+            {'season' in watchProgress && 'episode' in watchProgress && (
+              <Text style={styles.progressText}>
+                S{watchProgress.season} · E{watchProgress.episode}
+              </Text>
+            )}
+          </View>
         </View>
 
         {/* Resume indicator */}

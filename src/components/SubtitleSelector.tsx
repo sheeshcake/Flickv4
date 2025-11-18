@@ -45,102 +45,6 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [customUrl, setCustomUrl] = useState('');
   const [showCustomInput, setShowCustomInput] = useState(false);
-  const [processingSubtitles, setProcessingSubtitles] = useState<Set<string>>(new Set());
-
-  const convertSubtitleToVtt = useCallback(async (subtitle: SubtitleTrack): Promise<SubtitleTrack> => {
-    console.log('=== CONVERTING SUBTITLE USING WYZIE API ===');
-    console.log('Original subtitle:', subtitle);
-    
-    try {
-      setProcessingSubtitles(prev => new Set(prev).add(subtitle.id));
-      
-      // If already converted, return as-is
-      if (subtitle.isConverted && subtitle.vttContent) {
-        console.log('Subtitle already converted, using cached version');
-        return subtitle;
-      }
-      
-      // If it's already VTT format, no conversion needed
-      if (subtitle.format === 'vtt') {
-        console.log('Subtitle is already VTT format');
-        return {
-          ...subtitle,
-          isConverted: true,
-        };
-      }
-      
-      console.log('Using Wyzie API for conversion...');
-      
-      // Use Wyzie API for conversion
-      const wyzieApiUrl = 'https://sub.wyzie.ru/';
-      const formData = new FormData();
-      
-      // Download subtitle content
-      const response = await fetch(subtitle.url);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const subtitleContent = await response.text();
-      console.log('Downloaded content for API conversion, length:', subtitleContent.length);
-      
-      // Create FormData and append the subtitle content as a file
-      const blob = new Blob([subtitleContent]);
-      formData.append('file', blob);
-      
-      // Send to Wyzie API for conversion
-      const apiResponse = await fetch(wyzieApiUrl, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Accept': 'text/vtt, text/plain, */*',
-        },
-      });
-      
-      if (!apiResponse.ok) {
-        throw new Error(`Wyzie API error: HTTP ${apiResponse.status}`);
-      }
-      
-      const vttContent = await apiResponse.text();
-      console.log('Received VTT content from API, length:', vttContent.length);
-      
-      // Validate VTT content
-      if (!vttContent || !vttContent.includes('WEBVTT')) {
-        throw new Error('Invalid VTT content from API');
-      }
-      
-      // Create data URL for the converted VTT
-      const vttDataUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(vttContent)}`;
-      
-      const convertedSubtitle: SubtitleTrack = {
-        ...subtitle,
-        url: vttDataUrl, // Use data URL for the converted VTT
-        format: 'vtt',
-        isConverted: true,
-        vttContent,
-        title: `${subtitle.title} (VTT)`,
-      };
-      
-      console.log('Wyzie API conversion successful:', {
-        id: convertedSubtitle.id,
-        format: convertedSubtitle.format,
-        vttContentLength: vttContent.length,
-        hasDataUrl: convertedSubtitle.url.startsWith('data:'),
-      });
-      
-      return convertedSubtitle;
-      
-    } catch (conversionError) {
-      console.error('Error converting subtitle with Wyzie API:', conversionError);
-      throw conversionError;
-    } finally {
-      setProcessingSubtitles(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(subtitle.id);
-        return newSet;
-      });
-    }
-  }, []);
 
   const fetchWyzieSubtitles = useCallback(async () => {
     if (!contentId) {
@@ -220,30 +124,7 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
 
       console.log('Converted subtitles:', convertedSubtitles.length);
       
-      // Auto-convert all Wyzie subtitles to VTT format
-      console.log('Auto-converting all Wyzie subtitles to VTT...');
-      const vttConvertedSubtitles: SubtitleTrack[] = [];
-      
-      for (const subtitle of convertedSubtitles) {
-        try {
-          if (subtitle.format !== 'vtt' && !subtitle.isConverted) {
-            console.log(`Converting subtitle ${subtitle.id} from ${subtitle.format} to VTT`);
-            const convertedSubtitle = await convertSubtitleToVtt(subtitle);
-            vttConvertedSubtitles.push(convertedSubtitle);
-          } else {
-            console.log(`Subtitle ${subtitle.id} is already VTT format`);
-            vttConvertedSubtitles.push(subtitle);
-          }
-        } catch (conversionError) {
-          console.warn(`Failed to convert subtitle ${subtitle.id} to VTT, keeping original:`, conversionError);
-          vttConvertedSubtitles.push(subtitle);
-        }
-      }
-      
-      console.log('VTT conversion completed. Total subtitles:', vttConvertedSubtitles.length);
-      console.log('VTT converted count:', vttConvertedSubtitles.filter(s => s.isConverted).length);
-      
-      setSubtitles(vttConvertedSubtitles);
+      setSubtitles(convertedSubtitles);
     } catch (err) {
       console.error('Error fetching subtitles:', err);
       
@@ -272,7 +153,7 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [contentId, contentType, season, episode, convertSubtitleToVtt]);
+  }, [contentId, contentType, season, episode]);
 
   // Fetch subtitles from Wyzie when modal opens (or use prefetched)
   useEffect(() => {
@@ -317,28 +198,8 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
   };
 
   const handleSelectSubtitle = async (subtitle: SubtitleTrack) => {
-    try {
-      let finalSubtitle = subtitle;
-      
-      // Convert non-VTT subtitles to VTT format
-      if (subtitle.format !== 'vtt' && !subtitle.isConverted) {
-        console.log('Converting subtitle to VTT format before selection...');
-        finalSubtitle = await convertSubtitleToVtt(subtitle);
-        
-        // Update the subtitle in our list
-        setSubtitles(prev => prev.map(sub => 
-          sub.id === subtitle.id ? finalSubtitle : sub
-        ));
-      }
-      
-      onSelectSubtitle(finalSubtitle);
-      onClose();
-    } catch (selectionError) {
-      console.error('Failed to process subtitle selection:', selectionError);
-      // Still allow selection of unconverted subtitle as fallback
-      onSelectSubtitle(subtitle);
-      onClose();
-    }
+    onSelectSubtitle(subtitle);
+    onClose();
   };
 
   const handleDisableSubtitles = () => {
@@ -347,17 +208,13 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
   };
 
   const renderSubtitleItem = ({ item }: { item: SubtitleTrack }) => {
-    const isProcessing = processingSubtitles.has(item.id);
-    
     return (
       <TouchableOpacity
         style={[
           styles.subtitleItem,
           selectedSubtitle?.id === item.id && styles.selectedItem,
-          isProcessing && styles.processingItem,
         ]}
-        onPress={() => !isProcessing && handleSelectSubtitle(item)}
-        disabled={isProcessing}
+        onPress={() => handleSelectSubtitle(item)}
       >
         <View style={styles.subtitleInfo}>
           <View style={styles.titleRow}>
@@ -378,15 +235,10 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
             <Text style={styles.subtitleSource}> • {item.source}</Text>
             <Text style={styles.subtitleFormat}> • {item.format.toUpperCase()}</Text>
           </View>
-          {isProcessing && (
-            <Text style={styles.processingText}>Converting to VTT...</Text>
-          )}
         </View>
-        {isProcessing ? (
-          <ActivityIndicator size="small" color={colors.red} />
-        ) : selectedSubtitle?.id === item.id ? (
+        {selectedSubtitle?.id === item.id && (
           <Icon name="check" size={20} color={colors.red} />
-        ) : null}
+        )}
       </TouchableOpacity>
     );
   };
@@ -465,9 +317,6 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
                   <View style={styles.listHeader}>
                     <Text style={styles.listHeaderText}>
                       {subtitles.length} subtitle(s) available
-                    </Text>
-                    <Text style={styles.listHeaderSubtext}>
-                      Non-VTT subtitles will be automatically converted
                     </Text>
                   </View>
                 ) : null
@@ -594,11 +443,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 14,
     fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  listHeaderSubtext: {
-    color: colors.light,
-    fontSize: 12,
   },
   subtitleItem: {
     flexDirection: 'row',
@@ -613,10 +457,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.red + '20',
     borderWidth: 1,
     borderColor: colors.red,
-  },
-  processingItem: {
-    opacity: 0.7,
-    backgroundColor: colors.dark + '80',
   },
   subtitleInfo: {
     flex: 1,
@@ -666,12 +506,6 @@ const styles = StyleSheet.create({
     color: colors.red,
     fontSize: 12,
     fontWeight: 'bold',
-  },
-  processingText: {
-    color: colors.red,
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 4,
   },
   addCustomButton: {
     flexDirection: 'row',

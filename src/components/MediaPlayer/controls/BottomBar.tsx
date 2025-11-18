@@ -28,6 +28,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
     <View
       style={[
         styles.bottomBar,
+        fullscreen ? { paddingBottom: sizes.height * 0.01 } : {},
         hidden ? styles.bottomBarHidden : styles.bottomBarVisible,
       ]}
     >

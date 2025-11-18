@@ -5,7 +5,7 @@ const AUTO_HIDE_DELAY = 3000; // 3 seconds
 /**
  * Custom hook for managing controls visibility with auto-hide
  */
-export const useControlsVisibility = (isPlaying: boolean) => {
+export const useControlsVisibility = (isPlaying: boolean, isSeeking?: boolean) => {
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -27,9 +27,9 @@ export const useControlsVisibility = (isPlaying: boolean) => {
     setControlsVisible(prev => !prev);
   }, []);
 
-  // Auto-hide controls when playing
+  // Auto-hide controls when playing and not seeking
   useEffect(() => {
-    if (controlsVisible && isPlaying) {
+    if (controlsVisible && isPlaying && !isSeeking) {
       hideTimerRef.current = setTimeout(() => {
         setControlsVisible(false);
       }, AUTO_HIDE_DELAY);
@@ -40,7 +40,7 @@ export const useControlsVisibility = (isPlaying: boolean) => {
         clearTimeout(hideTimerRef.current);
       }
     };
-  }, [controlsVisible, isPlaying]);
+  }, [controlsVisible, isPlaying, isSeeking]);
 
   // Cleanup on unmount
   useEffect(() => {

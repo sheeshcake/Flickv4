@@ -56,16 +56,10 @@ export const useVideoProgress = ({
   const saveProgress = useCallback((progress: WatchProgress) => {
     try {
       updateWatchProgress(progress);
-      console.log('[useVideoProgress] Saved:', {
-        contentId,
-        progress: Math.round(progress.progress),
-        season,
-        episode,
-      });
     } catch (error) {
       console.error('[useVideoProgress] Save failed:', error);
     }
-  }, [updateWatchProgress, contentId, season, episode]);
+  }, [updateWatchProgress]);
 
   // Save progress periodically during playback
   useEffect(() => {

@@ -13,7 +13,7 @@ interface UseSubtitlesProps {
 }
 
 /**
- * Custom hook for managing subtitle fetching, conversion, and selection
+ * Custom hook for managing subtitle fetching and selection
  */
 export const useSubtitles = ({
   contentId,
@@ -28,50 +28,6 @@ export const useSubtitles = ({
   const [availableSubtitles, setAvailableSubtitles] = useState<SubtitleTrack[]>([]);
   const [isLoadingSubtitles, setIsLoadingSubtitles] = useState(false);
   const hasAutoSelectedRef = useRef(false);
-
-  // Convert subtitle to VTT format using Wyzie API
-  const convertSubtitleToVtt = useCallback(async (subtitle: SubtitleTrack): Promise<SubtitleTrack> => {
-    // Already converted or native VTT
-    if (subtitle.isConverted && subtitle.vttContent) return subtitle;
-    if (subtitle.format === 'vtt') return { ...subtitle, isConverted: true };
-
-    try {
-      const response = await fetch(subtitle.url);
-      if (!response.ok) throw new Error(`Failed to download: HTTP ${response.status}`);
-
-      const subtitleContent = await response.text();
-      const blob = new Blob([subtitleContent]);
-      const formData = new FormData();
-      formData.append('file', blob);
-
-      const apiResponse = await fetch('https://sub.wyzie.ru/', {
-        method: 'POST',
-        body: formData,
-        headers: { 'Accept': 'text/vtt, text/plain, */*' },
-      });
-
-      if (!apiResponse.ok) throw new Error(`API error: HTTP ${apiResponse.status}`);
-
-      const vttContent = await apiResponse.text();
-      if (!vttContent || !vttContent.includes('WEBVTT')) {
-        throw new Error('Invalid VTT content');
-      }
-
-      const vttDataUrl = `data:text/vtt;charset=utf-8,${encodeURIComponent(vttContent)}`;
-
-      return {
-        ...subtitle,
-        url: vttDataUrl,
-        format: 'vtt',
-        isConverted: true,
-        vttContent,
-        title: `${subtitle.title.replace(' (Wyzie)', '')} (VTT)`,
-      };
-    } catch (error) {
-      console.error('[useSubtitles] Conversion error:', error);
-      return subtitle;
-    }
-  }, []);
 
   // Fetch subtitles from Wyzie
   const fetchSubtitles = useCallback(async () => {
@@ -128,19 +84,12 @@ export const useSubtitles = ({
         isConverted: false,
       }));
 
-      // Convert all to VTT
-      const vttSubtitles: SubtitleTrack[] = [];
-      for (const subtitle of subtitles) {
-        const vttSubtitle = await convertSubtitleToVtt(subtitle);
-        vttSubtitles.push(vttSubtitle);
-      }
-
-      console.log('[useSubtitles] Converted subtitles:', vttSubtitles.length);
-      setAvailableSubtitles(vttSubtitles);
+      console.log('[useSubtitles] Fetched subtitles:', subtitles.length);
+      setAvailableSubtitles(subtitles);
 
       // Auto-select preferred language
       if (defaultSubtitleLanguage && !hasAutoSelectedRef.current) {
-        const preferred = vttSubtitles.find(
+        const preferred = subtitles.find(
           sub => sub.language === defaultSubtitleLanguage
         );
         if (preferred) {
@@ -154,7 +103,7 @@ export const useSubtitles = ({
     } finally {
       setIsLoadingSubtitles(false);
     }
-  }, [contentId, contentType, season, episode, defaultSubtitleLanguage, convertSubtitleToVtt]);
+  }, [contentId, contentType, season, episode, defaultSubtitleLanguage]);
 
   // Load saved subtitle or auto-fetch
   useEffect(() => {

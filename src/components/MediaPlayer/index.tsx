@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { View, BackHandler, Dimensions, StyleSheet, Text } from 'react-native';
-import Video, { TextTrackType, SelectedTrackType } from 'react-native-video';
+import Video from 'react-native-video';
 import { CastButton } from 'react-native-google-cast';
+import RNFS from 'react-native-fs';
 import { COLORS } from '../../utils/constants';
 import { useAppState } from '../../hooks/useAppState';
 import { SubtitleTrack } from '../../types';
 import { SubtitleSelector } from '../';
+import { SubtitleOverlay } from './SubtitleOverlay';
 import Controls from './controls';
 import {
   useVideoProgress,
@@ -69,28 +71,17 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const [isReadyForNext, setIsReadyForNext] = useState(false);
   const [hasStartedFromProgress, setHasStartedFromProgress] = useState(false);
   const [showSubtitleSelector, setShowSubtitleSelector] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
+
+  // State for subtitle content
+  const [subtitleContent, setSubtitleContent] = useState<string | null>(null);
 
   const videoRef = useRef<any>(null);
   const { state, updateWatchProgress } = useAppState();
 
-  // Debug logging for initial state
-  useEffect(() => {
-    console.log('[MediaPlayer] Component mounted with autoplay:', autoplay, 'initialProgress:', initialProgress);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    console.log("Video Url: ", videoUrl);
-  }, [videoUrl]);
-
-  // Debug logging for play state changes
-  useEffect(() => {
-    console.log('[MediaPlayer] isPlaying changed to:', isPlaying);
-  }, [isPlaying]);
-
   // Custom hooks
   const { isFullscreen, toggleFullscreen } = useFullscreen(onFullscreenChange);
-  const { controlsVisible, toggleControls, showControls } = useControlsVisibility(isPlaying);
+  const { controlsVisible, toggleControls, showControls } = useControlsVisibility(isPlaying, isSeeking);
 
   // Get saved subtitle from continue watching
   const savedSubtitle = useMemo(() => {
@@ -133,14 +124,11 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   // Seek to initial progress when video loads
   useEffect(() => {
     if (duration > 0 && initialProgress > 0 && !hasStartedFromProgress && videoRef.current) {
-      console.log('[MediaPlayer] Seeking to initial progress:', initialProgress, 'autoplay:', autoplay);
       videoRef.current.seek(initialProgress);
       setCurrentTime(initialProgress);
       setHasStartedFromProgress(true);
       
-      // Ensure video plays after seeking if autoplay is enabled
       if (autoplay) {
-        console.log('[MediaPlayer] Restoring play state after initial seek');
         setTimeout(() => {
           setIsPlaying(true);
         }, 100);
@@ -172,48 +160,24 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     return () => backHandler.remove();
   }, [isFullscreen, navigation, toggleFullscreen]);
 
-  // Video event handlers
-  const handleLoadStart = useCallback(() => {
-    setVideoStatus('loading');
-    console.log('[MediaPlayer] Video loading started');
-  }, []);
 
   const handleLoad = useCallback(({ duration: videoDuration }: { duration: number }) => {
     setDuration(videoDuration);
-    console.log('[MediaPlayer] Video loaded, duration:', videoDuration, 'initialProgress:', initialProgress);
 
-    // Don't restore current time during initial load - let the initial progress effect handle it
-    // Only restore for subtitle changes (when we have progress but haven't started from initial progress yet)
     if (currentTime > 0 && hasStartedFromProgress && videoRef.current) {
-      console.log('[MediaPlayer] Restoring currentTime after subtitle change:', currentTime);
       setTimeout(() => {
         videoRef.current.seek(currentTime);
       }, 50);
     }
-  }, [currentTime, hasStartedFromProgress, initialProgress]);
-
-  const handleReadyForDisplay = useCallback(() => {
-    setVideoStatus('loaded');
-    console.log('[MediaPlayer] Video ready for display, autoplay:', autoplay);
-
-    // Force autoplay if enabled
-    if (autoplay) {
-      console.log('[MediaPlayer] Setting isPlaying to true due to autoplay');
-      setIsPlaying(true);
-    }
-  }, [autoplay]);
+  }, [currentTime, hasStartedFromProgress]);
 
   const handleProgress = useCallback(({ currentTime: time }: { currentTime: number }) => {
     setCurrentTime(time);
-    
-    // Log progress occasionally to verify playback is happening
-    if (Math.floor(time) % 5 === 0 && Math.floor(time) !== Math.floor(currentTime)) {
-      console.log('[MediaPlayer] Progress update:', Math.floor(time), 'isPlaying:', isPlaying);
-    }
-  }, [currentTime, isPlaying]);
+  }, []);
 
   const handleBuffer = useCallback(({ isBuffering: buffering }: { isBuffering: boolean }) => {
     setIsBuffering(buffering);
+    setVideoStatus(buffering ? 'loading' : 'loaded');
   }, []);
 
   const handleError = useCallback((error: any) => {
@@ -223,13 +187,13 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   }, []);
 
   const handleSeek = useCallback((time: number) => {
-    if (videoRef.current) {
-      videoRef.current.seek(time);
-      setCurrentTime(time);
-      setIsPlaying(true);
+    if (videoRef.current && duration > 0) {
+      const clampedTime = Math.max(0, Math.min(time, duration));
+      videoRef.current.seek(clampedTime);
+      setCurrentTime(clampedTime);
       showControls();
     }
-  }, [showControls]);
+  }, [duration, showControls]);
 
   const handleResizeModeToggle = useCallback(() => {
     setResizeMode(prev => (prev + 1) % RESIZE_MODES.length);
@@ -242,57 +206,66 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   }, [showControls]);
 
   const handleSubtitleSelect = useCallback((subtitle: SubtitleTrack | null) => {
-    console.log('[MediaPlayer] Subtitle selected:', subtitle?.title);
-
-    const savedTime = currentTime;
-    const wasPlaying = isPlaying;
-
     setSelectedSubtitle(subtitle);
     setShowSubtitleSelector(false);
-
-    // Restore playback state
-    // setTimeout(() => {
-    //   if (videoRef.current && savedTime > 0) {
-    //     videoRef.current.seek(savedTime);
-    //     if (wasPlaying) setIsPlaying(true);
-    //   }
-    // }, 100);
-  }, [currentTime, isPlaying, setSelectedSubtitle]);
+  }, [setSelectedSubtitle]);
 
   const handleCloseSubtitleSelector = useCallback(() => {
     setShowSubtitleSelector(false);
   }, []);
 
-  // Text tracks configuration
-  const textTracks = useMemo(() => {
-    if (!selectedSubtitle) return [];
+  const handleSeekingStateChange = useCallback((seeking: boolean) => {
+    setIsSeeking(seeking);
+  }, []);
 
-    const trackType = selectedSubtitle.format === 'vtt' || selectedSubtitle.isConverted
-      ? TextTrackType.VTT
-      : TextTrackType.SUBRIP;
-
-    console.log('[MediaPlayer] Text track:', {
-      title: selectedSubtitle.title,
-      type: trackType,
-      isDataUrl: selectedSubtitle.url.startsWith('data:'),
-    });
-
-    return [{
-      title: selectedSubtitle.title,
-      language: selectedSubtitle.language as any,
-      type: trackType,
-      uri: selectedSubtitle.url,
-    }];
-  }, [selectedSubtitle]);
-
-  const selectedTextTrack = useMemo(() => {
+  useEffect(() => {
     if (!selectedSubtitle) {
-      return { type: SelectedTrackType.DISABLED };
+      setSubtitleContent(null);
+      return;
     }
-    return { type: SelectedTrackType.INDEX, value: 0 };
-  }, [selectedSubtitle]);
 
-  // Container styles
+    const downloadAndSaveSubtitle = async () => {
+      try {
+        const subtitlesDir = `${RNFS.DocumentDirectoryPath}/subtitles`;
+        const dirExists = await RNFS.exists(subtitlesDir);
+        
+        if (!dirExists) {
+          await RNFS.mkdir(subtitlesDir);
+        }
+
+        const sanitizedTitle = selectedSubtitle.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() + `_${contentId}` + (season && episode ? `_s${season}e${episode}` : '');
+        const filename = `${sanitizedTitle}_${selectedSubtitle.language}.srt`;
+        const localPath = `${subtitlesDir}/${filename}`;
+
+        const fileExists = await RNFS.exists(localPath);
+        
+        if (fileExists) {
+          const cachedContent = await RNFS.readFile(localPath, 'utf8');
+          setSubtitleContent(cachedContent);
+          return;
+        }
+
+        const response = await fetch(selectedSubtitle.url);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const downloadedContent = await response.text();
+        
+        await RNFS.writeFile(localPath, downloadedContent, 'utf8');
+        
+        setSubtitleContent(downloadedContent);
+        
+      } catch (error) {
+        console.error('[MediaPlayer] Failed to process subtitle:', error);
+      }
+    };
+
+    downloadAndSaveSubtitle();
+  }, [selectedSubtitle, contentId, season, episode]);
+
+
   const videoContainerStyle = useMemo(() => ({
     height: isFullscreen ? screenWidth : screenHeight * 0.3,
     width: isFullscreen ? screenHeight : screenWidth,
@@ -320,56 +293,36 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     );
   }
 
-  // Log the paused prop value
-  console.log('[MediaPlayer] Rendering Video with paused:', !isPlaying, 'isPlaying:', isPlaying);
-
   return (
     <View style={[styles.container, videoContainerStyle]}>
       <Video
         ref={videoRef}
-        source={{ uri: videoUrl,
-          headers : {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
-          }
-         }}
+        source={{ 
+          uri: videoUrl,
+        }}
         style={videoStyle}
-        onLoadStart={handleLoadStart}
         onLoad={handleLoad}
-        onReadyForDisplay={handleReadyForDisplay}
         onProgress={handleProgress}
         onBuffer={handleBuffer}
         onError={handleError}
-        onPlaybackRateChange={({ playbackRate }) => {
-          console.log("Playback Rate: ", playbackRate)
-        }}
         resizeMode={RESIZE_MODES[resizeMode]}
         poster={imageUrl}
-        posterResizeMode="cover"
         controls={false}
         repeat={false}
         muted={false}
         paused={!isPlaying}
         hideShutterView
         enterPictureInPictureOnLeave={state.user.preferences.pictureInPicture}
-        progressUpdateInterval={1000}
-        textTracks={textTracks}
-        selectedTextTrack={selectedTextTrack}
+        progressUpdateInterval={250}
         allowsExternalPlayback={false}
-        playInBackground={false}
       />
 
       <Controls
         title={title}
         hide={!controlsVisible}
         onHide={toggleControls}
-        onPause={() => {
-          console.log('[MediaPlayer] onPause called');
-          setIsPlaying(false);
-        }}
-        onPlay={() => {
-          console.log('[MediaPlayer] onPlay called');
-          setIsPlaying(true);
-        }}
+        onPause={() => setIsPlaying(false)}
+        onPlay={() => setIsPlaying(true)}
         playing={isPlaying}
         currentPosition={currentTime}
         duration={duration}
@@ -387,11 +340,19 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         _onDownload={() => {}}
         onSubtitlePress={handleSubtitlePress}
         hasSubtitles={!!selectedSubtitle}
+        onSeekingStateChange={handleSeekingStateChange}
         upperRightComponent={
           <View style={styles.castButtonContainer}>
             <CastButton style={styles.castButton} />
           </View>
         }
+      />
+
+      {/* Custom subtitle overlay for Android compatibility */}
+      <SubtitleOverlay
+        subtitleContent={subtitleContent}
+        currentTime={currentTime}
+        isVideoFullscreen={isFullscreen}
       />
 
       <SubtitleSelector

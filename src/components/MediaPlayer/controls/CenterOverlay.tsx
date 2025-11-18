@@ -45,8 +45,15 @@ export const CenterOverlay: React.FC<CenterOverlayProps> = ({
 
         {status !== 'loading' && status !== 'error' && (
           <TouchableOpacity
-            activeOpacity={hidden ? 1 : 0.7}
-            onPress={onPlayPause}
+            activeOpacity={0.7}
+            onPress={() => {
+              // Always toggle play/pause when center button is pressed
+              onPlayPause();
+              // Also show controls if they're hidden
+              if (hidden) {
+                onHide();
+              }
+            }}
             style={[
               styles.playPauseButton,
               hidden ? styles.playPauseButtonHidden : styles.playPauseButtonVisible,

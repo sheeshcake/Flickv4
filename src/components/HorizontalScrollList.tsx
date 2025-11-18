@@ -112,18 +112,13 @@ const HorizontalScrollList: React.FC<HorizontalScrollListProps> = ({
           windowSize={5}
           removeClippedSubviews={true}
           updateCellsBatchingPeriod={50}
-          disableIntervalMomentum={true}
           ListEmptyComponent={renderEmptyComponent}
-          decelerationRate="fast"
+          decelerationRate="normal"
           snapToInterval={cardDimensions.width + spacing.sm}
           snapToAlignment="start"
           legacyImplementation={false}
-          maintainVisibleContentPosition={{
-            minIndexForVisible: 0,
-            autoscrollToTopThreshold: 10,
-          }}
           onEndReached={handleEndReached}
-          onEndReachedThreshold={0.6}
+          onEndReachedThreshold={0.5}
           ListFooterComponent={
             loadingMore ? (
               <View style={[styles.loadingItemWrapper, styles.loadingMoreContainer]}>

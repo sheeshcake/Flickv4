@@ -13,7 +13,7 @@ import {
   ImageBackground,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { Movie, TVShow, TMDBResponse, AppError, WatchProgress } from '../types';
+import { Movie, TVShow, TMDBResponse, AppError } from '../types';
 import { COLORS } from '../utils/constants';
 import { TMDBService } from '../services';
 import HorizontalScrollList from '../components/HorizontalScrollList';
@@ -39,7 +39,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
     addLikedContent,
     removeLikedContent,
     isContentLiked,
-    updateWatchProgress,
   } = useAppState();
   const [similarContent, setSimilarContent] = useState<(Movie | TVShow)[]>([]);
   const [loadingSimilar, setLoadingSimilar] = useState(false);
@@ -114,6 +113,39 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   useEffect(() => {
     hasAppliedWatchProgressRef.current = false;
   }, [content.id]);
+
+  // Hide tab bar when video is in fullscreen
+  useEffect(() => {
+    // Try to find and hide the tab navigator
+    let currentNavigator: any = navigation;
+    let tabNavigator = null;
+    
+    // Traverse up the navigation tree to find the tab navigator
+    while (currentNavigator) {
+      const parent = currentNavigator.getParent();
+      if (parent && parent.getState()?.type === 'tab') {
+        tabNavigator = parent;
+        break;
+      }
+      if (!parent) break;
+      currentNavigator = parent;
+    }
+    
+    if (tabNavigator) {
+      tabNavigator.setOptions({
+        tabBarStyle: { display: isVideoFullscreen ? 'none' : 'flex' },
+      });
+    }
+
+    // Cleanup: restore tab bar when component unmounts
+    return () => {
+      if (tabNavigator) {
+        tabNavigator.setOptions({
+          tabBarStyle: { display: 'flex' },
+        });
+      }
+    };
+  }, [isVideoFullscreen, navigation]);
 
   // Get content title
   const getContentTitle = (item: Movie | TVShow): string => {
@@ -273,12 +305,49 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
   // Auto-start video if autoplay is enabled
   useEffect(() => {
-    if (autoplayEnabled && !showVideoPlayer && !currentVideoUrl) {
+    // Don't autoplay if video is already playing
+    if (showVideoPlayer || currentVideoUrl) {
+      return;
+    }
+
+    // Don't autoplay if autoplay is disabled
+    if (!autoplayEnabled) {
+      return;
+    }
+
+    // For TV shows, only autoplay if:
+    // 1. There's NO continue watching progress (not in continue watching list)
+    // 2. Episodes are loaded
+    // 3. First episode of first season is selected
+    if (!isMovie(content)) {
+      // Don't autoplay if there's watch progress (user is continuing watching)
+      if (watchProgress && watchProgress.season && watchProgress.episode) {
+        return;
+      }
+
+      // Wait until episodes are loaded
+      if (episodes.length === 0) {
+        return;
+      }
+
+      // Only autoplay if first season and first episode are selected
+      if (selectedSeason === 1 && (selectedEpisode === 1 || selectedEpisode === null)) {
+        // If episode is not yet selected, select the first episode
+        if (selectedEpisode === null) {
+          setSelectedEpisode(1);
+        }
+        
+        setShowScrapper(true);
+        setScrapingVideo(true);
+        setScrapingError(null);
+      }
+    } else {
+      // For movies, autoplay regardless of watch progress
       setShowScrapper(true);
       setScrapingVideo(true);
       setScrapingError(null);
     }
-  }, [autoplayEnabled, showVideoPlayer, currentVideoUrl]);
+  }, [autoplayEnabled, showVideoPlayer, currentVideoUrl, content, isMovie, watchProgress, episodes.length, selectedSeason, selectedEpisode]);
 
   // Handle video data extracted from WebViewScrapper
   const handleVideoExtracted = useCallback(
@@ -297,30 +366,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
       setShowScrapper(false);
       setScrapingVideo(false);
 
-      // Force save an initial watch progress entry to ensure continue watching works
-      const initialProgress: WatchProgress = {
-        contentId: content.id,
-        contentType: isMovie(content) ? 'movie' : 'tv',
-        progress: 0,
-        lastWatched: new Date(),
-        duration: 0, // Will be updated when video loads
-        season: !isMovie(content) ? selectedSeason : undefined,
-        episode: !isMovie(content) ? selectedEpisode ?? undefined : undefined,
-        selectedSubtitle: null,
-      };
-
-      try {
-        updateWatchProgress(initialProgress);
-        console.log('Saved initial watch progress for continue watching:', {
-          contentId: content.id,
-          contentType: isMovie(content) ? 'movie' : 'tv',
-          season: !isMovie(content) ? selectedSeason : undefined,
-          episode: !isMovie(content) ? selectedEpisode ?? undefined : undefined,
-        });
-      } catch (error) {
-        console.error('Failed to save initial watch progress:', error);
-      }
-
       // If there was a pending download, clear the flag
       // The DownloadButton will automatically detect the new videoUrl and user can try again
       if (pendingDownload) {
@@ -332,14 +377,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
         );
       }
     },
-    [
-      pendingDownload,
-      content,
-      isMovie,
-      selectedSeason,
-      selectedEpisode,
-      updateWatchProgress,
-    ],
+    [pendingDownload, content, isMovie, selectedSeason, selectedEpisode],
   );
 
   // Handle scraper loading state
