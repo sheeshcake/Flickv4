@@ -10,6 +10,9 @@ export type RootStackParamList = {
   Main: undefined;
   Detail: {
     content: Movie | TVShow;
+    video?: string;
+    isLocal?: boolean;
+    autoPlay?: boolean;
   };
   Downloads: undefined;
 };

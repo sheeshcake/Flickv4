@@ -165,7 +165,7 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
 
   const contentType = 'title' in content ? 'movie' : 'tv';
   const isDownloaded = downloadService.isContentDownloaded(
-    content.id,
+    content?.id,
     contentType,
     season,
     episode
