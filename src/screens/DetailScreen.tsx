@@ -42,6 +42,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   } = useAppState();
   const [similarContent, setSimilarContent] = useState<(Movie | TVShow)[]>([]);
   const [loadingSimilar, setLoadingSimilar] = useState(false);
+  const [loadingMoreSimilar, setLoadingMoreSimilar] = useState(false);
+  const [similarPage, setSimilarPage] = useState(1);
+  const [hasMoreSimilar, setHasMoreSimilar] = useState(true);
   const [currentVideoUrl, setCurrentVideoUrl] = useState<string>('');
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
   const [seasons, setSeasons] = useState<any[]>([]);
@@ -159,32 +162,50 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
   // Fetch similar content
   const fetchSimilarContent = useCallback(
-    async (item: Movie | TVShow) => {
+    async (item: Movie | TVShow, page: number = 1, isLoadMore: boolean = false) => {
       if (!item) {
         return;
       }
 
-      setLoadingSimilar(true);
+      if (isLoadMore) {
+        setLoadingMoreSimilar(true);
+      } else {
+        setLoadingSimilar(true);
+        setSimilarContent([]);
+        setSimilarPage(1);
+        setHasMoreSimilar(true);
+      }
+
       try {
         let response: TMDBResponse<Movie | TVShow>;
 
         if (isMovie(item)) {
-          response = await tmdbService.getSimilarMovies(item.id);
+          response = await tmdbService.getSimilarMovies(item.id, page);
         } else {
-          response = await tmdbService.getSimilarTVShows(item.id);
+          response = await tmdbService.getSimilarTVShows(item.id, page);
         }
 
-        setSimilarContent(response.results.slice(0, 10)); // Limit to 10 items
+        if (isLoadMore) {
+          setSimilarContent(prev => [...prev, ...response.results]);
+        } else {
+          setSimilarContent(response.results);
+        }
+
+        setSimilarPage(page);
+        setHasMoreSimilar(page < response.total_pages);
       } catch (error) {
         console.error('Error fetching similar content:', error);
         const appError = error as AppError;
-        Alert.alert(
-          'Error',
-          appError.message || 'Failed to load similar content',
-        );
-        setSimilarContent([]);
+        if (!isLoadMore) {
+          Alert.alert(
+            'Error',
+            appError.message || 'Failed to load similar content',
+          );
+          setSimilarContent([]);
+        }
       } finally {
         setLoadingSimilar(false);
+        setLoadingMoreSimilar(false);
       }
     },
     [isMovie],
@@ -198,6 +219,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
     },
     [navigation],
   );
+
+  // Handle loading more similar content
+  const handleLoadMoreSimilar = useCallback(() => {
+    if (!loadingMoreSimilar && hasMoreSimilar && !loadingSimilar) {
+      fetchSimilarContent(content, similarPage + 1, true);
+    }
+  }, [loadingMoreSimilar, hasMoreSimilar, loadingSimilar, content, similarPage, fetchSimilarContent]);
 
   // Handle video player close
   const handleCloseVideo = useCallback(() => {
@@ -786,6 +814,9 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
               data={similarContent}
               onItemPress={handleSimilarItemPress}
               loading={loadingSimilar}
+              onEndReached={handleLoadMoreSimilar}
+              hasMore={hasMoreSimilar}
+              loadingMore={loadingMoreSimilar}
             />
           </View>
 

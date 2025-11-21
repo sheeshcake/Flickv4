@@ -1,4 +1,4 @@
-import React, {useEffect, useCallback, useMemo, useState} from 'react';
+import React, {useEffect, useCallback, useMemo, useState, useRef} from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,11 @@ import {
   Alert,
   Dimensions,
   ImageBackground,
+  TouchableOpacity,
+  Animated,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import Icon from 'react-native-vector-icons/MaterialIcons';
 import type {MainTabScreenProps} from '../types/navigation';
 import {useAppState} from '../hooks/useAppState';
 import {useHomeScreenData} from '../hooks/useAppSelectors';
@@ -51,6 +54,9 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
     setTrendingMovies,
     setTrendingTVShows,
     setLoading,
+    addLikedContent,
+    removeLikedContent,
+    isContentLiked,
   } = useAppState();
 
   const {
@@ -69,6 +75,12 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
 
   // Credits modal state
   const [isCreditsModalOpen, setIsCreditsModalOpen] = useState(false);
+
+  // Hero carousel state
+  const [currentHeroIndex, setCurrentHeroIndex] = useState(0);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const heroIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const indicatorAnims = useRef<Animated.Value[]>([]).current;
 
   // Liked content state
   const [likedMovies, setLikedMovies] = React.useState<Movie[]>([]);
@@ -334,15 +346,78 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
     });
   }, [loadInitialTrending, loadLikedContent, loadGenreContent, genreSections]);
 
-    // Render hero banner with featured content
-  const renderHeroBanner = () => {
-    const featuredContent = trendingMovies[0] || trendingTVShows[0];
-
-    if (!featuredContent) {
-      return null;
+  // Auto-rotate hero content with fade transition
+  useEffect(() => {
+    const heroContent = [...trendingMovies.slice(0, 5), ...trendingTVShows.slice(0, 5)];
+    
+    if (heroContent.length <= 1) {
+      return;
     }
 
-    const title: string = 'title' in featuredContent && featuredContent.title 
+    // Initialize indicator animations
+    if (indicatorAnims.length !== heroContent.length) {
+      indicatorAnims.length = 0;
+      for (let i = 0; i < heroContent.length; i++) {
+        indicatorAnims.push(new Animated.Value(i === 0 ? 1 : 0));
+      }
+    }
+
+    const rotateHero = () => {
+      // Fade out
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }).start(() => {
+        // Change content
+        const nextIndex = (currentHeroIndex + 1) % heroContent.length;
+        setCurrentHeroIndex(nextIndex);
+        
+        // Fade in
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }).start();
+      });
+    };
+
+    // Start rotation every 5 seconds
+    heroIntervalRef.current = setInterval(rotateHero, 5000);
+
+    return () => {
+      if (heroIntervalRef.current) {
+        clearInterval(heroIntervalRef.current);
+      }
+    };
+  }, [trendingMovies, trendingTVShows, fadeAnim, currentHeroIndex, indicatorAnims]);
+
+  // Animate indicators when index changes
+  useEffect(() => {
+    const heroContent = [...trendingMovies.slice(0, 5), ...trendingTVShows.slice(0, 5)];
+    
+    if (indicatorAnims.length !== heroContent.length) {
+      return;
+    }
+
+    // Animate all indicators
+    indicatorAnims.forEach((anim, index) => {
+      Animated.timing(anim, {
+        toValue: index === currentHeroIndex ? 1 : 0,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    });
+  }, [currentHeroIndex, indicatorAnims, trendingMovies, trendingTVShows]);
+
+  // Render hero banner with featured content
+  const renderHeroBanner = () => {
+    const heroContent = [...trendingMovies.slice(0, 5), ...trendingTVShows.slice(0, 5)];
+    const featuredContent = heroContent[currentHeroIndex];
+
+    if (!featuredContent || heroContent.length === 0) {
+      return null;
+    }    const title: string = 'title' in featuredContent && featuredContent.title 
       ? featuredContent.title 
       : 'name' in featuredContent && (featuredContent as any).name
       ? (featuredContent as any).name
@@ -353,29 +428,108 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
       'w780',
     );
 
+    const contentType = 'title' in featuredContent ? 'movie' : 'tv';
+    const isLiked = isContentLiked(featuredContent.id, contentType);
+
+    const handlePlayPress = () => {
+      navigation.navigate('Detail', { content: featuredContent });
+    };
+
+    const handleLikePress = async () => {
+      try {
+        if (isLiked) {
+          await removeLikedContent(featuredContent.id, contentType);
+        } else {
+          await addLikedContent(featuredContent.id, contentType);
+        }
+        // Reload liked content to update the lists
+        loadLikedContent();
+      } catch (error) {
+        console.error('Failed to toggle like:', error);
+        Alert.alert('Error', 'Failed to update your liked content');
+      }
+    };
+
     return (
-      <View style={styles.heroBanner}>
+      <TouchableOpacity 
+        style={styles.heroBanner}
+        activeOpacity={0.95}
+        onPress={handlePlayPress}>
         <ImageBackground
           source={{ uri: backgroundImageUrl }}
           style={styles.heroBackgroundImage}
           resizeMode="cover">
           <LinearGradient
-            colors={['transparent', 'rgba(0, 0, 0, 0.3)', 'rgba(0, 0, 0, 0.8)', COLORS.NETFLIX_BLACK]}
+            colors={['transparent', 'rgba(0, 0, 0, 0.2)', 'rgba(0, 0, 0, 0.7)', COLORS.NETFLIX_BLACK]}
             style={styles.heroGradient}>
-            <View style={styles.heroContent}>
+            <Animated.View style={[styles.heroContent, { opacity: fadeAnim }]}>
               <Text style={styles.heroTitle}>{title}</Text>
+              <View style={styles.heroMetaRow}>
+                <View style={styles.heroRating}>
+                  <Icon name="star" size={18} color="#FFD700" />
+                  <Text style={styles.ratingText}>
+                    {featuredContent.vote_average.toFixed(1)}
+                  </Text>
+                </View>
+                <Text style={styles.heroType}>
+                  {contentType === 'movie' ? 'Movie' : 'TV Show'}
+                </Text>
+              </View>
               <Text style={styles.heroOverview} numberOfLines={3}>
                 {featuredContent.overview}
               </Text>
-              <View style={styles.heroRating}>
-                <Text style={styles.ratingText}>
-                  ⭐ {featuredContent.vote_average.toFixed(1)}
-                </Text>
+              <View style={styles.heroActions}>
+                <TouchableOpacity 
+                  style={styles.playButton}
+                  onPress={handlePlayPress}
+                  activeOpacity={0.8}>
+                  <Icon name="play-arrow" size={24} color={COLORS.NETFLIX_BLACK} />
+                  <Text style={styles.playButtonText}>Play</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.likeButton}
+                  onPress={handleLikePress}
+                  activeOpacity={0.7}>
+                  <Icon 
+                    name={isLiked ? 'favorite' : 'favorite-border'} 
+                    size={24} 
+                    color={isLiked ? COLORS.NETFLIX_RED : COLORS.NETFLIX_WHITE} 
+                  />
+                </TouchableOpacity>
               </View>
-            </View>
+            </Animated.View>
+            {/* Carousel Indicators */}
+            {heroContent.length > 1 && (
+              <View style={styles.heroIndicators}>
+                {heroContent.map((_, index) => {
+                  const anim = indicatorAnims[index] || new Animated.Value(0);
+                  const width = anim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [6, 20],
+                  });
+                  const opacity = anim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.4, 1],
+                  });
+                  
+                  return (
+                    <Animated.View
+                      key={index}
+                      style={[
+                        styles.heroIndicator,
+                        {
+                          width,
+                          opacity,
+                        },
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+            )}
           </LinearGradient>
         </ImageBackground>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -577,7 +731,7 @@ const styles = StyleSheet.create({
     paddingTop: 80,
   },
   heroBanner: {
-    height: screenHeight * 0.4,
+    height: screenHeight * 0.5,
   },
   heroBackgroundImage: {
     flex: 1,
@@ -587,42 +741,105 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 24,
   },
   heroContent: {
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    padding: 16,
-    borderRadius: 8,
+    paddingVertical: 20,
   },
   heroTitle: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
     color: COLORS.NETFLIX_WHITE,
-    marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.8)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 3,
+    marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.9)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 4,
+    letterSpacing: 0.5,
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  heroRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 12,
+  },
+  ratingText: {
+    fontSize: 14,
+    color: COLORS.NETFLIX_WHITE,
+    fontWeight: '700',
+    marginLeft: 4,
+  },
+  heroType: {
+    fontSize: 13,
+    color: COLORS.NETFLIX_LIGHT_GRAY,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   heroOverview: {
     fontSize: 14,
     color: COLORS.NETFLIX_WHITE,
     lineHeight: 20,
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    marginBottom: 20,
+    textShadowColor: 'rgba(0, 0, 0, 0.9)',
     textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+    textShadowRadius: 3,
   },
-  heroRating: {
+  heroActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
-  ratingText: {
-    fontSize: 14,
-    color: COLORS.NETFLIX_WHITE,
-    fontWeight: '600',
-    textShadowColor: 'rgba(0, 0, 0, 0.8)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
+  playButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.NETFLIX_WHITE,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 6,
+    flex: 1,
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  playButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.NETFLIX_BLACK,
+    marginLeft: 8,
+  },
+  likeButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  heroIndicators: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: 12,
+    gap: 6,
+  },
+  heroIndicator: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.NETFLIX_WHITE,
   },
   contentSections: {
     paddingTop: 20,

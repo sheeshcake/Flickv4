@@ -16,6 +16,7 @@ interface ContinueWatchingCardProps {
   watchProgress: WatchProgress;
   onPress: (item: Movie | TVShow, progress: WatchProgress) => void;
   size?: 'small' | 'medium' | 'large';
+  type: 'movie' | 'tv';
 }
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -24,6 +25,7 @@ const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
   watchProgress,
   onPress,
   size = 'medium',
+  type,
 }) => {
   const [content, setContent] = useState<Movie | TVShow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -144,7 +146,7 @@ const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
             style={{ flexDirection: 'row', justifyContent: 'space-between' }}
           >
             <Text style={styles.progressText}>{progressPercentage}%</Text>
-            {'season' in watchProgress && 'episode' in watchProgress && (
+            {type === 'tv' && 'season' in watchProgress && 'episode' in watchProgress && (
               <Text style={styles.progressText}>
                 S{watchProgress.season} · E{watchProgress.episode}
               </Text>

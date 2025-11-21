@@ -8,6 +8,8 @@ import {
   ScrollView,
   Image,
 } from 'react-native';
+import RNFS from 'react-native-fs';
+import { TMDBService } from '../services/TMDBService';
 import Svg, { Circle } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { 
@@ -19,6 +21,62 @@ import {
 } from '../types';
 import { downloadService } from '../services';
 import { COLORS } from '../utils/constants';
+
+// Helper component: DownloadThumbnail - resolves local file or TMDB fallback
+const DownloadThumbnail: React.FC<{ download: DownloadItem }> = ({ download }) => {
+  const [uri, setUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const tmdb = new TMDBService();
+
+    const resolve = async () => {
+      try {
+        if (download.thumbnailPath) {
+          const exists = await RNFS.exists(download.thumbnailPath);
+          if (exists && mounted) {
+            setUri(`file://${download.thumbnailPath}`);
+            return;
+          }
+        }
+
+        // fallback to TMDB poster or backdrop
+        if (download.posterPath) {
+          const remote = tmdb.getImageUrl(download.posterPath);
+          if (mounted) setUri(remote);
+          return;
+        }
+
+        if (download.backdropPath) {
+          const remote = tmdb.getImageUrl(download.backdropPath);
+          if (mounted) setUri(remote);
+          return;
+        }
+
+        setUri(null);
+      } catch (error) {
+        console.warn('Failed to resolve download thumbnail:', error);
+        if (mounted) setUri(null);
+      }
+    };
+
+    resolve();
+
+    return () => { mounted = false; };
+  }, [download]);
+
+  if (!uri) {
+    return (
+      <View style={styles.placeholderImage}>
+        <Icon name="movie" size={32} color={COLORS.NETFLIX_GRAY} />
+      </View>
+    );
+  }
+
+  return (
+    <Image source={{ uri }} style={styles.thumbnail} resizeMode="cover" />
+  );
+};
 
 interface CircularProgressProps {
   size: number;
@@ -613,17 +671,7 @@ export const DownloadsList: React.FC<DownloadsListProps> = ({
           activeOpacity={0.7}
         >
           <View style={styles.downloadImage}>
-            {download.thumbnailPath ? (
-              <Image
-                source={{ uri: `file://${download.thumbnailPath}` }}
-                style={styles.thumbnail}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={styles.placeholderImage}>
-                <Icon name="movie" size={32} color={COLORS.NETFLIX_GRAY} />
-              </View>
-            )}
+            <DownloadThumbnail download={download} />
             
             {download.status === DownloadStatus.DOWNLOADING && (
               <View style={styles.progressOverlay}>
