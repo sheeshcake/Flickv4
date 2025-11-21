@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useCallback, useMemo} from 'react';
+import React, {useState, useEffect, useCallback, useMemo, useRef} from 'react';
 import {
   View,
   Text,
@@ -32,7 +32,7 @@ import {commonStyles} from '../utils/theme';
 
 type Props = MainTabScreenProps<'Search'>;
 
-const CARD_WIDTH = getGridItemWidth(3, spacing.md * 1.5);
+const CARD_WIDTH = getGridItemWidth(3, spacing.md * 1.2);
 const DEBOUNCE_DELAY = 1000; // 500ms debounce
 const safeArea = getSafeAreaPadding();
 
@@ -43,8 +43,19 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
   const [popularContent, setPopularContent] = useState<Content[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<AppError | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMorePages, setHasMorePages] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   const isOffline = state.ui.offlineMode;
+
+  // Use ref to track current search results to avoid stale closures
+  const searchResultsRef = useRef<Content[]>([]);
+  
+  // Keep ref in sync with state
+  useEffect(() => {
+    searchResultsRef.current = state.content.searchResults;
+  }, [state.content.searchResults]);
 
   const tmdbService = useMemo(() => new TMDBService(), []);
 
@@ -88,12 +99,16 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
   }, [tmdbService, dispatch]);
 
   const performSearch = useCallback(
-    async (query: string) => {
+    async (query: string, page: number = 1, isLoadMore: boolean = false) => {
       try {
-        setIsSearching(true);
+        if (isLoadMore) {
+          setIsLoadingMore(true);
+        } else {
+          setIsSearching(true);
+        }
         setError(null);
 
-        const response = await tmdbService.searchMulti(query);
+        const response = await tmdbService.searchMulti(query, page);
 
         // Filter out person results and content without posters
         const filteredResults = response.results.filter(
@@ -103,10 +118,24 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
             (item.title || item.name), // Ensure it has a title/name
         );
 
-        dispatch({
-          type: AppActionType.SET_SEARCH_RESULTS,
-          payload: filteredResults,
-        });
+        if (isLoadMore) {
+          // Append to existing results using ref for current state
+          const updatedResults = [...searchResultsRef.current, ...filteredResults];
+          dispatch({
+            type: AppActionType.SET_SEARCH_RESULTS,
+            payload: updatedResults,
+          });
+        } else {
+          // Replace results for new search
+          dispatch({
+            type: AppActionType.SET_SEARCH_RESULTS,
+            payload: filteredResults,
+          });
+        }
+
+        // Update pagination state
+        setCurrentPage(page);
+        setHasMorePages(page < response.total_pages && response.total_pages > 1);
 
         // Preload images for search results
         if (filteredResults.length > 0) {
@@ -118,16 +147,25 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
       } catch (err) {
         console.error('Search failed:', err);
         setError(err as AppError);
-        dispatch({
-          type: AppActionType.SET_SEARCH_RESULTS,
-          payload: [],
-        });
+        if (!isLoadMore) {
+          dispatch({
+            type: AppActionType.SET_SEARCH_RESULTS,
+            payload: [],
+          });
+        }
       } finally {
         setIsSearching(false);
+        setIsLoadingMore(false);
       }
     },
     [tmdbService, dispatch],
   );
+
+  const loadMoreResults = useCallback(() => {
+    if (!isLoadingMore && hasMorePages && debouncedQuery && !isSearching) {
+      performSearch(debouncedQuery, currentPage + 1, true);
+    }
+  }, [isLoadingMore, hasMorePages, debouncedQuery, currentPage, isSearching, performSearch]);
 
   // Load popular content when component mounts
   useEffect(() => {
@@ -141,6 +179,8 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
     // Clear results immediately if query is empty
     if (!trimmedQuery) {
       setDebouncedQuery('');
+      setCurrentPage(1);
+      setHasMorePages(true);
       dispatch({
         type: AppActionType.SET_SEARCH_RESULTS,
         payload: [],
@@ -148,11 +188,13 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
       return;
     }
     
-    // Only apply debounce when query length is 3 or more
-    if (trimmedQuery.length >= 3) {
+    // Only apply debounce when query length is 1 or more
+    if (trimmedQuery.length >= 1) {
       const timeoutId = setTimeout(() => {
         setDebouncedQuery(trimmedQuery);
-        performSearch(trimmedQuery);
+        setCurrentPage(1);
+        setHasMorePages(true);
+        performSearch(trimmedQuery, 1, false);
       }, DEBOUNCE_DELAY);
 
       return () => clearTimeout(timeoutId);
@@ -168,7 +210,9 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
 
   const handleRetry = useCallback(() => {
     if (debouncedQuery) {
-      performSearch(debouncedQuery);
+      setCurrentPage(1);
+      setHasMorePages(true);
+      performSearch(debouncedQuery, 1, false);
     } else {
       loadPopularContent();
     }
@@ -263,9 +307,10 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
     return null;
   }, [isSearching, error, handleRetry, debouncedQuery, state.content.searchResults.length]);
 
-  const displayData = debouncedQuery
-    ? state.content.searchResults
-    : popularContent;
+  const displayData = useMemo(
+    () => (debouncedQuery ? state.content.searchResults : popularContent),
+    [debouncedQuery, state.content.searchResults, popularContent],
+  );
 
   const isLoading = state.ui.loading.popularContent || isSearching;
 
@@ -303,6 +348,24 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
     </View>
   ), [OfflineIndicatorComponent, SectionHeaderComponent]);
 
+  const ListFooterComponent = useMemo(() => {
+    if (isLoadingMore && debouncedQuery) {
+      return (
+        <View style={styles.footerLoader}>
+          <ActivityIndicator size="small" color="#E50914" />
+          <Text style={styles.footerLoaderText}>Loading more...</Text>
+        </View>
+      );
+    }
+    return null;
+  }, [isLoadingMore, debouncedQuery]);
+
+  const handleEndReached = useCallback(() => {
+    if (debouncedQuery && hasMorePages && !isLoadingMore && !isSearching) {
+      loadMoreResults();
+    }
+  }, [debouncedQuery, hasMorePages, isLoadingMore, isSearching, loadMoreResults]);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
@@ -319,6 +382,7 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
         keyExtractor={item => `${item.id}-${'title' in item ? 'movie' : 'tv'}`}
         numColumns={3}
         ListHeaderComponent={ListHeaderComponent}
+        ListFooterComponent={ListFooterComponent}
         ListEmptyComponent={renderEmptyState}
         contentContainerStyle={[
           styles.contentContainer,
@@ -328,13 +392,14 @@ export const SearchScreen: React.FC<Props> = ({navigation}) => {
         showsVerticalScrollIndicator={false}
         refreshing={isLoading}
         onRefresh={debouncedQuery ? undefined : loadPopularContent}
+        onEndReached={handleEndReached}
+        onEndReachedThreshold={0.5}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       />
     </View>
   );
 };
-
 const styles = StyleSheet.create({
   container: {
     ...commonStyles.container,
@@ -384,7 +449,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: spacing.xl + spacing.sm,
     minHeight: 300,
   },
   loadingText: {
@@ -435,5 +499,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
     fontStyle: 'italic',
+  },
+  footerLoader: {
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerLoaderText: {
+    color: '#CCCCCC',
+    fontSize: typography.small,
+    marginTop: spacing.sm,
   },
 });

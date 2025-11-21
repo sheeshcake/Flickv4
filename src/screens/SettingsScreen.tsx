@@ -39,7 +39,7 @@ export const SettingsScreen: React.FC<Props> = () => {
   const [showSubtitleSettings, setShowSubtitleSettings] = useState(false);
 
   const isDarkTheme = state.ui.theme === 'dark';
-  const appVersion = '1.0.0'; // From package.json
+  const appVersion = '1.0.1'; // From package.json
 
   // Load storage info on component mount
   useEffect(() => {
@@ -58,20 +58,20 @@ export const SettingsScreen: React.FC<Props> = () => {
     }
   };
 
-  const handleThemeToggle = async (value: boolean) => {
-    const newTheme = value ? 'dark' : 'light';
+  // const handleThemeToggle = async (value: boolean) => {
+  //   const newTheme = value ? 'dark' : 'light';
 
-    try {
-      // Update theme in context (this will also persist via useEffect in AppContext)
-      dispatch({
-        type: AppActionType.SET_THEME,
-        payload: newTheme,
-      });
-    } catch (error) {
-      console.error('Failed to update theme:', error);
-      Alert.alert('Error', 'Failed to update theme preference');
-    }
-  };
+  //   try {
+  //     // Update theme in context (this will also persist via useEffect in AppContext)
+  //     dispatch({
+  //       type: AppActionType.SET_THEME,
+  //       payload: newTheme,
+  //     });
+  //   } catch (error) {
+  //     console.error('Failed to update theme:', error);
+  //     Alert.alert('Error', 'Failed to update theme preference');
+  //   }
+  // };
 
   const handleAutoplayToggle = async (value: boolean) => {
     try {

@@ -50,7 +50,7 @@ const CreditsModal: React.FC<CreditsModalProps> = ({ isOpen, onClose }) => {
                         style={styles.logo}
                         resizeMode="contain"
                     />
-                    <Text style={styles.versionText}>1.0.0</Text>
+                    <Text style={styles.versionText}>1.0.1</Text>
                     <ScrollView>
                         <Text style={styles.sectionTitle}>
                             What is Flick?
