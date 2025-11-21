@@ -188,8 +188,6 @@ const WebViewScrapper: React.FC<WebViewScrapperProps> = ({
         mediaPlaybackRequiresUserAction={false}
         useWebKit
         // Performance optimizations
-        cacheEnabled={false}
-        incognito
         thirdPartyCookiesEnabled={false}
         sharedCookiesEnabled={false}
       />

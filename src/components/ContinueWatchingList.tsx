@@ -33,6 +33,7 @@ const ContinueWatchingList: React.FC<ContinueWatchingListProps> = ({
       watchProgress={item}
       onPress={onItemPress}
       size={cardSize}
+      type={item.contentType as 'movie' | 'tv'}
     />
   );
 

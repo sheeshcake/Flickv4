@@ -299,6 +299,7 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
             >
               <View style={styles.subtitleInfo}>
                 <Text style={styles.subtitleTitle}>Disable Subtitles</Text>
+                <Text style={styles.subtitleDescription}>No subtitles will be shown</Text>
               </View>
               {!selectedSubtitle && (
                 <Icon name="check" size={20} color={colors.red} />
@@ -452,6 +453,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: colors.dark,
     borderRadius: 8,
+    height: 80,
   },
   selectedItem: {
     backgroundColor: colors.red + '20',
@@ -471,6 +473,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     flex: 1,
+  },
+  subtitleDescription: {
+    color: colors.light,
+    fontSize: 12,
   },
   convertedBadge: {
     backgroundColor: colors.red,
