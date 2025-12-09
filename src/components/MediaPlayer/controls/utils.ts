@@ -1,4 +1,4 @@
-export const DOUBLE_PRESS_DELAY = 400;
+export const DOUBLE_PRESS_DELAY = 300;
 export const SEEK_INCREMENT_SECONDS = 5;
 export const AUTO_HIDE_DELAY = 3000;
 

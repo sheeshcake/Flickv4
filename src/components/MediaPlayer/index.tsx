@@ -37,6 +37,8 @@ interface MediaPlayerProps {
   season?: number;
   episode?: number;
   onFullscreenChange?: (isFullscreen: boolean) => void;
+  fullscreen?: boolean;
+  setFullscreen?: (fullscreen: boolean) => void;
 }
 
 /**
@@ -60,6 +62,8 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   season,
   episode,
   onFullscreenChange,
+  fullscreen,
+  setFullscreen,
 }) => {
   // Video state
   const [isPlaying, setIsPlaying] = useState(autoplay);
@@ -80,7 +84,20 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const { state, updateWatchProgress } = useAppState();
 
   // Custom hooks
-  const { isFullscreen, toggleFullscreen } = useFullscreen(onFullscreenChange);
+  // If fullscreen/setFullscreen are provided, use them as the source of truth
+  const { isFullscreen, toggleFullscreen } = useFullscreen((val) => {
+    if (setFullscreen) setFullscreen(val);
+    if (onFullscreenChange) onFullscreenChange(val);
+  });
+
+  // Sync internal fullscreen state with prop
+  useEffect(() => {
+    if (typeof fullscreen === 'boolean' && fullscreen !== isFullscreen) {
+      // Only update if different
+      toggleFullscreen();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen]);
   const { controlsVisible, toggleControls, showControls } = useControlsVisibility(isPlaying, isSeeking);
 
   // Get saved subtitle from continue watching
@@ -275,11 +292,11 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
   const videoStyle = useMemo(() => ({
     position: 'absolute' as const,
-    top: isFullscreen ? 0 : 15,
+    top: 0,
     left: 0,
     bottom: 0,
     right: 0,
-    height: isFullscreen ? screenWidth : screenHeight * 0.3,
+    height: isFullscreen ? screenWidth : screenHeight * 0.35,
     width: isFullscreen ? screenHeight : screenWidth,
   }), [isFullscreen]);
 
@@ -295,22 +312,29 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
   return (
     <View style={[styles.container, videoContainerStyle]}>
-      <Video
-        ref={videoRef}
-        source={{ 
-          uri: videoUrl,
-        }}
-        style={videoStyle}
-        onLoad={handleLoad}
-        onProgress={handleProgress}
-        onBuffer={handleBuffer}
-        onError={handleError}
-        resizeMode={RESIZE_MODES[resizeMode]}
-        poster={imageUrl}
-        controls={false}
-        repeat={false}
-        muted={false}
-        paused={!isPlaying}
+      {videoUrl && typeof videoUrl === 'string' && videoUrl.trim() !== '' ? (
+        <Video
+          ref={videoRef}
+          source={{ 
+            uri: videoUrl,
+          }}
+          style={videoStyle}
+          onLoad={handleLoad}
+          onProgress={handleProgress}
+          onBuffer={handleBuffer}
+          onError={handleError}
+          resizeMode={RESIZE_MODES[resizeMode]}
+          poster={imageUrl}
+          controls={false}
+          repeat={false}
+          muted={false}
+          paused={!isPlaying}
+        />
+      ) : (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>No valid video URL provided.</Text>
+        </View>
+      )}
         hideShutterView
         enterPictureInPictureOnLeave={state.user.preferences.pictureInPicture}
         progressUpdateInterval={250}

@@ -89,31 +89,15 @@ const DownloadsScreen: React.FC<DownloadsScreenProps> = ({ navigation }) => {
   // Handle download item press (play downloaded content)
   const handleDownloadPress = useCallback((download: DownloadItem) => {
     if (download.status === DownloadStatus.COMPLETED && download.filePath) {
-      // Navigate to Detail screen and play the downloaded content
-      Alert.alert(
-        'Play Downloaded Content',
-        `Play ${download.title} from downloads?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Play',
-            onPress: () => {
-              navigation.navigate('Detail', {
-                content: {
-                  id: download.contentId,
-                  title: download.title,
-                  type: download.contentType,
-                  // Additional fields can be added as needed
-                },
-                video: download.filePath,
-                isLocal: true,
-                autoPlay: true,
-                fromDownload: true,
-              });
-            },
-          },
-        ]
-      );
+      navigation.navigate('Detail', {
+        content: {
+          id: download.contentId,
+          title: download.title,
+        },
+        video: download.filePath,
+        isLocal: true,
+        autoPlay: true,
+      });
     } else if (download.status === DownloadStatus.DOWNLOADING) {
       Alert.alert(
         'Download in Progress',

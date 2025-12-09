@@ -10,9 +10,26 @@ import {
   Dimensions,
   ImageBackground,
   TouchableOpacity,
-  Animated,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import Carousel from 'react-native-reanimated-carousel';
+import Animated, { withTiming, useAnimatedStyle } from 'react-native-reanimated';
+interface HeroIndicatorProps {
+  active: boolean;
+}
+const HeroIndicator: React.FC<HeroIndicatorProps> = ({ active }) => {
+  const animatedStyle = useAnimatedStyle(() => {
+    const width = active ? 20 : 6;
+    const opacity = active ? 1 : 0.4;
+    return {
+      width: withTiming(width, { duration: 300 }),
+      opacity: withTiming(opacity, { duration: 300 }),
+      marginHorizontal: 3,
+    };
+  }, [active]);
+  return <Animated.View style={[styles.heroIndicator, animatedStyle]} />;
+};
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import type {MainTabScreenProps} from '../types/navigation';
 import {useAppState} from '../hooks/useAppState';
@@ -49,6 +66,8 @@ const hasMorePages = (page: number, totalPages: number): boolean => {
 };
 
 export const HomeScreen: React.FC<Props> = ({navigation}) => {
+    // Track previous hero index for direction-based indicator animation
+    const prevHeroIndexRef = useRef(0);
   const {
     state,
     setTrendingMovies,
@@ -76,11 +95,9 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
   // Credits modal state
   const [isCreditsModalOpen, setIsCreditsModalOpen] = useState(false);
 
-  // Hero carousel state
+  // Hero carousel state (reanimated-carousel)
   const [currentHeroIndex, setCurrentHeroIndex] = useState(0);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const heroIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const indicatorAnims = useRef<Animated.Value[]>([]).current;
+  const carouselRef = useRef<any>(null);
 
   // Liked content state
   const [likedMovies, setLikedMovies] = React.useState<Movie[]>([]);
@@ -346,190 +363,138 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
     });
   }, [loadInitialTrending, loadLikedContent, loadGenreContent, genreSections]);
 
-  // Auto-rotate hero content with fade transition
+
+  // No need for manual interval/animation, handled by carousel
+
+  // Render hero banner with carousel
   useEffect(() => {
-    const heroContent = [...trendingMovies.slice(0, 5), ...trendingTVShows.slice(0, 5)];
-    
-    if (heroContent.length <= 1) {
-      return;
-    }
+    prevHeroIndexRef.current = currentHeroIndex;
+  }, [currentHeroIndex]);
 
-    // Initialize indicator animations
-    if (indicatorAnims.length !== heroContent.length) {
-      indicatorAnims.length = 0;
-      for (let i = 0; i < heroContent.length; i++) {
-        indicatorAnims.push(new Animated.Value(i === 0 ? 1 : 0));
-      }
-    }
-
-    const rotateHero = () => {
-      // Fade out
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 500,
-        useNativeDriver: true,
-      }).start(() => {
-        // Change content
-        const nextIndex = (currentHeroIndex + 1) % heroContent.length;
-        setCurrentHeroIndex(nextIndex);
-        
-        // Fade in
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 500,
-          useNativeDriver: true,
-        }).start();
-      });
-    };
-
-    // Start rotation every 5 seconds
-    heroIntervalRef.current = setInterval(rotateHero, 5000);
-
-    return () => {
-      if (heroIntervalRef.current) {
-        clearInterval(heroIntervalRef.current);
-      }
-    };
-  }, [trendingMovies, trendingTVShows, fadeAnim, currentHeroIndex, indicatorAnims]);
-
-  // Animate indicators when index changes
-  useEffect(() => {
-    const heroContent = [...trendingMovies.slice(0, 5), ...trendingTVShows.slice(0, 5)];
-    
-    if (indicatorAnims.length !== heroContent.length) {
-      return;
-    }
-
-    // Animate all indicators
-    indicatorAnims.forEach((anim, index) => {
-      Animated.timing(anim, {
-        toValue: index === currentHeroIndex ? 1 : 0,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    });
-  }, [currentHeroIndex, indicatorAnims, trendingMovies, trendingTVShows]);
-
-  // Render hero banner with featured content
   const renderHeroBanner = () => {
     const heroContent = [...trendingMovies.slice(0, 5), ...trendingTVShows.slice(0, 5)];
-    const featuredContent = heroContent[currentHeroIndex];
+    if (heroContent.length === 0) return null;
 
-    if (!featuredContent || heroContent.length === 0) {
-      return null;
-    }    const title: string = 'title' in featuredContent && featuredContent.title 
-      ? featuredContent.title 
-      : 'name' in featuredContent && (featuredContent as any).name
-      ? (featuredContent as any).name
-      : 'Unknown';
+    // No direction logic needed for single expanded indicator
 
-    const backgroundImageUrl = tmdbService.getImageUrl(
-      featuredContent.backdrop_path,
-      'w780',
-    );
+    const renderItem = ({item, index: _index}: {item: Movie | TVShow, index: number}) => {
+      const title: string = 'title' in item && item.title
+        ? item.title
+        : 'name' in item && (item as any).name
+        ? (item as any).name
+        : 'Unknown';
+      const backgroundImageUrl = tmdbService.getImageUrl(item.backdrop_path || '', 'w780');
+      const contentType = 'title' in item ? 'movie' : 'tv';
+      const isLiked = isContentLiked(item.id, contentType);
 
-    const contentType = 'title' in featuredContent ? 'movie' : 'tv';
-    const isLiked = isContentLiked(featuredContent.id, contentType);
-
-    const handlePlayPress = () => {
-      navigation.navigate('Detail', { content: featuredContent });
-    };
-
-    const handleLikePress = async () => {
-      try {
-        if (isLiked) {
-          await removeLikedContent(featuredContent.id, contentType);
-        } else {
-          await addLikedContent(featuredContent.id, contentType);
+      const handlePlayPress = () => {
+        navigation.navigate('Detail', { content: item });
+      };
+      const handleLikePress = async () => {
+        try {
+          if (isLiked) {
+            await removeLikedContent(item.id, contentType);
+          } else {
+            await addLikedContent(item.id, contentType);
+          }
+          loadLikedContent();
+        } catch (error) {
+          console.error('Failed to toggle like:', error);
+          Alert.alert('Error', 'Failed to update your liked content');
         }
-        // Reload liked content to update the lists
-        loadLikedContent();
-      } catch (error) {
-        console.error('Failed to toggle like:', error);
-        Alert.alert('Error', 'Failed to update your liked content');
-      }
+      };
+
+      return (
+        <TouchableWithoutFeedback onPress={handlePlayPress}>
+          <View style={styles.heroBanner}>
+            <ImageBackground
+              source={{ uri: backgroundImageUrl }}
+              style={styles.heroBackgroundImage}
+              resizeMode="cover">
+              <LinearGradient
+                colors={['transparent', 'rgba(0, 0, 0, 0.2)', 'rgba(0, 0, 0, 0.7)', COLORS.NETFLIX_BLACK]}
+                style={styles.heroGradient}>
+                <View style={styles.heroContent}>
+                  <Text style={styles.heroTitle}>{title}</Text>
+                  <View style={styles.heroMetaRow}>
+                    <View style={styles.heroRating}>
+                      <Icon name="star" size={18} color="#FFD700" />
+                      <Text style={styles.ratingText}>
+                        {item?.vote_average?.toFixed(1) || 'N/A'}
+                      </Text>
+                    </View>
+                    <Text style={styles.heroType}>
+                      {contentType === 'movie' ? 'Movie' : 'TV Show'}
+                    </Text>
+                  </View>
+                  <Text style={styles.heroOverview} numberOfLines={3}>
+                    {item.overview}
+                  </Text>
+                  <View style={styles.heroActions}>
+                    <TouchableOpacity 
+                      style={styles.playButton}
+                      onPress={handlePlayPress}
+                      activeOpacity={0.8}>
+                      <Icon name="play-arrow" size={24} color={COLORS.NETFLIX_BLACK} />
+                      <Text style={styles.playButtonText}>Play</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.likeButton}
+                      onPress={handleLikePress}
+                      activeOpacity={0.7}>
+                      <Icon 
+                        name={isLiked ? 'favorite' : 'favorite-border'} 
+                        size={24} 
+                        color={isLiked ? COLORS.NETFLIX_RED : COLORS.NETFLIX_WHITE} 
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </LinearGradient>
+            </ImageBackground>
+          </View>
+        </TouchableWithoutFeedback>
+      );
     };
+
+    // Only one expanded indicator (active)
+    const indicators = heroContent.map((_, index) => {
+      const isActive = currentHeroIndex === index;
+      return (
+        <TouchableOpacity
+          key={index}
+          onPress={() => {
+            setCurrentHeroIndex(index);
+            if (carouselRef.current) {
+              carouselRef.current.scrollTo({index, animated: true});
+            }
+          }}
+          activeOpacity={0.7}
+        >
+          <HeroIndicator active={isActive} />
+        </TouchableOpacity>
+      );
+    });
 
     return (
-      <TouchableOpacity 
-        style={styles.heroBanner}
-        activeOpacity={0.95}
-        onPress={handlePlayPress}>
-        <ImageBackground
-          source={{ uri: backgroundImageUrl }}
-          style={styles.heroBackgroundImage}
-          resizeMode="cover">
-          <LinearGradient
-            colors={['transparent', 'rgba(0, 0, 0, 0.2)', 'rgba(0, 0, 0, 0.7)', COLORS.NETFLIX_BLACK]}
-            style={styles.heroGradient}>
-            <Animated.View style={[styles.heroContent, { opacity: fadeAnim }]}>
-              <Text style={styles.heroTitle}>{title}</Text>
-              <View style={styles.heroMetaRow}>
-                <View style={styles.heroRating}>
-                  <Icon name="star" size={18} color="#FFD700" />
-                  <Text style={styles.ratingText}>
-                    {featuredContent.vote_average.toFixed(1)}
-                  </Text>
-                </View>
-                <Text style={styles.heroType}>
-                  {contentType === 'movie' ? 'Movie' : 'TV Show'}
-                </Text>
-              </View>
-              <Text style={styles.heroOverview} numberOfLines={3}>
-                {featuredContent.overview}
-              </Text>
-              <View style={styles.heroActions}>
-                <TouchableOpacity 
-                  style={styles.playButton}
-                  onPress={handlePlayPress}
-                  activeOpacity={0.8}>
-                  <Icon name="play-arrow" size={24} color={COLORS.NETFLIX_BLACK} />
-                  <Text style={styles.playButtonText}>Play</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.likeButton}
-                  onPress={handleLikePress}
-                  activeOpacity={0.7}>
-                  <Icon 
-                    name={isLiked ? 'favorite' : 'favorite-border'} 
-                    size={24} 
-                    color={isLiked ? COLORS.NETFLIX_RED : COLORS.NETFLIX_WHITE} 
-                  />
-                </TouchableOpacity>
-              </View>
-            </Animated.View>
-            {/* Carousel Indicators */}
-            {heroContent.length > 1 && (
-              <View style={styles.heroIndicators}>
-                {heroContent.map((_, index) => {
-                  const anim = indicatorAnims[index] || new Animated.Value(0);
-                  const width = anim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [6, 20],
-                  });
-                  const opacity = anim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.4, 1],
-                  });
-                  
-                  return (
-                    <Animated.View
-                      key={index}
-                      style={[
-                        styles.heroIndicator,
-                        {
-                          width,
-                          opacity,
-                        },
-                      ]}
-                    />
-                  );
-                })}
-              </View>
-            )}
-          </LinearGradient>
-        </ImageBackground>
-      </TouchableOpacity>
+      <View>
+        <Carousel
+          ref={carouselRef}
+          width={Dimensions.get('window').width}
+          height={screenHeight * 0.5}
+          data={heroContent}
+          autoPlay
+          autoPlayInterval={5000}
+          onSnapToItem={setCurrentHeroIndex}
+          renderItem={renderItem}
+          loop
+          style={{}}
+        />
+        {/* Carousel Indicators */}
+        {heroContent.length > 1 && (
+          <View style={styles.heroIndicators}>{indicators}</View>
+        )}
+      </View>
     );
   };
 

@@ -20,7 +20,12 @@ export const CenterOverlay: React.FC<CenterOverlayProps> = ({
   const seekLabel = `${seekIncrementSeconds}s`;
 
   return (
-    <View style={styles.centerOverlay}>
+    <View
+      style={[
+        styles.centerOverlay,
+        hidden && styles.centerOverlayHidden,
+      ]}
+    >
       <DoubleTapSeekArea
         side="left"
         style={styles.seekArea}
@@ -29,14 +34,16 @@ export const CenterOverlay: React.FC<CenterOverlayProps> = ({
         seekAmountLabel={seekLabel}
       />
 
-      <View style={styles.centerPlayArea}>
+      <TouchableOpacity
+        style={styles.centerPlayArea}
+        activeOpacity={1}
+        onPress={onHide}
+      >
         {status === 'loading' && (
-          <>
+          <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.red} />
-            <View style={styles.loadingContainer}>
-              <Text style={styles.loadingText}>{loadingMessage}</Text>
-            </View>
-          </>
+            <Text style={styles.loadingText}>{loadingMessage}</Text>
+          </View>
         )}
 
         {status === 'error' && (
@@ -47,16 +54,15 @@ export const CenterOverlay: React.FC<CenterOverlayProps> = ({
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={() => {
-              // Always toggle play/pause when center button is pressed
               onPlayPause();
-              // Also show controls if they're hidden
               if (hidden) {
                 onHide();
               }
             }}
             style={[
               styles.playPauseButton,
-              hidden ? styles.playPauseButtonHidden : styles.playPauseButtonVisible,
+              hidden && styles.playPauseButtonHidden,
+              !hidden && styles.playPauseButtonVisible,
             ]}
           >
             <Icon
@@ -66,7 +72,7 @@ export const CenterOverlay: React.FC<CenterOverlayProps> = ({
             />
           </TouchableOpacity>
         )}
-      </View>
+      </TouchableOpacity>
 
       <DoubleTapSeekArea
         side="right"

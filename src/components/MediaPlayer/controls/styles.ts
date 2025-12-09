@@ -4,6 +4,7 @@ import { colors, sizes } from '../../../constants/theme';
 export const styles = StyleSheet.create({
   container: {
     justifyContent: 'space-between',
+    overflow: 'hidden',
     width: '100%',
   },
   containerFullscreen: {
@@ -15,18 +16,18 @@ export const styles = StyleSheet.create({
     zIndex: 1,
   },
   topBar: {
-    maxHeight: sizes.width * 0.25,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
     backgroundColor: colors.transparentBlack,
     width: '100%',
   },
   topBarFullscreen: {
-    paddingTop: 0,
+    paddingHorizontal: 20,
+    alignItems: 'center',
   },
   topBarRegular: {
-    paddingTop: 20,
+    paddingTop: 50,
   },
   topBarHidden: {
     opacity: 0,
@@ -49,11 +50,20 @@ export const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   centerOverlay: {
-    height: sizes.height * 0.2,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     width: '100%',
+    height: sizes.height * 0.20,
+    position: 'relative',
+    zIndex: 2,
+  },
+  centerOverlayHidden: {
+    justifyContent: 'center',
+    position: 'absolute',
+    height: sizes.height * 0.40,
+    width: '100%',
+    zIndex: 20,
   },
   seekArea: {
     flex: 1,
@@ -83,19 +93,18 @@ export const styles = StyleSheet.create({
   },
   playPauseButton: {
     borderRadius: 50,
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
     padding: 20,
   },
-  playPauseButtonVisible: {
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    opacity: 1,
-  },
   playPauseButtonHidden: {
-    backgroundColor: 'transparent',
     opacity: 0,
+  },
+  playPauseButtonVisible: {
+    opacity: 1,
   },
   bottomBar: {
     flexDirection: 'row',
-    minHeight: 55,
+    height: 50,
     width: '100%',
     justifyContent: 'space-between',
     backgroundColor: colors.transparentBlack,
