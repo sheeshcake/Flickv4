@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { View, BackHandler, Dimensions, StyleSheet, Text } from 'react-native';
-import Video from 'react-native-video';
+import Video, { BufferingStrategyType } from 'react-native-video';
 import { CastButton } from 'react-native-google-cast';
 import RNFS from 'react-native-fs';
 import { COLORS } from '../../utils/constants';
@@ -326,20 +326,20 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
           resizeMode={RESIZE_MODES[resizeMode]}
           poster={imageUrl}
           controls={false}
+          bufferingStrategy={BufferingStrategyType.DEPENDING_ON_MEMORY}
           repeat={false}
           muted={false}
           paused={!isPlaying}
+          hideShutterView
+          enterPictureInPictureOnLeave={state.user.preferences.pictureInPicture}
+          progressUpdateInterval={250}
+          allowsExternalPlayback={false}
         />
       ) : (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>No valid video URL provided.</Text>
         </View>
       )}
-        hideShutterView
-        enterPictureInPictureOnLeave={state.user.preferences.pictureInPicture}
-        progressUpdateInterval={250}
-        allowsExternalPlayback={false}
-      />
 
       <Controls
         title={title}
@@ -400,6 +400,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.NETFLIX_BLACK,
     justifyContent: 'center',
     alignItems: 'center',
+    flex: 1,
   },
   castButtonContainer: {
     flexDirection: 'row',
