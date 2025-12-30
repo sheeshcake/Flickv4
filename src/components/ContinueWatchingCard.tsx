@@ -46,7 +46,6 @@ const ContinueWatchingCard: React.FC<ContinueWatchingCardProps> = ({
 
   const cardDimensions = getCardDimensions();
 
-  // Fetch content details
   useEffect(() => {
     const fetchContentDetails = async () => {
       try {

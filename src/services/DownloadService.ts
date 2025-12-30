@@ -1,4 +1,5 @@
 import RNFS from 'react-native-fs';
+import { PermissionsAndroid, Platform } from 'react-native';
 import RNBackgroundDownloader, { DownloadTask } from '@kesha-antonov/react-native-background-downloader';
 import { Parser as M3U8Parser } from 'm3u8-parser';
 import { 
@@ -53,7 +54,7 @@ export class DownloadService {
   private tmdbService: TMDBService;
 
   // Storage paths
-  private static readonly DOWNLOADS_DIR = `${RNFS.DocumentDirectoryPath}/downloads`;
+  private static readonly DOWNLOADS_DIR = `${RNFS.ExternalStorageDirectoryPath}/Download/FlickDownloads`;
   private static readonly VIDEOS_DIR = `${DownloadService.DOWNLOADS_DIR}/videos`;
   private static readonly THUMBNAILS_DIR = `${DownloadService.DOWNLOADS_DIR}/thumbnails`;
   private static readonly SUBTITLES_DIR = `${DownloadService.DOWNLOADS_DIR}/subtitles`;
@@ -61,8 +62,65 @@ export class DownloadService {
 
   private constructor() {
     this.tmdbService = new TMDBService();
-    this.initializeDownloadsDirectory();
-    this.loadDownloadsFromStorage();
+    this.requestStoragePermission()
+      .then(() => this.initializeDownloadsDirectory())
+      .catch((err) => console.warn('Storage permission not granted:', err))
+      .finally(() => this.loadDownloadsFromStorage());
+  }
+
+  /**
+   * Request storage access permission (Android only)
+   */
+  private async requestStoragePermission(): Promise<void> {
+    if (Platform.OS !== 'android') return;
+    try {
+      let granted: string = PermissionsAndroid.RESULTS.GRANTED;
+      // Android 13+ uses new permissions
+      if (Platform.Version >= 33) {
+        granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
+          {
+            title: 'Storage Permission Required',
+            message: 'Flick needs access to your media to download and save videos.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          },
+        );
+      } else {
+        granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+          {
+            title: 'Storage Permission Required',
+            message: 'Flick needs access to your storage to download and save videos.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          },
+        );
+      }
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        // Always provide a non-null error code for Promise.reject
+        const error: AppError = {
+          type: ErrorType.STORAGE_ERROR,
+          message: 'Storage permission denied',
+          code: 'PERMISSION_DENIED',
+        };
+        throw error;
+      }
+    } catch (err) {
+      // Always provide a non-null error code for Promise.reject
+      if (err && typeof err === 'object' && 'code' in err) {
+        throw err;
+      } else {
+        const error: AppError = {
+          type: ErrorType.STORAGE_ERROR,
+          message: (err as any)?.message || 'Unknown storage permission error',
+          code: 'PERMISSION_ERROR',
+        };
+        throw error;
+      }
+    }
   }
 
   /**

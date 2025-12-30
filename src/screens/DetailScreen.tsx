@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
   ImageBackground,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Movie, TVShow, TMDBResponse, AppError } from '../types';
 import { COLORS } from '../utils/constants';
 import { TMDBService } from '../services';
@@ -24,6 +24,8 @@ import { useAppState } from '../hooks/useAppState';
 import { useContentWatchProgress } from '../hooks/useAppSelectors';
 import type { RootStackScreenProps } from '../types/navigation';
 import { getGenreNameById } from '../utils/genreMap';
+import LinearGradient from 'react-native-linear-gradient';
+import { colors, sizes } from '../constants/theme';
 
 type DetailScreenProps = RootStackScreenProps<'Detail'>;
 
@@ -33,7 +35,9 @@ const { height: screenHeight } = Dimensions.get('window');
 const VIDEO_HEIGHT = screenHeight * 0.33; // 16:9 aspect ratio
 
 const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
-  const { content } = route.params;
+  const { content, video: localVideoPath, isLocal, autoPlay } = route.params || {};
+  // Defensive: fallback if content is not an object
+  const validContent = content && typeof content === 'object' ? content : null;
   const {
     state,
     addLikedContent,
@@ -46,6 +50,34 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   const [similarPage, setSimilarPage] = useState(1);
   const [hasMoreSimilar, setHasMoreSimilar] = useState(true);
   const [currentVideoUrl, setCurrentVideoUrl] = useState<string>('');
+  const [localFileExists, setLocalFileExists] = useState<boolean>(true);
+  const [initialVideoDuration, setInitialVideoDuration] = useState<number>(0);
+    // Check if local file exists (if playing local)
+    useEffect(() => {
+      if (isLocal && localVideoPath) {
+        // Use RNFS or Expo FileSystem to check file existence
+        const checkFile = async () => {
+          try {
+            // Dynamically require to avoid breaking web builds
+            const RNFS = require('react-native-fs');
+            const exists = await RNFS.exists(localVideoPath);
+            setLocalFileExists(!!exists);
+            if (exists) {
+              setCurrentVideoUrl(localVideoPath);
+              setShowVideoPlayer(true);
+            } else {
+              setCurrentVideoUrl('');
+              setShowVideoPlayer(false);
+            }
+          } catch (e) {
+            setLocalFileExists(false);
+            setCurrentVideoUrl('');
+            setShowVideoPlayer(false);
+          }
+        };
+        checkFile();
+      }
+    }, [isLocal, localVideoPath]);
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
   const [seasons, setSeasons] = useState<any[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<number>(1);
@@ -65,12 +97,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
   // Determine if content is a movie or TV show
   const isMovie = useCallback((item: Movie | TVShow): item is Movie => {
-    return 'title' in item;
+    return !!item && typeof item === 'object' && 'title' in item;
   }, []);
 
   const genreDisplayNames = useMemo(() => {
-    const detailedGenres = isMovie(content)
-      ? (content as any).genres
+    if (!validContent) return [];
+    const detailedGenres = isMovie(validContent)
+      ? (validContent as any).genres
       : tvShowDetails?.genres;
 
     if (Array.isArray(detailedGenres) && detailedGenres.length > 0) {
@@ -79,43 +112,48 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
         .filter((name: string | undefined): name is string => Boolean(name));
     }
 
-    if (Array.isArray(content.genre_ids) && content.genre_ids.length > 0) {
-      const mapped = content.genre_ids
-        .map(id => getGenreNameById(id))
-        .filter((name): name is string => Boolean(name));
+    if (Array.isArray(validContent?.genre_ids) && validContent?.genre_ids.length > 0) {
+      const mapped = validContent?.genre_ids
+        .map((id: any) => getGenreNameById(id))
+        .filter((name: string | undefined): name is string => Boolean(name));
       return Array.from(new Set(mapped));
     }
 
     return [];
-  }, [content, tvShowDetails, isMovie]);
+  }, [validContent, tvShowDetails, isMovie]);
 
   // Check if content is liked
-  const contentType = isMovie(content) ? 'movie' : 'tv';
-  const isLiked = isContentLiked(content.id, contentType);
+  const contentType = isMovie(validContent) ? 'movie' : 'tv';
+  const isLiked = validContent ? isContentLiked(validContent?.id, contentType) : false;
 
   // Toggle like function
   const toggleLike = useCallback(async () => {
+    if (!validContent) return;
     try {
       if (isLiked) {
-        await removeLikedContent(content.id, contentType);
+        await removeLikedContent(validContent?.id, contentType);
       } else {
-        await addLikedContent(content.id, contentType);
+        await addLikedContent(validContent?.id, contentType);
       }
     } catch (error) {
       console.error('Failed to toggle like:', error);
       Alert.alert('Error', 'Failed to update your liked content');
     }
-  }, [isLiked, content.id, contentType, addLikedContent, removeLikedContent]);
+  }, [isLiked, validContent, contentType, addLikedContent, removeLikedContent]);
 
   // Get saved watch progress for continue watching
-  const watchProgress = useContentWatchProgress(
-    content.id,
-    isMovie(content) ? 'movie' : 'tv',
-  );
+  const watchProgress = validContent
+    ? useContentWatchProgress(
+        validContent?.id,
+        isMovie(validContent) ? 'movie' : 'tv',
+      )
+    : undefined;
 
   useEffect(() => {
-    hasAppliedWatchProgressRef.current = false;
-  }, [content.id]);
+    if (validContent) {
+      hasAppliedWatchProgressRef.current = false;
+    }
+  }, [validContent]);
 
   // Hide tab bar when video is in fullscreen
   useEffect(() => {
@@ -152,11 +190,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
   // Get content title
   const getContentTitle = (item: Movie | TVShow): string => {
+    if (!item) return '';
     return isMovie(item) ? item.title : item.name;
   };
 
   // Get content release date
   const getContentReleaseDate = (item: Movie | TVShow): string => {
+    if (!item) return '';
     return isMovie(item) ? item.release_date : item.first_air_date;
   };
 
@@ -214,7 +254,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   // Handle similar content item press
   const handleSimilarItemPress = useCallback(
     (item: Movie | TVShow) => {
-      // Navigate to a new detail screen with the selected content
+      if (!item) return;
       navigation.push('Detail', { content: item });
     },
     [navigation],
@@ -222,10 +262,10 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
   // Handle loading more similar content
   const handleLoadMoreSimilar = useCallback(() => {
-    if (!loadingMoreSimilar && hasMoreSimilar && !loadingSimilar) {
-      fetchSimilarContent(content, similarPage + 1, true);
+    if (!loadingMoreSimilar && hasMoreSimilar && !loadingSimilar && validContent) {
+      fetchSimilarContent(validContent, similarPage + 1, true);
     }
-  }, [loadingMoreSimilar, hasMoreSimilar, loadingSimilar, content, similarPage, fetchSimilarContent]);
+  }, [loadingMoreSimilar, hasMoreSimilar, loadingSimilar, validContent, similarPage, fetchSimilarContent]);
 
   // Handle video player close
   const handleCloseVideo = useCallback(() => {
@@ -308,18 +348,20 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
       hasAppliedWatchProgressRef.current = true;
       setSelectedSeason(seasonNumber);
       setSelectedEpisode(null);
-      if (!isMovie(content)) {
-        fetchSeasonEpisodes(content.id, seasonNumber);
+      if (validContent && !isMovie(validContent)) {
+        fetchSeasonEpisodes(validContent?.id, seasonNumber);
       }
     },
-    [content, fetchSeasonEpisodes, isMovie],
+    [validContent, fetchSeasonEpisodes, isMovie],
   );
 
   // Handle episode selection
   const handleEpisodeChange = useCallback(
     (episodeNumber: number, _episodeName: string) => {
-      hasAppliedWatchProgressRef.current = true;
+      hasAppliedWatchProgressRef.current = false;
       setSelectedEpisode(episodeNumber);
+      setInitialVideoDuration(0);
+      // reset watch progress for new episode
       // If autoplay is enabled, start scraping and playing the new episode
       if (autoplayEnabled) {
         setShowScrapper(true);
@@ -333,49 +375,39 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
   // Auto-start video if autoplay is enabled
   useEffect(() => {
-    // Don't autoplay if video is already playing
     if (showVideoPlayer || currentVideoUrl) {
       return;
     }
-
-    // Don't autoplay if autoplay is disabled
     if (!autoplayEnabled) {
       return;
     }
-
-    // For TV shows, only autoplay if:
-    // 1. There's NO continue watching progress (not in continue watching list)
-    // 2. Episodes are loaded
-    // 3. First episode of first season is selected
-    if (!isMovie(content)) {
-      // Don't autoplay if there's watch progress (user is continuing watching)
-      if (watchProgress && watchProgress.season && watchProgress.episode) {
-        return;
-      }
-
-      // Wait until episodes are loaded
-      if (episodes.length === 0) {
-        return;
-      }
-
-      // Only autoplay if first season and first episode are selected
-      if (selectedSeason === 1 && (selectedEpisode === 1 || selectedEpisode === null)) {
-        // If episode is not yet selected, select the first episode
-        if (selectedEpisode === null) {
-          setSelectedEpisode(1);
+    if(!isLocal){
+      if (!isMovie(content)) {
+        if (watchProgress && watchProgress.season && watchProgress.episode) {
+          setShowScrapper(true);
+          setScrapingVideo(true);
+          return;
         }
+        if (episodes.length === 0) {
+          return;
+        }
+        if (selectedSeason === 1 && (selectedEpisode === 1 || selectedEpisode === null)) {
+          // If episode is not yet selected, select the first episode
+          if (selectedEpisode === null) {
+            setSelectedEpisode(1);
+          }
+          setShowScrapper(true);
+          setScrapingVideo(true);
+          setScrapingError(null);
+        }
+      } else {
         
-        setShowScrapper(true);
-        setScrapingVideo(true);
-        setScrapingError(null);
+          setShowScrapper(true);
+          setScrapingVideo(true);
+          setScrapingError(null);
       }
-    } else {
-      // For movies, autoplay regardless of watch progress
-      setShowScrapper(true);
-      setScrapingVideo(true);
-      setScrapingError(null);
     }
-  }, [autoplayEnabled, showVideoPlayer, currentVideoUrl, content, isMovie, watchProgress, episodes.length, selectedSeason, selectedEpisode]);
+  }, [autoplayEnabled, showVideoPlayer, currentVideoUrl, content, isMovie, watchProgress, episodes.length, selectedSeason, selectedEpisode, isLocal]);
 
   // Handle video data extracted from WebViewScrapper
   const handleVideoExtracted = useCallback(
@@ -383,19 +415,18 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
       console.log('Video extracted successfully:', { 
         videoUrl: data.videoUrl.substring(0, 100),
         isWebM: data.isWebM,
-        contentId: content.id,
+        contentId: content?.id,
         contentType: isMovie(content) ? 'movie' : 'tv',
         season: selectedSeason,
         episode: selectedEpisode
-      })
-      
+      });
       setCurrentVideoUrl(data.videoUrl);
       setShowVideoPlayer(true);
       setShowScrapper(false);
       setScrapingVideo(false);
 
-      // If there was a pending download, clear the flag
-      // The DownloadButton will automatically detect the new videoUrl and user can try again
+      setInitialVideoDuration(watchProgress ? (watchProgress.progress / 100) * watchProgress.duration : 0);
+
       if (pendingDownload) {
         setPendingDownload(false);
         Alert.alert(
@@ -425,7 +456,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
   useEffect(() => {
     if (
-      isMovie(content) ||
+      !validContent ||
+      isMovie(validContent) ||
       hasAppliedWatchProgressRef.current ||
       !watchProgress ||
       !watchProgress.season ||
@@ -451,7 +483,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
       try {
         if (selectedSeason !== targetSeason) {
           setSelectedSeason(targetSeason);
-          await fetchSeasonEpisodes(content.id, targetSeason, {
+          await fetchSeasonEpisodes(validContent?.id, targetSeason, {
             autoSelectEpisode: targetEpisode,
           });
         } else {
@@ -462,7 +494,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
           if (matchedEpisode) {
             setSelectedEpisode(matchedEpisode.episode_number);
           } else {
-            await fetchSeasonEpisodes(content.id, selectedSeason, {
+            await fetchSeasonEpisodes(validContent?.id, selectedSeason, {
               autoSelectEpisode: targetEpisode,
             });
           }
@@ -474,7 +506,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
     applyWatchProgressSelection();
   }, [
-    content,
+    validContent,
     episodes,
     fetchSeasonEpisodes,
     isMovie,
@@ -485,95 +517,131 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
 
   // Effect to fetch similar content and TV show details when component mounts
   useEffect(() => {
-    if (content) {
-      fetchSimilarContent(content);
+    if (validContent) {
+      fetchSimilarContent(validContent);
 
       // If it's a TV show, fetch detailed information including seasons
-      if (!isMovie(content)) {
-        fetchTVShowDetails(content.id);
+      if (!isMovie(validContent)) {
+        fetchTVShowDetails(validContent?.id);
       }
     }
-  }, [content, fetchSimilarContent, fetchTVShowDetails, isMovie]);
+  }, [validContent, fetchSimilarContent, fetchTVShowDetails, isMovie]);
 
-  const contentTitle = getContentTitle(content);
-  const contentReleaseDate = getContentReleaseDate(content);
+  const contentTitle = getContentTitle(validContent);
+  const contentReleaseDate = getContentReleaseDate(validContent);
   const releaseYear = contentReleaseDate
     ? new Date(contentReleaseDate).getFullYear()
     : 'Unknown';
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.videoSection}>
-        {showVideoPlayer && currentVideoUrl ? (
-          <MediaPlayer
-            videoUrl={currentVideoUrl}
-            title={contentTitle}
-            imageUrl={`https://image.tmdb.org/t/p/w500${
-              content.backdrop_path || content.poster_path
-            }`}
-            contentType={isMovie(content) ? 'movie' : 'tv'}
-            contentId={content.id}
-            autoplay={autoplayEnabled}
-            initialProgress={
-              watchProgress
-                ? (watchProgress.progress / 100) * watchProgress.duration
-                : 0
-            }
-            season={!isMovie(content) ? selectedSeason : undefined}
-            episode={
-              !isMovie(content) ? selectedEpisode ?? undefined : undefined
-            }
-            onEnd={handleCloseVideo}
-            onNext={
-              !isMovie(content) && selectedEpisode !== null
-                ? () => handleEpisodeChange(selectedEpisode + 1, '')
-                : undefined
-            }
-            navigation={navigation}
-            onFullscreenChange={setIsVideoFullscreen}
-          />
-        ) : (
-          <ImageBackground
-            source={{
-              uri: `https://image.tmdb.org/t/p/w500${
-                content.backdrop_path || content.poster_path
-              }`,
-            }}
-            resizeMode="cover"
-          >
-            <TouchableOpacity
-              style={[styles.playButtonContainer]}
-              onPress={() => {
-                if (!isMovie(content)) {
-                  hasAppliedWatchProgressRef.current = true;
-                  if (selectedEpisode === null && episodes.length > 0) {
-                    setSelectedEpisode(episodes[0].episode_number);
-                  }
+      {!validContent ? (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>Content not found or invalid.</Text>
+        </View>
+      ) : (
+        <View style={styles.videoSection}>
+          {isLocal ? (
+            localFileExists && currentVideoUrl ? (
+              <MediaPlayer
+                videoUrl={currentVideoUrl}
+                title={contentTitle}
+                imageUrl={`https://image.tmdb.org/t/p/w500${validContent?.backdrop_path || validContent?.poster_path}`}
+                contentType={"movie"}
+                contentId={content?.id}
+                autoplay={autoPlay ?? true}
+                initialProgress={0}
+                season={!isMovie(validContent) ? selectedSeason : undefined}
+                episode={!isMovie(validContent) ? selectedEpisode ?? undefined : undefined}
+                onEnd={handleCloseVideo}
+                onNext={
+                  !isMovie(validContent) && selectedEpisode !== null
+                    ? () => handleEpisodeChange(selectedEpisode + 1, '')
+                    : undefined
                 }
-                setShowScrapper(true);
-                setScrapingVideo(true);
-                setScrapingError(null);
-              }}
-              disabled={scrapingVideo}
-            >
-              {scrapingVideo ? (
-                <>
-                  <ActivityIndicator
-                    size="small"
-                    color={COLORS.NETFLIX_WHITE}
-                  />
-                  <Text style={styles.playButtonText}>Loading video...</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.playButtonIcon}>▶</Text>
-                  <Text style={styles.playButtonText}>Play {contentTitle}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </ImageBackground>
-        )}
-      </View>
+                navigation={navigation}
+                onFullscreenChange={setIsVideoFullscreen}
+              />
+            ) : (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.errorText}>Downloaded file not found or cannot be played.</Text>
+              </View>
+            )
+          ) : (
+            showVideoPlayer && currentVideoUrl ? (
+              <MediaPlayer
+                videoUrl={currentVideoUrl}
+                title={contentTitle}
+                imageUrl={`https://image.tmdb.org/t/p/w500${validContent?.backdrop_path || validContent?.poster_path}`}
+                contentType={isMovie(validContent) ? 'movie' : 'tv'}
+                contentId={validContent?.id}
+                autoplay={autoplayEnabled}
+                initialProgress={initialVideoDuration}
+                season={!isMovie(validContent) ? selectedSeason : undefined}
+                episode={!isMovie(validContent) ? selectedEpisode ?? undefined : undefined}
+                onEnd={handleCloseVideo}
+                onNext={
+                  !isMovie(validContent) && selectedEpisode !== null
+                    ? () => handleEpisodeChange(selectedEpisode + 1, '')
+                    : undefined
+                }
+                navigation={navigation}
+                onFullscreenChange={setIsVideoFullscreen}
+              />
+            ) : (
+              <ImageBackground
+                source={{
+                  uri: `https://image.tmdb.org/t/p/w500${validContent?.backdrop_path || validContent?.poster_path}`,
+                }}
+                resizeMode="cover"
+              >
+                {/* add back button */}
+                <TouchableOpacity
+                  onPress={() => navigation.goBack()}
+                  style={styles.backButton}
+                >
+                  <Icon name="arrow-left" size={sizes.width * 0.05} color={colors.white} />
+                </TouchableOpacity>
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.3)', 'rgba(0,0,0,1)']}
+                  style={styles.videoOverlay}
+                >
+                  <TouchableOpacity
+                    style={[styles.playButtonContainer]}
+                    onPress={() => {
+                      if (!isMovie(validContent)) {
+                        hasAppliedWatchProgressRef.current = true;
+                        if (selectedEpisode === null && episodes.length > 0) {
+                          setSelectedEpisode(episodes[0].episode_number);
+                        }
+                      }
+                      setShowScrapper(true);
+                      setScrapingVideo(true);
+                      setScrapingError(null);
+                    }}
+                    disabled={scrapingVideo}
+                  >
+                    {scrapingVideo ? (
+                      <>
+                        <ActivityIndicator
+                          size="small"
+                          color={COLORS.NETFLIX_WHITE}
+                        />
+                        <Text style={styles.playButtonText}>Loading video...</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.playButtonIcon}>▶</Text>
+                        <Text style={styles.playButtonText}>Play {contentTitle}</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </LinearGradient>
+              </ImageBackground>
+            )
+          )}
+        </View>
+      )}
       {!isVideoFullscreen && (
         <ScrollView
           style={styles.scrollView}
@@ -594,6 +662,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
             <View style={styles.titleRow}>
               <Text style={styles.title}>{contentTitle}</Text>
               <View style={styles.actionButtons}>
+                { !isLocal && (
                 <DownloadButton
                   content={content}
                   videoUrl={currentVideoUrl}
@@ -618,14 +687,14 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
                     setScrapingError(null);
                   }}
                   isPreparingVideo={scrapingVideo && pendingDownload}
-                />
+                />)}
                 <TouchableOpacity
                   style={styles.likeButton}
                   onPress={toggleLike}
                   activeOpacity={0.7}
                 >
                   <Icon
-                    name={isLiked ? 'favorite' : 'favorite-border'}
+                    name={isLiked ? 'cards-heart' : 'cards-heart-outline'}
                     size={28}
                     color={isLiked ? COLORS.NETFLIX_RED : COLORS.NETFLIX_WHITE}
                     style={[styles.likeIcon, isLiked && styles.likeIconActive]}
@@ -636,17 +705,17 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
             <View style={styles.metaInfo}>
               <Text style={styles.year}>{releaseYear}</Text>
               <Text style={styles.rating}>
-                ★ {content.vote_average.toFixed(1)}
+                ★ {content?.vote_average?.toFixed(1)}
               </Text>
               {isLiked && <Text style={styles.likedIndicator}>• Liked</Text>}
             </View>
           </View>
 
           {/* Content Overview */}
-          {content.overview ? (
+          {content?.overview ? (
             <View style={styles.overviewContainer}>
               <Text style={styles.sectionTitle}>Overview</Text>
-              <Text style={styles.overview}>{content.overview}</Text>
+              <Text style={styles.overview}>{content?.overview}</Text>
             </View>
           ) : null}
 
@@ -671,7 +740,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Popularity:</Text>
               <Text style={styles.infoValue}>
-                {content.popularity.toFixed(0)}
+                {content?.popularity?.toFixed(0)}
               </Text>
             </View>
           </View>
@@ -828,7 +897,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
       {/* WebViewScrapper for video extraction */}
       {showScrapper && (
         <WebViewScrapper
-          tmdbId={content.id}
+          tmdbId={content?.id}
           type={isMovie(content) ? 'movie' : 'tv'}
           seasonNumber={!isMovie(content) ? selectedSeason : undefined}
           episodeNumber={
@@ -854,16 +923,6 @@ const styles = StyleSheet.create({
     paddingTop: 25,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.NETFLIX_GRAY,
-  },
-  backButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  backButtonText: {
-    color: COLORS.NETFLIX_WHITE,
-    fontSize: 16,
-    fontWeight: '500',
   },
   scrollView: {
     flex: 1,
@@ -1226,6 +1285,18 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 20,
   },
+  backButton: {
+    position: 'absolute',
+    top: 40,
+    left: 20,
+    zIndex: 10,
+  },
+  videoOverlay: { 
+    width: '100%', 
+    height: VIDEO_HEIGHT, 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  }
 });
 
 export default DetailScreen;

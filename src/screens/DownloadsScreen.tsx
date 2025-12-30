@@ -89,26 +89,15 @@ const DownloadsScreen: React.FC<DownloadsScreenProps> = ({ navigation }) => {
   // Handle download item press (play downloaded content)
   const handleDownloadPress = useCallback((download: DownloadItem) => {
     if (download.status === DownloadStatus.COMPLETED && download.filePath) {
-      // Navigate to player with local file
-      Alert.alert(
-        'Play Downloaded Content',
-        `Play ${download.title} from downloads?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Play',
-            onPress: () => {
-              // Here you would navigate to your media player with the local file path
-              console.log('Playing local file:', download.filePath);
-              // navigation.navigate('Player', { 
-              //   videoUrl: `file://${download.filePath}`,
-              //   title: download.title,
-              //   isLocal: true 
-              // });
-            },
-          },
-        ]
-      );
+      navigation.navigate('Detail', {
+        content: {
+          id: download.contentId,
+          title: download.title,
+        },
+        video: download.filePath,
+        isLocal: true,
+        autoPlay: true,
+      });
     } else if (download.status === DownloadStatus.DOWNLOADING) {
       Alert.alert(
         'Download in Progress',

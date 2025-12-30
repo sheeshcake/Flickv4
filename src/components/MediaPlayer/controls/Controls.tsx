@@ -135,7 +135,7 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   // Memoize container dimensions
   const containerDimensions = useMemo(() => ({
     width: fullscreen ? sizes.height : sizes.width,
-    height: fullscreen ? sizes.width : sizes.height * 0.3,
+    height: fullscreen ? sizes.width : sizes.height * 0.35,
   }), [fullscreen]);
 
   // Memoize controls visibility

@@ -165,7 +165,7 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
 
   const contentType = 'title' in content ? 'movie' : 'tv';
   const isDownloaded = downloadService.isContentDownloaded(
-    content.id,
+    content?.id,
     contentType,
     season,
     episode
@@ -691,7 +691,6 @@ export const DownloadsList: React.FC<DownloadsListProps> = ({
                 Season {download.season}, Episode {download.episode}
               </Text>
             )}
-
             <View style={styles.downloadMeta}>
               <View style={[styles.statusBadge, { backgroundColor: getStatusColor(download.status) }]}>
                 <Text style={styles.statusText}>{getStatusText(download.status)}</Text>
@@ -699,11 +698,11 @@ export const DownloadsList: React.FC<DownloadsListProps> = ({
               
               <Text style={styles.quality}>{download.quality}</Text>
               
-              {download.totalSize && (
+              {/* {download.totalSize && (
                 <Text style={styles.fileSize}>
                   {formatFileSize(download.totalSize)}
                 </Text>
-              )}
+              )} */}
             </View>
 
             {download.status === DownloadStatus.DOWNLOADING && (
