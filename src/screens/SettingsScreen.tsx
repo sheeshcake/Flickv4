@@ -39,7 +39,7 @@ export const SettingsScreen: React.FC<Props> = () => {
   const [showSubtitleSettings, setShowSubtitleSettings] = useState(false);
 
   const isDarkTheme = state.ui.theme === 'dark';
-  const appVersion = '1.0.1'; // From package.json
+  const appVersion = '1.0.2'; // From package.json
 
   // Load storage info on component mount
   useEffect(() => {
