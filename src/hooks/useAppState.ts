@@ -6,6 +6,7 @@ import {
   TVShow,
   WatchProgress,
   UserPreferences,
+  SubtitleStyle,
 } from '../types';
 import {StorageService} from '../services/StorageService';
 
@@ -216,6 +217,22 @@ export const useAppState = () => {
     [dispatch],
   );
 
+  const setSubtitleStyle = useCallback(
+    async (style: SubtitleStyle) => {
+      try {
+        // Update state
+        dispatch({
+          type: AppActionType.SET_SUBTITLE_STYLE,
+          payload: style,
+        });
+      } catch (error) {
+        console.error('Failed to set subtitle style:', error);
+        throw error;
+      }
+    },
+    [dispatch],
+  );
+
   // Utility functions
   const isContentLiked = useCallback(
     (id: number, contentType: 'movie' | 'tv'): boolean => {
@@ -271,6 +288,7 @@ export const useAppState = () => {
     // Subtitle preference actions
     setDefaultSubtitleLanguage,
     setAutoSelectSubtitles,
+    setSubtitleStyle,
 
     // Utility functions
     isContentLiked,

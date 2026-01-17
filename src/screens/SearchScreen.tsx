@@ -33,7 +33,7 @@ import {commonStyles} from '../utils/theme';
 type Props = MainTabScreenProps<'Search'>;
 
 const CARD_WIDTH = getGridItemWidth(3, spacing.md * 1.2);
-const DEBOUNCE_DELAY = 1000; // 500ms debounce
+const DEBOUNCE_DELAY = 500; // 500ms debounce
 const safeArea = getSafeAreaPadding();
 
 export const SearchScreen: React.FC<Props> = ({navigation}) => {

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, ViewStyle, TextStyle } from 'react-native';
+import { SubtitleStyle, DEFAULT_SUBTITLE_STYLE } from '../../types';
 
 interface SubtitleCue {
   start: number;
@@ -11,6 +12,8 @@ interface SubtitleOverlayProps {
   subtitleContent: string | null;
   currentTime: number;
   isVideoFullscreen: boolean;
+  delay?: number; // Delay in seconds (positive = subtitles later, negative = subtitles earlier)
+  style?: SubtitleStyle; // Custom subtitle style from settings
 }
 
 const parseSRT = (srtContent: string): SubtitleCue[] => {
@@ -62,9 +65,62 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   subtitleContent,
   currentTime,
   isVideoFullscreen,
+  delay = 0,
+  style = DEFAULT_SUBTITLE_STYLE,
 }) => {
   const [cues, setCues] = useState<SubtitleCue[]>([]);
   const [currentCue, setCurrentCue] = useState<string | null>(null);
+
+  // Compute font size based on style setting and fullscreen mode
+  const computedFontSize = useMemo(() => {
+    const baseSizes = {
+      small: isVideoFullscreen ? 14 : 10,
+      medium: isVideoFullscreen ? 18 : 14,
+      large: isVideoFullscreen ? 22 : 18,
+      xlarge: isVideoFullscreen ? 26 : 22,
+    };
+    return baseSizes[style.fontSize] || baseSizes.medium;
+  }, [style.fontSize, isVideoFullscreen]);
+
+  // Compute background color with opacity
+  const computedBackgroundColor = useMemo(() => {
+    if (style.backgroundOpacity === 0) return 'transparent';
+    const hex = style.backgroundColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${style.backgroundOpacity})`;
+  }, [style.backgroundColor, style.backgroundOpacity]);
+
+  // Dynamic container style based on position
+  const containerStyle: ViewStyle = useMemo(() => ({
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    ...(style.position === 'top' ? { top: 50 } : { bottom: 20 }),
+  }), [style.position]);
+
+  // Dynamic text style
+  const textStyle: TextStyle = useMemo(() => ({
+    color: style.fontColor,
+    textAlign: 'center',
+    fontSize: computedFontSize,
+    fontWeight: style.fontWeight === 'bold' ? '700' : '400',
+    textShadowColor: style.textShadow ? 'rgba(0, 0, 0, 1)' : 'transparent',
+    textShadowOffset: style.textShadow ? { width: 1, height: 1 } : { width: 0, height: 0 },
+    textShadowRadius: style.textShadow ? 2 : 0,
+  }), [style.fontColor, style.fontWeight, style.textShadow, computedFontSize]);
+
+  // Dynamic text container style
+  const textContainerStyle: ViewStyle = useMemo(() => ({
+    backgroundColor: computedBackgroundColor,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+    maxWidth: '100%',
+  }), [computedBackgroundColor]);
 
   useEffect(() => {
     if (subtitleContent) {
@@ -87,50 +143,27 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       return;
     }
 
-    const adjustedTime = currentTime + 0.5;
+    // Apply delay: positive delay means subtitles appear later (subtract from currentTime)
+    // negative delay means subtitles appear earlier (add to currentTime)
+    const adjustedTime = currentTime - delay + 0.5;
     const activeCue = cues.find(
       cue => adjustedTime >= cue.start && adjustedTime <= cue.end
     );
 
     setCurrentCue(activeCue ? activeCue.text : null);
-  }, [currentTime, cues]);
+  }, [currentTime, cues, delay]);
 
   if (!currentCue) {
     return null;
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.textContainer}>
-        <Text style={[styles.text, isVideoFullscreen && { fontSize: 18 }]}>{currentCue}</Text>
+    <View style={containerStyle}>
+      <View style={textContainerStyle}>
+        <Text style={textStyle}>{currentCue}</Text>
       </View>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    position: 'absolute',
-    bottom: 20,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  textContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 4,
-    maxWidth: '100%',
-  },
-  text: {
-    color: '#FFFFFF',
-    textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '600',
-    textShadowColor: 'rgba(0, 0, 0, 1)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
-  },
-});
+export default SubtitleOverlay;

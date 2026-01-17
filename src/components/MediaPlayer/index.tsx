@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { View, BackHandler, Dimensions, StyleSheet, Text } from 'react-native';
-import Video, { BufferingStrategyType } from 'react-native-video';
+import Video, { BufferingStrategyType, TextTrackType, SelectedTrackType } from 'react-native-video';
 import { CastButton } from 'react-native-google-cast';
 import RNFS from 'react-native-fs';
 import { COLORS } from '../../utils/constants';
 import { useAppState } from '../../hooks/useAppState';
-import { SubtitleTrack } from '../../types';
+import { SubtitleTrack, DEFAULT_SUBTITLE_STYLE } from '../../types';
 import { SubtitleSelector } from '../';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import Controls from './controls';
@@ -21,6 +21,34 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 // Constants
 const RESIZE_MODES = ['contain', 'cover', 'stretch', 'none'] as const;
 const NEXT_EPISODE_THRESHOLD = 150; // seconds (2.5 minutes)
+
+// Convert SRT to VTT format for better native player compatibility
+const convertSrtToVtt = (srtContent: string): string => {
+  // Add VTT header
+  let vttContent = 'WEBVTT\n\n';
+  
+  // Split by double newline to get subtitle blocks
+  const blocks = srtContent.trim().split(/\r?\n\r?\n/);
+  
+  for (const block of blocks) {
+    const lines = block.trim().split(/\r?\n/);
+    if (lines.length < 2) continue;
+    
+    // Find the timestamp line (contains -->)
+    const timestampIndex = lines.findIndex(line => line.includes('-->'));
+    if (timestampIndex === -1) continue;
+    
+    // Convert SRT timestamps (00:00:01,000) to VTT format (00:00:01.000)
+    const timestampLine = lines[timestampIndex].replace(/,/g, '.');
+    const textLines = lines.slice(timestampIndex + 1);
+    
+    if (textLines.length > 0) {
+      vttContent += `${timestampLine}\n${textLines.join('\n')}\n\n`;
+    }
+  }
+  
+  return vttContent;
+};
 
 interface MediaPlayerProps {
   videoUrl: string;
@@ -77,8 +105,14 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const [showSubtitleSelector, setShowSubtitleSelector] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
 
-  // State for subtitle content
+  // State for subtitle content (used by SubtitleOverlay)
   const [subtitleContent, setSubtitleContent] = useState<string | null>(null);
+  // State for native VTT subtitle path (used for PiP mode)
+  const [subtitleVttPath, setSubtitleVttPath] = useState<string | null>(null);
+  // Track if PiP is active (subtitles overlay won't show in PiP)
+  const [isPipActive, setIsPipActive] = useState(false);
+  // Subtitle delay in seconds (positive = later, negative = earlier)
+  const [subtitleDelay, setSubtitleDelay] = useState(0);
 
   const videoRef = useRef<any>(null);
   const { state, updateWatchProgress } = useAppState();
@@ -238,6 +272,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   useEffect(() => {
     if (!selectedSubtitle) {
       setSubtitleContent(null);
+      setSubtitleVttPath(null);
       return;
     }
 
@@ -251,31 +286,48 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         }
 
         const sanitizedTitle = selectedSubtitle.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() + `_${contentId}` + (season && episode ? `_s${season}e${episode}` : '');
-        const filename = `${sanitizedTitle}_${selectedSubtitle.language}.srt`;
-        const localPath = `${subtitlesDir}/${filename}`;
+        const srtFilename = `${sanitizedTitle}_${selectedSubtitle.language}.srt`;
+        const vttFilename = `${sanitizedTitle}_${selectedSubtitle.language}.vtt`;
+        const srtPath = `${subtitlesDir}/${srtFilename}`;
+        const vttPath = `${subtitlesDir}/${vttFilename}`;
 
-        const fileExists = await RNFS.exists(localPath);
+        let srtContent: string;
+        const srtExists = await RNFS.exists(srtPath);
         
-        if (fileExists) {
-          const cachedContent = await RNFS.readFile(localPath, 'utf8');
-          setSubtitleContent(cachedContent);
-          return;
+        if (srtExists) {
+          // File already exists, read content from cache
+          srtContent = await RNFS.readFile(srtPath, 'utf8');
+          console.log('[MediaPlayer] Using cached subtitle:', srtPath);
+        } else {
+          // Download subtitle
+          const response = await fetch(selectedSubtitle.url);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          
+          srtContent = await response.text();
+          await RNFS.writeFile(srtPath, srtContent, 'utf8');
+          console.log('[MediaPlayer] Downloaded and cached subtitle:', srtPath);
         }
-
-        const response = await fetch(selectedSubtitle.url);
         
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // Set SRT content for overlay
+        setSubtitleContent(srtContent);
+        
+        // Convert to VTT and save for native player (PiP support)
+        const vttExists = await RNFS.exists(vttPath);
+        if (!vttExists) {
+          const vttContent = convertSrtToVtt(srtContent);
+          await RNFS.writeFile(vttPath, vttContent, 'utf8');
+          console.log('[MediaPlayer] Created VTT subtitle:', vttPath);
         }
         
-        const downloadedContent = await response.text();
-        
-        await RNFS.writeFile(localPath, downloadedContent, 'utf8');
-        
-        setSubtitleContent(downloadedContent);
+        setSubtitleVttPath(`file://${vttPath}`);
         
       } catch (error) {
         console.error('[MediaPlayer] Failed to process subtitle:', error);
+        setSubtitleContent(null);
+        setSubtitleVttPath(null);
       }
     };
 
@@ -292,13 +344,56 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
   const videoStyle = useMemo(() => ({
     position: 'absolute' as const,
-    top: 0,
+    top: isFullscreen ? 0 : 15,
     left: 0,
     bottom: 0,
     right: 0,
-    height: isFullscreen ? screenWidth : screenHeight * 0.35,
+    height: isFullscreen ? screenWidth : screenHeight * 0.3,
     width: isFullscreen ? screenHeight : screenWidth,
   }), [isFullscreen]);
+
+  // Native text tracks for PiP mode (VTT format for better compatibility)
+  const textTracks = useMemo(() => {
+    if (!subtitleVttPath || !selectedSubtitle) return undefined;
+    
+    return [{
+      title: selectedSubtitle.title || 'Subtitles',
+      language: (selectedSubtitle.language || 'en') as any,
+      type: TextTrackType.VTT,
+      uri: subtitleVttPath,
+    }];
+  }, [subtitleVttPath, selectedSubtitle]);
+
+  // Selected text track - enable when we have subtitles
+  const selectedTextTrack = useMemo(() => {
+    if (!subtitleVttPath || !selectedSubtitle) {
+      return { type: SelectedTrackType.DISABLED };
+    }
+    return {
+      type: SelectedTrackType.LANGUAGE,
+      value: selectedSubtitle.language || 'en',
+    };
+  }, [subtitleVttPath, selectedSubtitle]);
+
+  // Handle PiP status changes
+  const handlePictureInPictureStatusChanged = useCallback((data: { isActive: boolean }) => {
+    setIsPipActive(data.isActive);
+    console.log('[MediaPlayer] PiP status changed:', data.isActive);
+  }, []);
+
+  // Subtitle delay handlers
+  const handleSubtitleDelayChange = useCallback((delta: number) => {
+    setSubtitleDelay(prev => {
+      const newDelay = Math.round((prev + delta) * 10) / 10; // Round to 1 decimal
+      console.log('[MediaPlayer] Subtitle delay changed:', newDelay, 'seconds');
+      return newDelay;
+    });
+  }, []);
+
+  const handleResetSubtitleDelay = useCallback(() => {
+    setSubtitleDelay(0);
+    console.log('[MediaPlayer] Subtitle delay reset to 0');
+  }, []);
 
   if (!videoUrl) {
     return (
@@ -317,12 +412,14 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
           ref={videoRef}
           source={{ 
             uri: videoUrl,
+            textTracks: textTracks, // Include in source for Android
           }}
           style={videoStyle}
           onLoad={handleLoad}
           onProgress={handleProgress}
           onBuffer={handleBuffer}
           onError={handleError}
+          onPictureInPictureStatusChanged={handlePictureInPictureStatusChanged}
           resizeMode={RESIZE_MODES[resizeMode]}
           poster={imageUrl}
           controls={false}
@@ -334,6 +431,14 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
           enterPictureInPictureOnLeave={state.user.preferences.pictureInPicture}
           progressUpdateInterval={250}
           allowsExternalPlayback={false}
+          // Native subtitle support for PiP mode
+          textTracks={textTracks}
+          selectedTextTrack={selectedTextTrack}
+          subtitleStyle={{
+            fontSize: 16,
+            paddingBottom: 20,
+            opacity: 1,
+          }}
         />
       ) : (
         <View style={styles.errorContainer}>
@@ -365,6 +470,9 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         onSubtitlePress={handleSubtitlePress}
         hasSubtitles={!!selectedSubtitle}
         onSeekingStateChange={handleSeekingStateChange}
+        subtitleDelay={subtitleDelay}
+        onSubtitleDelayChange={handleSubtitleDelayChange}
+        onResetSubtitleDelay={handleResetSubtitleDelay}
         upperRightComponent={
           <View style={styles.castButtonContainer}>
             <CastButton style={styles.castButton} />
@@ -372,12 +480,16 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         }
       />
 
-      {/* Custom subtitle overlay for Android compatibility */}
-      <SubtitleOverlay
-        subtitleContent={subtitleContent}
-        currentTime={currentTime}
-        isVideoFullscreen={isFullscreen}
-      />
+      {/* Custom subtitle overlay - hidden during PiP (native subtitles used instead) */}
+      {!isPipActive && (
+        <SubtitleOverlay
+          subtitleContent={subtitleContent}
+          currentTime={currentTime}
+          isVideoFullscreen={isFullscreen}
+          delay={subtitleDelay}
+          style={state.user.preferences.subtitleStyle || DEFAULT_SUBTITLE_STYLE}
+        />
+      )}
 
       <SubtitleSelector
         visible={showSubtitleSelector}

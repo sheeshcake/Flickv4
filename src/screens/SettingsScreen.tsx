@@ -10,22 +10,21 @@ import {
   Alert,
   Modal,
 } from 'react-native';
-import type {MainTabScreenProps} from '../types/navigation';
+import type {MainTabScreenProps, MainTabParamList} from '../types/navigation';
 import {useAppContext} from '../context/AppContext';
 import {AppActionType} from '../types';
 import {StorageService} from '../services/StorageService';
 import {TMDBService} from '../services/TMDBService';
 import {downloadService} from '../services/DownloadService';
-import {SubtitleSettings} from '../components';
+import {SubtitleSettings, SubtitleStyleSettings} from '../components';
 import {useNavigation} from '@react-navigation/native';
-import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import type {RootStackParamList} from '../types/navigation';
+import type {BottomTabNavigationProp} from '@react-navigation/bottom-tabs';
 
 type Props = MainTabScreenProps<'Settings'>;
 
 export const SettingsScreen: React.FC<Props> = () => {
   const {state, dispatch} = useAppContext();
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [storageInfo, setStorageInfo] = useState<{
     keys: string[];
     totalSize: number;
@@ -37,6 +36,7 @@ export const SettingsScreen: React.FC<Props> = () => {
   });
   const [showLikedContent, setShowLikedContent] = useState(false);
   const [showSubtitleSettings, setShowSubtitleSettings] = useState(false);
+  const [showSubtitleStyleSettings, setShowSubtitleStyleSettings] = useState(false);
 
   const isDarkTheme = state.ui.theme === 'dark';
   const appVersion = '1.0.2'; // From package.json
@@ -323,6 +323,19 @@ export const SettingsScreen: React.FC<Props> = () => {
                 </Text>
               </View>
             </View>
+
+            <TouchableOpacity 
+              style={styles.settingItem}
+              onPress={() => setShowSubtitleStyleSettings(true)}
+            >
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Subtitle Appearance</Text>
+                <Text style={styles.settingDescription}>
+                  Customize font size, color, background, and position
+                </Text>
+              </View>
+              <Text style={styles.chevron}>›</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Storage Section */}
@@ -486,6 +499,16 @@ export const SettingsScreen: React.FC<Props> = () => {
         onRequestClose={() => setShowSubtitleSettings(false)}
       >
         <SubtitleSettings onClose={() => setShowSubtitleSettings(false)} />
+      </Modal>
+
+      {/* Subtitle Style Settings Modal */}
+      <Modal
+        visible={showSubtitleStyleSettings}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowSubtitleStyleSettings(false)}
+      >
+        <SubtitleStyleSettings onClose={() => setShowSubtitleStyleSettings(false)} />
       </Modal>
     </View>
   );

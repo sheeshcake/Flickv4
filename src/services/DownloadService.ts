@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { TMDBService } from './TMDBService';
 import { StorageService } from './StorageService';
+import { notificationService } from './NotificationService';
 
 export interface DownloadOptions {
   quality: DownloadQuality;
@@ -52,9 +53,11 @@ export class DownloadService {
   private downloadListeners: Map<string, (progress: DownloadProgress) => void> = new Map();
   private notificationListeners: Set<(notification: DownloadNotification) => void> = new Set();
   private tmdbService: TMDBService;
+  private lastProgressNotification: Map<string, number> = new Map(); // Track last notification time per download
+  private static readonly PROGRESS_NOTIFICATION_INTERVAL = 2000; // Update system notification every 2 seconds
 
-  // Storage paths
-  private static readonly DOWNLOADS_DIR = `${RNFS.ExternalStorageDirectoryPath}/Download/FlickDownloads`;
+  // Storage paths - Use DocumentDirectoryPath for app-private storage (works without extra permissions on Android 10+)
+  private static readonly DOWNLOADS_DIR = `${RNFS.DocumentDirectoryPath}/FlickDownloads`;
   private static readonly VIDEOS_DIR = `${DownloadService.DOWNLOADS_DIR}/videos`;
   private static readonly THUMBNAILS_DIR = `${DownloadService.DOWNLOADS_DIR}/thumbnails`;
   private static readonly SUBTITLES_DIR = `${DownloadService.DOWNLOADS_DIR}/subtitles`;
@@ -62,64 +65,38 @@ export class DownloadService {
 
   private constructor() {
     this.tmdbService = new TMDBService();
-    this.requestStoragePermission()
-      .then(() => this.initializeDownloadsDirectory())
-      .catch((err) => console.warn('Storage permission not granted:', err))
+    // DocumentDirectoryPath doesn't require storage permissions on Android 10+
+    // Just initialize the directory structure directly
+    this.initializeDownloadsDirectory()
+      .catch((err) => console.warn('Failed to initialize downloads directory:', err))
       .finally(() => this.loadDownloadsFromStorage());
   }
 
   /**
    * Request storage access permission (Android only)
+   * Note: With DocumentDirectoryPath, this is no longer strictly required,
+   * but we keep it for potential future use or for reading media metadata
    */
   private async requestStoragePermission(): Promise<void> {
     if (Platform.OS !== 'android') return;
     try {
-      let granted: string = PermissionsAndroid.RESULTS.GRANTED;
-      // Android 13+ uses new permissions
+      // Android 13+ uses new permissions for media access
+      // These are only needed if we want to access shared media, not for app-private storage
       if (Platform.Version >= 33) {
-        granted = await PermissionsAndroid.request(
+        await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
           {
-            title: 'Storage Permission Required',
-            message: 'Flick needs access to your media to download and save videos.',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          },
-        );
-      } else {
-        granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-          {
-            title: 'Storage Permission Required',
-            message: 'Flick needs access to your storage to download and save videos.',
+            title: 'Media Permission',
+            message: 'Flick needs access to your media library to read video metadata.',
             buttonNeutral: 'Ask Me Later',
             buttonNegative: 'Cancel',
             buttonPositive: 'OK',
           },
         );
       }
-      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-        // Always provide a non-null error code for Promise.reject
-        const error: AppError = {
-          type: ErrorType.STORAGE_ERROR,
-          message: 'Storage permission denied',
-          code: 'PERMISSION_DENIED',
-        };
-        throw error;
-      }
+      // For app-private storage (DocumentDirectoryPath), no permission is needed
     } catch (err) {
-      // Always provide a non-null error code for Promise.reject
-      if (err && typeof err === 'object' && 'code' in err) {
-        throw err;
-      } else {
-        const error: AppError = {
-          type: ErrorType.STORAGE_ERROR,
-          message: (err as any)?.message || 'Unknown storage permission error',
-          code: 'PERMISSION_ERROR',
-        };
-        throw error;
-      }
+      console.warn('Permission request failed:', err);
     }
   }
 
@@ -284,6 +261,10 @@ export class DownloadService {
         type: 'info',
         timestamp: new Date(),
       });
+
+      // Start foreground service to maintain download speed in background
+      // This also shows the download progress notification
+      await notificationService.startForegroundService(downloadId, downloadItem.title);
 
       // Start the actual download
       await this.performDownload(downloadItem, options);
@@ -729,6 +710,15 @@ export class DownloadService {
                     console.error('Error calling M3U8 progress listener:', error);
                   }
                 }
+
+                // Update foreground service notification (throttled)
+                const now = Date.now();
+                const lastNotification = this.lastProgressNotification.get(downloadItem.id) || 0;
+                if (now - lastNotification >= DownloadService.PROGRESS_NOTIFICATION_INTERVAL) {
+                  this.lastProgressNotification.set(downloadItem.id, now);
+                  notificationService.updateForegroundService(downloadItem.id, downloadItem.title, overallProgress)
+                    .catch(err => console.warn('Failed to update M3U8 foreground service:', err));
+                }
               })
               .done(({ bytesDownloaded }) => {
                 totalDownloadedBytes += bytesDownloaded;
@@ -898,6 +888,19 @@ export class DownloadService {
           timestamp: new Date(),
         });
 
+        // Show system notification for completion
+        await notificationService.showDownloadCompleted({
+          downloadId: downloadItem.id,
+          title: downloadItem.title,
+          status: 'completed',
+        });
+
+        // Stop foreground service (will only stop if no more active downloads)
+        await notificationService.stopForegroundService(downloadItem.id);
+
+        // Clean up progress notification tracking
+        this.lastProgressNotification.delete(downloadItem.id);
+
         return;
       }
 
@@ -972,6 +975,15 @@ export class DownloadService {
         } else {
           console.warn('No progress listener found for download:', downloadItem.id);
         }
+
+        // Update foreground service notification (throttled to avoid too many updates)
+        const now = Date.now();
+        const lastNotification = this.lastProgressNotification.get(downloadItem.id) || 0;
+        if (now - lastNotification >= DownloadService.PROGRESS_NOTIFICATION_INTERVAL) {
+          this.lastProgressNotification.set(downloadItem.id, now);
+          notificationService.updateForegroundService(downloadItem.id, downloadItem.title, progress)
+            .catch(err => console.warn('Failed to update foreground service:', err));
+        }
       }).done(({ bytesDownloaded: _bytesDownloaded, bytesTotal: _bytesTotal }) => {
         console.log('Download completed callback triggered:', {
           downloadId: downloadItem.id,
@@ -1005,6 +1017,20 @@ export class DownloadService {
           timestamp: new Date(),
         });
 
+        // Show system notification for completion
+        notificationService.showDownloadCompleted({
+          downloadId: downloadItem.id,
+          title: downloadItem.title,
+          status: 'completed',
+        }).catch(err => console.warn('Failed to show completion notification:', err));
+
+        // Stop foreground service (will only stop if no more active downloads)
+        notificationService.stopForegroundService(downloadItem.id)
+          .catch(err => console.warn('Failed to stop foreground service:', err));
+
+        // Clean up progress notification tracking
+        this.lastProgressNotification.delete(downloadItem.id);
+
         this.activeDownloads.delete(downloadItem.id);
       }).error(({ error, errorCode: _errorCode }) => {
         console.log('Download error callback triggered:', {
@@ -1029,6 +1055,21 @@ export class DownloadService {
           type: 'error',
           timestamp: new Date(),
         });
+
+        // Show system notification for failure
+        notificationService.showDownloadFailed({
+          downloadId: downloadItem.id,
+          title: downloadItem.title,
+          status: 'failed',
+          error: error,
+        }).catch(err => console.warn('Failed to show failure notification:', err));
+
+        // Stop foreground service (will only stop if no more active downloads)
+        notificationService.stopForegroundService(downloadItem.id)
+          .catch(err => console.warn('Failed to stop foreground service:', err));
+
+        // Clean up progress notification tracking
+        this.lastProgressNotification.delete(downloadItem.id);
 
         throw new Error(`Download failed: ${error}`);
       });
@@ -1057,6 +1098,21 @@ export class DownloadService {
         type: 'error',
         timestamp: new Date(),
       });
+
+      // Show system notification for failure
+      notificationService.showDownloadFailed({
+        downloadId: downloadItem.id,
+        title: downloadItem.title,
+        status: 'failed',
+        error: downloadItem.error,
+      }).catch(err => console.warn('Failed to show failure notification:', err));
+
+      // Stop foreground service (will only stop if no more active downloads)
+      notificationService.stopForegroundService(downloadItem.id)
+        .catch(err => console.warn('Failed to stop foreground service:', err));
+
+      // Clean up progress notification tracking
+      this.lastProgressNotification.delete(downloadItem.id);
 
       throw error;
     }
@@ -1122,6 +1178,17 @@ export class DownloadService {
         type: 'info',
         timestamp: new Date(),
       });
+
+      // Show system notification for paused state
+      await notificationService.showDownloadPaused({
+        downloadId: downloadId,
+        title: downloadItem.title,
+        progress: downloadItem.progress,
+        status: 'paused',
+      });
+
+      // Stop foreground service when paused (will only stop if no more active downloads)
+      await notificationService.stopForegroundService(downloadId);
     } catch (error) {
       console.error('Failed to pause download:', error);
       throw error;
@@ -1151,6 +1218,10 @@ export class DownloadService {
         downloadItem.updatedAt = new Date();
         this.downloads.set(downloadId, downloadItem);
         await this.saveDownloadsToStorage();
+
+        // Start foreground service to maintain download speed
+        // This also shows the download notification
+        await notificationService.startForegroundService(downloadId, downloadItem.title);
       } else {
         // Restart download if no active task exists
         downloadItem.status = DownloadStatus.PENDING;
@@ -1202,6 +1273,19 @@ export class DownloadService {
         type: 'info',
         timestamp: new Date(),
       });
+
+      // Cancel system notification
+      await notificationService.showDownloadCancelled({
+        downloadId: downloadId,
+        title: downloadItem.title,
+        status: 'cancelled',
+      });
+
+      // Stop foreground service (will only stop if no more active downloads)
+      await notificationService.stopForegroundService(downloadId);
+
+      // Clean up progress notification tracking
+      this.lastProgressNotification.delete(downloadId);
     } catch (error) {
       console.error('Failed to cancel download:', error);
       throw error;

@@ -2,7 +2,7 @@ import React from 'react';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {Text, StyleSheet} from 'react-native';
 import type {MainTabParamList} from '../types/navigation';
-import {HomeScreen, SearchScreen, SettingsScreen} from '../screens';
+import {HomeScreen, SearchScreen, DownloadsScreen, SettingsScreen} from '../screens';
 import {spacing, typography, getSafeAreaPadding} from '../utils/responsive';
 import {
   accessibilityLabels,
@@ -24,6 +24,10 @@ const HomeTabIcon: React.FC<{focused: boolean}> = ({focused}) => (
 
 const SearchTabIcon: React.FC<{focused: boolean}> = ({focused}) => (
   <Icon name="magnify" size={24} color={focused ? '#FFFFFF' : '#666666'} />
+);
+
+const DownloadsTabIcon: React.FC<{focused: boolean}> = ({focused}) => (
+  <Icon name="download" size={24} color={focused ? '#FFFFFF' : '#666666'} />
 );
 
 const SettingsTabIcon: React.FC<{focused: boolean}> = ({focused}) => (
@@ -50,6 +54,17 @@ const SearchTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
     accessibilityLabel={accessibilityLabels.searchTab}
     accessibilityHint={accessibilityHints.searchTab}>
     Search
+  </Text>
+);
+
+const DownloadsTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
+  <Text
+    style={[styles.tabBarLabel, focused && styles.activeLabel]}
+    accessible={true}
+    accessibilityRole={accessibilityRoles.tab}
+    accessibilityLabel="Downloads tab"
+    accessibilityHint="View your downloaded content">
+    Downloads
   </Text>
 );
 
@@ -93,6 +108,14 @@ export const TabNavigator: React.FC<TabNavigatorProps> = ({
         options={{
           tabBarLabel: ({focused}) => <SearchTabLabel focused={focused} />,
           tabBarIcon: ({focused}) => <SearchTabIcon focused={focused} />,
+        }}
+      />
+      <Tab.Screen
+        name="Downloads"
+        component={DownloadsScreen}
+        options={{
+          tabBarLabel: ({focused}) => <DownloadsTabLabel focused={focused} />,
+          tabBarIcon: ({focused}) => <DownloadsTabIcon focused={focused} />,
         }}
       />
       <Tab.Screen
