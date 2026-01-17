@@ -3,9 +3,16 @@ import { colors, sizes } from '../../../constants/theme';
 
 export const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    alignItems: 'center',
+    paddingVertical: 10,
     justifyContent: 'space-between',
     overflow: 'hidden',
     width: '100%',
+    height: '100%',
   },
   containerFullscreen: {
     position: 'absolute',
@@ -23,11 +30,10 @@ export const styles = StyleSheet.create({
     width: '100%',
   },
   topBarFullscreen: {
-    paddingHorizontal: 20,
     alignItems: 'center',
   },
   topBarRegular: {
-    paddingTop: 50,
+    paddingTop: 15,
   },
   topBarHidden: {
     opacity: 0,
@@ -244,5 +250,31 @@ export const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  // Subtitle delay controls
+  delayControlsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    marginRight: 4,
+  },
+  delayButton: {
+    padding: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  delayValueButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 50,
+  },
+  delayText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

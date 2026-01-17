@@ -52,6 +52,9 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   onSubtitlePress,
   hasSubtitles,
   onSeekingStateChange,
+  subtitleDelay = 0,
+  onSubtitleDelayChange,
+  onResetSubtitleDelay,
 }) => {
   const navigation = useNavigation();
   const [timeLabel, setTimeLabel] = useState<string>(formatTime(0));
@@ -135,7 +138,7 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   // Memoize container dimensions
   const containerDimensions = useMemo(() => ({
     width: fullscreen ? sizes.height : sizes.width,
-    height: fullscreen ? sizes.width : sizes.height * 0.35,
+    height: fullscreen ? sizes.width : sizes.height * 0.3,
   }), [fullscreen]);
 
   // Memoize controls visibility
@@ -185,6 +188,9 @@ const ControlsComponent: React.FC<ControlsProps> = ({
         onSubtitlePress={onSubtitlePress}
         onResize={onResize}
         onFullscreen={onFullscreen}
+        subtitleDelay={subtitleDelay}
+        onSubtitleDelayChange={onSubtitleDelayChange}
+        onResetSubtitleDelay={onResetSubtitleDelay}
       />
 
       {readyNext && fullscreen && onNext && (

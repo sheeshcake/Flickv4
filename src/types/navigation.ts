@@ -14,12 +14,12 @@ export type RootStackParamList = {
     isLocal?: boolean;
     autoPlay?: boolean;
   };
-  Downloads: undefined;
 };
 
 export type MainTabParamList = {
   Home: undefined;
   Search: undefined;
+  Downloads: undefined;
   Settings: undefined;
 };
 

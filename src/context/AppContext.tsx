@@ -12,6 +12,7 @@ import {
   AppContextType,
   WatchProgress,
   NetworkState,
+  DEFAULT_SUBTITLE_STYLE,
 } from '../types';
 import {StorageService} from '../services/StorageService';
 import {NetworkUtils} from '../utils/networkUtils';
@@ -28,6 +29,7 @@ const initialState: AppState = {
       pictureInPicture: true,
       defaultSubtitleLanguage: undefined,
       autoSelectSubtitles: false,
+      subtitleStyle: DEFAULT_SUBTITLE_STYLE,
     },
     likedContent: {
       movies: [],
@@ -196,6 +198,18 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
           preferences: {
             ...state.user.preferences,
             autoSelectSubtitles: action.payload,
+          },
+        },
+      };
+
+    case AppActionType.SET_SUBTITLE_STYLE:
+      return {
+        ...state,
+        user: {
+          ...state.user,
+          preferences: {
+            ...state.user.preferences,
+            subtitleStyle: action.payload,
           },
         },
       };

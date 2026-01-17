@@ -32,7 +32,7 @@ type DetailScreenProps = RootStackScreenProps<'Detail'>;
 const tmdbService = new TMDBService();
 
 const { height: screenHeight } = Dimensions.get('window');
-const VIDEO_HEIGHT = screenHeight * 0.33; // 16:9 aspect ratio
+const VIDEO_HEIGHT = screenHeight * 0.33; // 30% height when not fullscreen
 
 const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   const { content, video: localVideoPath, isLocal, autoPlay } = route.params || {};
@@ -358,16 +358,16 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   // Handle episode selection
   const handleEpisodeChange = useCallback(
     (episodeNumber: number, _episodeName: string) => {
-      hasAppliedWatchProgressRef.current = false;
+      hasAppliedWatchProgressRef.current = true; // Mark as applied to prevent watchProgress from overriding
       setSelectedEpisode(episodeNumber);
-      setInitialVideoDuration(0);
-      // reset watch progress for new episode
+      setInitialVideoDuration(0); // Reset seek time to 0 for new episode
+      setCurrentVideoUrl(''); // Clear current video URL to force re-render of MediaPlayer
+      setShowVideoPlayer(false); // Hide player to ensure fresh state
       // If autoplay is enabled, start scraping and playing the new episode
       if (autoplayEnabled) {
         setShowScrapper(true);
         setScrapingVideo(true);
         setScrapingError(null);
-        setShowVideoPlayer(false);
       }
     },
     [autoplayEnabled],
@@ -425,7 +425,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
       setShowScrapper(false);
       setScrapingVideo(false);
 
-      setInitialVideoDuration(watchProgress ? (watchProgress.progress / 100) * watchProgress.duration : 0);
+      // Only apply watch progress if not manually changed episode (hasAppliedWatchProgressRef is false)
+      // When user changes episode manually, hasAppliedWatchProgressRef is set to true, so we start from 0
+      if (!hasAppliedWatchProgressRef.current && watchProgress && watchProgress.progress > 0) {
+        setInitialVideoDuration((watchProgress.progress / 100) * watchProgress.duration);
+      } else {
+        setInitialVideoDuration(0); // Start from beginning for new episode selection
+      }
 
       if (pendingDownload) {
         setPendingDownload(false);
@@ -436,7 +442,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
         );
       }
     },
-    [pendingDownload, content, isMovie, selectedSeason, selectedEpisode],
+    [pendingDownload, content, isMovie, selectedSeason, selectedEpisode, watchProgress],
   );
 
   // Handle scraper loading state
@@ -570,6 +576,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
           ) : (
             showVideoPlayer && currentVideoUrl ? (
               <MediaPlayer
+                key={`${validContent?.id}-${selectedSeason}-${selectedEpisode}`}
                 videoUrl={currentVideoUrl}
                 title={contentTitle}
                 imageUrl={`https://image.tmdb.org/t/p/w500${validContent?.backdrop_path || validContent?.poster_path}`}

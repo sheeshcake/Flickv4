@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
@@ -23,12 +23,27 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   onSubtitlePress,
   onResize,
   onFullscreen,
+  subtitleDelay = 0,
+  onSubtitleDelayChange,
+  onResetSubtitleDelay,
 }) => {
+  const [showDelayControls, setShowDelayControls] = useState(false);
+
+  const handleSubtitleLongPress = () => {
+    if (hasSubtitles && onSubtitleDelayChange) {
+      setShowDelayControls(!showDelayControls);
+    }
+  };
+
+  const formatDelay = (delay: number) => {
+    const sign = delay >= 0 ? '+' : '';
+    return `${sign}${delay.toFixed(1)}s`;
+  };
+
   return (
     <View
       style={[
         styles.bottomBar,
-        fullscreen ? { paddingBottom: sizes.height * 0.01 } : {},
         hidden ? styles.bottomBarHidden : styles.bottomBarVisible,
       ]}
     >
@@ -52,10 +67,49 @@ export const BottomBar: React.FC<BottomBarProps> = ({
 
       <Text style={styles.timeText}>{timeLabel}</Text>
 
+      {/* Subtitle delay controls - shown when long-pressing subtitle button */}
+      {showDelayControls && hasSubtitles && onSubtitleDelayChange && (
+        <View style={styles.delayControlsContainer}>
+          <TouchableOpacity 
+            onPress={() => onSubtitleDelayChange(-0.5)} 
+            style={styles.delayButton}
+          >
+            <MaterialCommunityIcon
+              name="minus"
+              size={sizes.width * 0.04}
+              color={colors.white}
+            />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={onResetSubtitleDelay}
+            style={styles.delayValueButton}
+          >
+            <Text style={styles.delayText}>{formatDelay(subtitleDelay)}</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={() => onSubtitleDelayChange(0.5)} 
+            style={styles.delayButton}
+          >
+            <MaterialCommunityIcon
+              name="plus"
+              size={sizes.width * 0.04}
+              color={colors.white}
+            />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {onSubtitlePress && (
-        <TouchableOpacity onPress={onSubtitlePress} style={styles.subtitleButton}>
+        <TouchableOpacity 
+          onPress={onSubtitlePress} 
+          onLongPress={handleSubtitleLongPress}
+          delayLongPress={500}
+          style={styles.subtitleButton}
+        >
           <MaterialCommunityIcon
-            name="closed-caption"
+            name={showDelayControls ? 'timer-outline' : 'closed-caption'}
             size={sizes.width * 0.05}
             color={hasSubtitles ? colors.red : colors.white}
           />

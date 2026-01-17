@@ -3,7 +3,7 @@ import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '../types/navigation';
 import {TabNavigator} from './TabNavigator';
-import {DetailScreen, DownloadsScreen, SplashScreen} from '../screens';
+import {DetailScreen, SplashScreen} from '../screens';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -30,13 +30,6 @@ export const AppNavigator: React.FC = () => {
           options={{
             presentation: 'modal',
             animation: 'slide_from_bottom',
-          }}
-        />
-        <Stack.Screen 
-          name="Downloads" 
-          component={DownloadsScreen}
-          options={{
-            animation: 'slide_from_right',
           }}
         />
       </Stack.Navigator>

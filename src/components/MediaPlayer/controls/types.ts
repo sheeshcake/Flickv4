@@ -29,6 +29,10 @@ export interface ControlsProps {
   onSubtitlePress?: () => void;
   hasSubtitles?: boolean;
   onSeekingStateChange?: (isSeeking: boolean) => void;
+  // Subtitle delay props
+  subtitleDelay?: number;
+  onSubtitleDelayChange?: (delta: number) => void;
+  onResetSubtitleDelay?: () => void;
 }
 
 export interface DoubleTapSeekAreaProps {
@@ -75,6 +79,10 @@ export interface BottomBarProps {
   onSubtitlePress?: () => void;
   onResize: () => void;
   onFullscreen: () => void;
+  // Subtitle delay props
+  subtitleDelay?: number;
+  onSubtitleDelayChange?: (delta: number) => void;
+  onResetSubtitleDelay?: () => void;
 }
 
 export interface ProgressBarProps {

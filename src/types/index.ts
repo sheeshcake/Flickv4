@@ -29,6 +29,26 @@ export interface TVShow {
   popularity?: number;
 }
 
+export interface SubtitleStyle {
+  fontSize: 'small' | 'medium' | 'large' | 'xlarge';
+  fontColor: string;
+  backgroundColor: string;
+  backgroundOpacity: number;
+  fontWeight: 'normal' | 'bold';
+  textShadow: boolean;
+  position: 'bottom' | 'top';
+}
+
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  fontSize: 'medium',
+  fontColor: '#FFFFFF',
+  backgroundColor: '#000000',
+  backgroundOpacity: 0,
+  fontWeight: 'bold',
+  textShadow: true,
+  position: 'bottom',
+};
+
 export interface UserPreferences {
   likedMovies: number[];
   likedTVShows: number[];
@@ -38,6 +58,7 @@ export interface UserPreferences {
   pictureInPicture: boolean;
   defaultSubtitleLanguage?: string;
   autoSelectSubtitles: boolean;
+  subtitleStyle: SubtitleStyle;
 }
 
 export interface WatchProgress {
@@ -140,6 +161,7 @@ export enum AppActionType {
   UPDATE_WATCH_PROGRESS = 'UPDATE_WATCH_PROGRESS',
   SET_DEFAULT_SUBTITLE_LANGUAGE = 'SET_DEFAULT_SUBTITLE_LANGUAGE',
   SET_AUTO_SELECT_SUBTITLES = 'SET_AUTO_SELECT_SUBTITLES',
+  SET_SUBTITLE_STYLE = 'SET_SUBTITLE_STYLE',
 
   // Content actions
   SET_TRENDING_MOVIES = 'SET_TRENDING_MOVIES',
