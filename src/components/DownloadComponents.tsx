@@ -7,6 +7,9 @@ import {
   Alert,
   ScrollView,
   Image,
+  Modal,
+  ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import RNFS from 'react-native-fs';
 import { TMDBService } from '../services/TMDBService';
@@ -17,7 +20,8 @@ import {
   DownloadStatus, 
   DownloadProgress,
   Movie, 
-  TVShow 
+  TVShow,
+  M3U8StreamInfo,
 } from '../types';
 import { downloadService } from '../services';
 import { COLORS } from '../utils/constants';
@@ -162,6 +166,11 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
   const [progress, setProgress] = useState(0);
   const [_isLocalDownloading, setIsLocalDownloading] = useState(false);
   const [_lastProgressUpdate, _setLastProgressUpdate] = useState<number>(0);
+  
+  // Resolution selection state
+  const [showResolutionModal, setShowResolutionModal] = useState(false);
+  const [availableResolutions, setAvailableResolutions] = useState<M3U8StreamInfo[]>([]);
+  const [loadingResolutions, setLoadingResolutions] = useState(false);
 
   const contentType = 'title' in content ? 'movie' : 'tv';
   const isDownloaded = downloadService.isContentDownloaded(
@@ -295,43 +304,63 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
     }
   }, [_isLocalDownloading, downloadItem?.status, downloadId, progress, downloadItem?.updatedAt]);
 
-  const handleDownload = async () => {
-    if (!videoUrl) {
-      if (onVideoNeeded) {
-        // If callback is provided, trigger video scraping
-        onVideoNeeded();
-        Alert.alert(
-          'Getting Video Ready', 
-          'Starting video preparation for download. Once the video loads, the download will begin automatically.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        // Fallback to original behavior
-        Alert.alert(
-          'Video URL Required', 
-          'Please start playing the video first, then try downloading. This ensures we get the correct video stream for download.',
-          [{ text: 'OK' }]
-        );
-      }
-      return;
-    }
-
+  // Fetch available resolutions for the video
+  const fetchResolutions = async () => {
+    if (!videoUrl) return;
+    
+    setLoadingResolutions(true);
     try {
-      setProgress(0); // Reset progress to 0 when starting new download
-      setIsLocalDownloading(true); // Immediately set downloading state
+      const resolutions = await downloadService.getAvailableResolutions(videoUrl);
+      setAvailableResolutions(resolutions);
+      
+      if (resolutions.length === 0) {
+        // No resolution options (direct file download), start immediately
+        await startDownloadWithResolution(undefined);
+      } else {
+        // Show resolution selection modal
+        setShowResolutionModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to fetch resolutions:', error);
+      // Fallback to direct download without resolution selection
+      await startDownloadWithResolution(undefined);
+    } finally {
+      setLoadingResolutions(false);
+    }
+  };
+
+  // Start download with selected resolution
+  const startDownloadWithResolution = async (selectedStream?: M3U8StreamInfo) => {
+    setShowResolutionModal(false);
+    
+    try {
+      setProgress(0);
+      setIsLocalDownloading(true);
       console.log('Starting download for:', {
         contentId: content.id,
         downloadId,
-        videoUrl: videoUrl ? 'available' : 'missing'
+        videoUrl: videoUrl ? 'available' : 'missing',
+        selectedResolution: selectedStream?.label || 'auto (highest)',
       });
+
+      // Determine quality label from resolution
+      let qualityLabel = '720p';
+      if (selectedStream) {
+        if (selectedStream.height >= 2160) qualityLabel = '4K';
+        else if (selectedStream.height >= 1080) qualityLabel = '1080p';
+        else if (selectedStream.height >= 720) qualityLabel = '720p';
+        else if (selectedStream.height >= 480) qualityLabel = '480p';
+        else qualityLabel = `${selectedStream.height}p`;
+      }
 
       const newDownloadId = await downloadService.startDownload(
         content,
-        videoUrl,
+        videoUrl!,
         {
-          quality: '720p' as any, // Default quality
+          quality: qualityLabel as any,
           downloadSubtitles: true,
           wifiOnly: false,
+          selectedStreamUrl: selectedStream?.url,
         },
         season,
         episode,
@@ -365,6 +394,31 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
       console.error('Download start failed:', error);
       Alert.alert('Download Error', error.message || 'Failed to start download');
     }
+  };
+
+  const handleDownload = async () => {
+    if (!videoUrl) {
+      if (onVideoNeeded) {
+        // If callback is provided, trigger video scraping
+        onVideoNeeded();
+        Alert.alert(
+          'Getting Video Ready', 
+          'Starting video preparation for download. Once the video loads, the download will begin automatically.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        // Fallback to original behavior
+        Alert.alert(
+          'Video URL Required', 
+          'Please start playing the video first, then try downloading. This ensures we get the correct video stream for download.',
+          [{ text: 'OK' }]
+        );
+      }
+      return;
+    }
+
+    // Fetch available resolutions and show selection modal
+    await fetchResolutions();
   };
 
   const handlePause = async () => {
@@ -573,30 +627,84 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
     );
   }
 
+  // Resolution Selection Modal
+  const renderResolutionModal = () => (
+    <Modal
+      visible={showResolutionModal}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => setShowResolutionModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.resolutionModalContent}>
+          <View style={styles.resolutionModalHeader}>
+            <Text style={styles.resolutionModalTitle}>Select Quality</Text>
+            <TouchableOpacity 
+              onPress={() => setShowResolutionModal(false)}
+              style={styles.modalCloseButton}
+            >
+              <Icon name="close" size={24} color={COLORS.NETFLIX_WHITE} />
+            </TouchableOpacity>
+          </View>
+          
+          <FlatList
+            data={availableResolutions}
+            keyExtractor={(item, index) => `${item.resolution}-${index}`}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.resolutionItem}
+                onPress={() => startDownloadWithResolution(item)}
+              >
+                <View style={styles.resolutionInfo}>
+                  <Text style={styles.resolutionLabel}>{item.label}</Text>
+                  <Text style={styles.resolutionDetails}>
+                    {item.resolution} {item.codecs ? `• ${item.codecs.split(',')[0]}` : ''}
+                  </Text>
+                </View>
+                <Icon name="download" size={24} color={COLORS.NETFLIX_RED} />
+              </TouchableOpacity>
+            )}
+            ItemSeparatorComponent={() => <View style={styles.resolutionSeparator} />}
+            ListEmptyComponent={
+              <Text style={styles.noResolutionsText}>No resolutions available</Text>
+            }
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+
   // Default download button
   return (
-    <TouchableOpacity
-      style={[
-        styles.downloadButtonContainer,
-        {
-          width: getButtonSize(),
-          height: getButtonSize(),
-          borderRadius: getButtonSize() / 2,
-        },
-        style
-      ]}
-      onPress={handleDownload}
-      activeOpacity={0.7}
-      // Don't disable the button - let it show informative message instead
-    >
-      <View style={styles.iconContainer}>
-        <Icon 
-          name="download" 
-          size={getIconSize()} 
-          color={COLORS.NETFLIX_WHITE} 
-        />
-      </View>
-    </TouchableOpacity>
+    <>
+      {renderResolutionModal()}
+      <TouchableOpacity
+        style={[
+          styles.downloadButtonContainer,
+          {
+            width: getButtonSize(),
+            height: getButtonSize(),
+            borderRadius: getButtonSize() / 2,
+          },
+          style
+        ]}
+        onPress={handleDownload}
+        activeOpacity={0.7}
+        disabled={loadingResolutions}
+      >
+        <View style={styles.iconContainer}>
+          {loadingResolutions ? (
+            <ActivityIndicator size="small" color={COLORS.NETFLIX_WHITE} />
+          ) : (
+            <Icon 
+              name="download" 
+              size={getIconSize()} 
+              color={COLORS.NETFLIX_WHITE} 
+            />
+          )}
+        </View>
+      </TouchableOpacity>
+    </>
   );
 };
 
@@ -973,6 +1081,69 @@ const styles = StyleSheet.create({
   iconContainer: {
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // Resolution Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'flex-end',
+  },
+  resolutionModalContent: {
+    backgroundColor: '#1a1a1a',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '70%',
+    paddingBottom: 30,
+  },
+  resolutionModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  resolutionModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.NETFLIX_WHITE,
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  resolutionItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  resolutionInfo: {
+    flex: 1,
+    marginRight: 16,
+  },
+  resolutionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.NETFLIX_WHITE,
+    marginBottom: 4,
+  },
+  resolutionDetails: {
+    fontSize: 12,
+    color: COLORS.NETFLIX_GRAY,
+  },
+  resolutionSeparator: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginHorizontal: 20,
+  },
+  noResolutionsText: {
+    fontSize: 14,
+    color: COLORS.NETFLIX_GRAY,
+    textAlign: 'center',
+    padding: 20,
   },
 });
 

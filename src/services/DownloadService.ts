@@ -1,7 +1,5 @@
 import RNFS from 'react-native-fs';
-import { PermissionsAndroid, Platform } from 'react-native';
 import RNBackgroundDownloader, { DownloadTask } from '@kesha-antonov/react-native-background-downloader';
-import { Parser as M3U8Parser } from 'm3u8-parser';
 import { 
   DownloadItem, 
   DownloadStatus, 
@@ -11,7 +9,8 @@ import {
   Movie, 
   TVShow,
   ErrorType,
-  AppError
+  AppError,
+  M3U8StreamInfo
 } from '../types';
 import { TMDBService } from './TMDBService';
 import { StorageService } from './StorageService';
@@ -22,6 +21,7 @@ export interface DownloadOptions {
   downloadSubtitles?: boolean;
   wifiOnly?: boolean;
   overwriteExisting?: boolean;
+  selectedStreamUrl?: string; // For M3U8: specific stream URL from getAvailableResolutions
 }
 
 export interface DownloadJobResult {
@@ -33,6 +33,7 @@ export interface M3U8Segment {
   uri: string;
   duration: number;
   timeline: number;
+  index: number;
 }
 
 export interface M3U8Playlist {
@@ -41,63 +42,67 @@ export interface M3U8Playlist {
   mediaSequence: number;
   endList: boolean;
   version: number;
+  totalDuration: number;
 }
+
+export interface M3U8DownloadState {
+  downloadId: string;
+  playlistUrl: string;
+  segments: M3U8Segment[];
+  downloadedSegments: Set<number>;
+  failedSegments: Map<number, number>; // segment index -> retry count
+  totalSegments: number;
+  segmentsDir: string;
+  outputPath: string;
+  isPaused: boolean;
+  isCancelled: boolean;
+  totalBytes: number;
+  downloadedBytes: number;
+}
+
+// Configuration
+const CONFIG = {
+  M3U8_CONCURRENCY: 5, // Download 5 segments at a time
+  MAX_RETRIES: 3, // Retry failed segments up to 3 times
+  RETRY_DELAY: 1000, // Wait 1 second before retrying
+  PROGRESS_NOTIFICATION_INTERVAL: 2000, // Update notification every 2 seconds
+  PROGRESS_SAVE_INTERVAL: 5000, // Save progress to storage every 5 seconds
+};
 
 /**
  * DownloadService handles downloading and managing offline content
+ * 
+ * Features:
+ * - Concurrent M3U8 segment downloads (5 at a time by default)
+ * - Pause/Resume support for all downloads including M3U8
+ * - Automatic retry for failed segments (up to 3 retries)
+ * - Background download support
+ * - Progress persistence for resume after app restart
  */
 export class DownloadService {
   private static instance: DownloadService;
   private downloads: Map<string, DownloadItem> = new Map();
   private activeDownloads: Map<string, DownloadJobResult> = new Map();
+  private m3u8Downloads: Map<string, M3U8DownloadState> = new Map();
   private downloadListeners: Map<string, (progress: DownloadProgress) => void> = new Map();
   private notificationListeners: Set<(notification: DownloadNotification) => void> = new Set();
   private tmdbService: TMDBService;
-  private lastProgressNotification: Map<string, number> = new Map(); // Track last notification time per download
-  private static readonly PROGRESS_NOTIFICATION_INTERVAL = 2000; // Update system notification every 2 seconds
+  private lastProgressNotification: Map<string, number> = new Map();
+  private lastProgressSave: Map<string, number> = new Map();
 
-  // Storage paths - Use DocumentDirectoryPath for app-private storage (works without extra permissions on Android 10+)
+  // Storage paths
   private static readonly DOWNLOADS_DIR = `${RNFS.DocumentDirectoryPath}/FlickDownloads`;
   private static readonly VIDEOS_DIR = `${DownloadService.DOWNLOADS_DIR}/videos`;
   private static readonly THUMBNAILS_DIR = `${DownloadService.DOWNLOADS_DIR}/thumbnails`;
   private static readonly SUBTITLES_DIR = `${DownloadService.DOWNLOADS_DIR}/subtitles`;
+  private static readonly M3U8_STATE_DIR = `${DownloadService.DOWNLOADS_DIR}/m3u8_state`;
   private static readonly DOWNLOADS_STORAGE_KEY = '@netflix_clone:downloads';
 
   private constructor() {
     this.tmdbService = new TMDBService();
-    // DocumentDirectoryPath doesn't require storage permissions on Android 10+
-    // Just initialize the directory structure directly
     this.initializeDownloadsDirectory()
       .catch((err) => console.warn('Failed to initialize downloads directory:', err))
       .finally(() => this.loadDownloadsFromStorage());
-  }
-
-  /**
-   * Request storage access permission (Android only)
-   * Note: With DocumentDirectoryPath, this is no longer strictly required,
-   * but we keep it for potential future use or for reading media metadata
-   */
-  private async requestStoragePermission(): Promise<void> {
-    if (Platform.OS !== 'android') return;
-    try {
-      // Android 13+ uses new permissions for media access
-      // These are only needed if we want to access shared media, not for app-private storage
-      if (Platform.Version >= 33) {
-        await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
-          {
-            title: 'Media Permission',
-            message: 'Flick needs access to your media library to read video metadata.',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          },
-        );
-      }
-      // For app-private storage (DocumentDirectoryPath), no permission is needed
-    } catch (err) {
-      console.warn('Permission request failed:', err);
-    }
   }
 
   /**
@@ -120,6 +125,7 @@ export class DownloadService {
         DownloadService.VIDEOS_DIR,
         DownloadService.THUMBNAILS_DIR,
         DownloadService.SUBTITLES_DIR,
+        DownloadService.M3U8_STATE_DIR,
       ];
 
       for (const dir of directories) {
@@ -143,15 +149,22 @@ export class DownloadService {
       if (downloadsData) {
         const downloads: DownloadItem[] = JSON.parse(downloadsData);
         downloads.forEach(download => {
-          // Parse dates
           download.createdAt = new Date(download.createdAt);
           download.updatedAt = new Date(download.updatedAt);
           if (download.startedAt) download.startedAt = new Date(download.startedAt);
           if (download.completedAt) download.completedAt = new Date(download.completedAt);
           
+          // Reset downloading status to paused on app restart
+          if (download.status === DownloadStatus.DOWNLOADING) {
+            download.status = DownloadStatus.PAUSED;
+          }
+          
           this.downloads.set(download.id, download);
         });
       }
+      
+      // Load M3U8 download states
+      await this.loadM3U8States();
     } catch (error) {
       console.warn('Failed to load downloads from storage:', error);
     }
@@ -166,6 +179,72 @@ export class DownloadService {
       await StorageService.setItem(DownloadService.DOWNLOADS_STORAGE_KEY, JSON.stringify(downloads));
     } catch (error) {
       console.error('Failed to save downloads to storage:', error);
+    }
+  }
+
+  /**
+   * Save M3U8 download state for resume support
+   */
+  private async saveM3U8State(state: M3U8DownloadState): Promise<void> {
+    try {
+      const statePath = `${DownloadService.M3U8_STATE_DIR}/${state.downloadId}.json`;
+      const stateData = {
+        ...state,
+        downloadedSegments: Array.from(state.downloadedSegments),
+        failedSegments: Array.from(state.failedSegments.entries()),
+      };
+      await RNFS.writeFile(statePath, JSON.stringify(stateData), 'utf8');
+    } catch (error) {
+      console.warn('Failed to save M3U8 state:', error);
+    }
+  }
+
+  /**
+   * Load M3U8 download states for resume support
+   */
+  private async loadM3U8States(): Promise<void> {
+    try {
+      const stateDir = DownloadService.M3U8_STATE_DIR;
+      const exists = await RNFS.exists(stateDir);
+      if (!exists) return;
+
+      const files = await RNFS.readDir(stateDir);
+      for (const file of files) {
+        if (file.name.endsWith('.json')) {
+          try {
+            const content = await RNFS.readFile(file.path, 'utf8');
+            const stateData = JSON.parse(content);
+            const state: M3U8DownloadState = {
+              ...stateData,
+              downloadedSegments: new Set(stateData.downloadedSegments),
+              failedSegments: new Map(stateData.failedSegments),
+              isPaused: true, // Start paused
+              isCancelled: false,
+            };
+            this.m3u8Downloads.set(state.downloadId, state);
+          } catch (e) {
+            console.warn(`Failed to load M3U8 state from ${file.name}:`, e);
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load M3U8 states:', error);
+    }
+  }
+
+  /**
+   * Delete M3U8 state file
+   */
+  private async deleteM3U8State(downloadId: string): Promise<void> {
+    try {
+      const statePath = `${DownloadService.M3U8_STATE_DIR}/${downloadId}.json`;
+      const exists = await RNFS.exists(statePath);
+      if (exists) {
+        await RNFS.unlink(statePath);
+      }
+      this.m3u8Downloads.delete(downloadId);
+    } catch (error) {
+      console.warn('Failed to delete M3U8 state:', error);
     }
   }
 
@@ -196,7 +275,22 @@ export class DownloadService {
       videoPath: `${DownloadService.VIDEOS_DIR}/${videoFileName}`,
       thumbnailPath: `${DownloadService.THUMBNAILS_DIR}/${thumbnailFileName}`,
       subtitlesDir: `${DownloadService.SUBTITLES_DIR}/${downloadId}`,
+      segmentsDir: `${DownloadService.VIDEOS_DIR}/${downloadId}_segments`,
     };
+  }
+
+  /**
+   * Check if a URL is an M3U8 playlist
+   */
+  private isM3U8Url(url: string): boolean {
+    const lowerUrl = url.toLowerCase();
+    return lowerUrl.includes('.m3u8') || 
+           lowerUrl.includes('.m3u') ||
+           lowerUrl.includes('application/x-mpegurl') ||
+           lowerUrl.includes('application/vnd.apple.mpegurl') ||
+           lowerUrl.includes('playlist.m3u8') ||
+           lowerUrl.includes('index.m3u8') ||
+           lowerUrl.includes('master.m3u8');
   }
 
   /**
@@ -223,6 +317,20 @@ export class DownloadService {
         if (existingDownload.status === DownloadStatus.DOWNLOADING) {
           throw this.createDownloadError('Content is already being downloaded', null);
         }
+        // If paused, resume instead
+        if (existingDownload.status === DownloadStatus.PAUSED) {
+          await this.resumeDownload(downloadId);
+          return downloadId;
+        }
+        // If cancelled or failed, clean up old state before starting fresh
+        if (existingDownload.status === DownloadStatus.CANCELLED || 
+            existingDownload.status === DownloadStatus.FAILED) {
+          console.log(`[Download] Cleaning up old ${existingDownload.status} download: ${downloadId}`);
+          // Remove old M3U8 state from memory and disk
+          await this.deleteM3U8State(downloadId);
+          // Remove from downloads map
+          this.downloads.delete(downloadId);
+        }
       }
 
       const filePaths = this.generateFilePaths(downloadId, options.quality);
@@ -236,7 +344,7 @@ export class DownloadService {
         overview: content.overview,
         posterPath: content.poster_path,
         backdropPath: content.backdrop_path,
-        releaseDate: 'release_date' in content ? content.release_date : content.first_air_date,
+        releaseDate: 'release_date' in content ? content.release_date : (content as TVShow).first_air_date,
         season,
         episode,
         episodeTitle,
@@ -253,7 +361,6 @@ export class DownloadService {
       this.downloads.set(downloadId, downloadItem);
       await this.saveDownloadsToStorage();
 
-      // Send notification
       this.sendNotification({
         id: `download_started_${downloadId}`,
         title: 'Download Started',
@@ -262,8 +369,7 @@ export class DownloadService {
         timestamp: new Date(),
       });
 
-      // Start foreground service to maintain download speed in background
-      // This also shows the download progress notification
+      // Start foreground service
       await notificationService.startForegroundService(downloadId, downloadItem.title);
 
       // Start the actual download
@@ -272,570 +378,6 @@ export class DownloadService {
       return downloadId;
     } catch (error) {
       console.error('Failed to start download:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Check if a URL is an M3U8 playlist
-   */
-  private isM3U8Url(url: string): boolean {
-    const lowerUrl = url.toLowerCase();
-    return lowerUrl.includes('.m3u8') || 
-           lowerUrl.includes('.m3u') ||
-           lowerUrl.includes('application/x-mpegurl') ||
-           lowerUrl.includes('application/vnd.apple.mpegurl') ||
-           lowerUrl.includes('video/mp2t') ||
-           // Check if URL contains common HLS patterns
-           lowerUrl.includes('playlist.m3u8') ||
-           lowerUrl.includes('index.m3u8') ||
-           lowerUrl.includes('master.m3u8');
-  }
-
-  /**
-   * Manual M3U8 parser as fallback when m3u8-parser fails
-   */
-  private async manualParseM3U8(playlistText: string, baseUrl: string): Promise<M3U8Playlist> {
-    try {
-      console.log('Starting manual M3U8 parsing...');
-      
-      const lines = playlistText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-      
-      // Check if this is a master playlist (contains stream info)
-      const isMasterPlaylist = lines.some(line => line.includes('#EXT-X-STREAM-INF'));
-      
-      if (isMasterPlaylist) {
-        console.log('Detected master playlist, extracting best quality stream...');
-        return await this.parseMasterPlaylist(lines, baseUrl);
-      }
-      
-      // Parse as media playlist
-      const segments: M3U8Segment[] = [];
-      let targetDuration = 10;
-      let mediaSequence = 0;
-      let version = 3;
-      let endList = false;
-      
-      let currentDuration = 10;
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        
-        // Parse target duration
-        if (line.startsWith('#EXT-X-TARGETDURATION:')) {
-          targetDuration = parseInt(line.split(':')[1], 10) || 10;
-        }
-        
-        // Parse media sequence
-        else if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
-          mediaSequence = parseInt(line.split(':')[1], 10) || 0;
-        }
-        
-        // Parse version
-        else if (line.startsWith('#EXT-X-VERSION:')) {
-          version = parseInt(line.split(':')[1], 10) || 3;
-        }
-        
-        // Parse end list
-        else if (line === '#EXT-X-ENDLIST') {
-          endList = true;
-        }
-        
-        // Parse segment duration
-        else if (line.startsWith('#EXTINF:')) {
-          const durationMatch = line.match(/#EXTINF:([\d.]+)/);
-          if (durationMatch) {
-            currentDuration = parseFloat(durationMatch[1]);
-          }
-        }
-        
-        // Parse segment URL
-        else if (!line.startsWith('#') && line.length > 0) {
-          // This is a segment URL
-          segments.push({
-            uri: line,
-            duration: currentDuration,
-            timeline: 0,
-          });
-          currentDuration = targetDuration; // Reset for next segment
-        }
-      }
-      
-      console.log(`Manual parser found ${segments.length} segments`);
-      
-      if (segments.length === 0) {
-        throw new Error('No segments found in M3U8 playlist during manual parsing');
-      }
-      
-      return {
-        segments,
-        targetDuration,
-        mediaSequence,
-        endList,
-        version,
-      };
-    } catch (error) {
-      console.error('Manual M3U8 parsing failed:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Parse master playlist and select best quality stream
-   */
-  private async parseMasterPlaylist(lines: string[], baseUrl: string): Promise<M3U8Playlist> {
-    const streams: { bandwidth: number; resolution: string; url: string }[] = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      if (line.startsWith('#EXT-X-STREAM-INF:')) {
-        // Parse stream info
-        const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
-        const resolutionMatch = line.match(/RESOLUTION=([^\s,]+)/);
-        
-        const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0;
-        const resolution = resolutionMatch ? resolutionMatch[1] : 'unknown';
-        
-        // Next line should be the stream URL
-        if (i + 1 < lines.length) {
-          const streamUrl = lines[i + 1];
-          if (!streamUrl.startsWith('#')) {
-            streams.push({
-              bandwidth,
-              resolution,
-              url: streamUrl,
-            });
-          }
-        }
-      }
-    }
-    
-    if (streams.length === 0) {
-      throw new Error('No streams found in master playlist');
-    }
-    
-    // Select the highest bandwidth stream
-    const bestStream = streams.reduce((best, current) => 
-      current.bandwidth > best.bandwidth ? current : best
-    );
-    
-    console.log(`Selected stream: ${bestStream.resolution} at ${bestStream.bandwidth} bps`);
-    console.log(`Stream URL: ${bestStream.url}`);
-    
-    // Resolve the stream URL
-    let resolvedUrl: string;
-    if (bestStream.url.startsWith('http://') || bestStream.url.startsWith('https://')) {
-      resolvedUrl = bestStream.url;
-    } else if (bestStream.url.startsWith('/')) {
-      // Absolute path
-      const urlParts = baseUrl.match(/^(https?:\/\/[^/]+)/);
-      if (urlParts) {
-        resolvedUrl = urlParts[1] + bestStream.url;
-      } else {
-        resolvedUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/')) + bestStream.url;
-      }
-    } else {
-      // Relative path
-      resolvedUrl = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) + bestStream.url;
-    }
-    
-    console.log(`Resolved stream URL: ${resolvedUrl}`);
-    
-    // Fetch and parse the actual media playlist
-    return await this.fetchM3U8Playlist(resolvedUrl);
-  }
-
-  /**
-   * Fetch and parse M3U8 playlist
-   */
-  private async fetchM3U8Playlist(url: string): Promise<M3U8Playlist> {
-    try {
-      console.log(`Fetching M3U8 playlist from: ${url}`);
-      
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch M3U8 playlist: ${response.status} ${response.statusText}`);
-      }
-
-      const playlistText = await response.text();
-      console.log(`M3U8 playlist content length: ${playlistText.length} characters`);
-      console.log('M3U8 playlist first 500 characters:', playlistText.substring(0, 500));
-      
-      // Try manual parsing first (more reliable for React Native)
-      try {
-        console.log('Trying manual M3U8 parsing...');
-        return await this.manualParseM3U8(playlistText, url);
-      } catch (manualError) {
-        console.log('Manual parsing failed, trying m3u8-parser...', manualError);
-      }
-      
-      // Fallback to m3u8-parser
-      const parser = new M3U8Parser();
-      parser.push(playlistText);
-      parser.end();
-
-      const manifest = parser.manifest;
-      console.log('Raw parsed manifest:', JSON.stringify(manifest, null, 2));
-
-      // If the parser failed to parse properly, throw error
-      if (!manifest || (!manifest.segments && !manifest.playlists)) {
-        throw new Error('Both manual and standard M3U8 parsing failed');
-      }
-      
-      console.log('Parsed M3U8 manifest:', {
-        hasPlaylists: !!(manifest.playlists && manifest.playlists.length > 0),
-        playlistCount: manifest.playlists?.length || 0,
-        hasSegments: !!(manifest.segments && manifest.segments.length > 0),
-        segmentCount: manifest.segments?.length || 0,
-      });
-      
-      // Handle master playlist (contains multiple streams)
-      if (manifest.playlists && manifest.playlists.length > 0) {
-        console.log('Processing master playlist...');
-        
-        // Filter playlists that have valid URIs
-        const validPlaylists = manifest.playlists.filter((playlist: any, index: number) => {
-          const isValid = playlist && playlist.uri && typeof playlist.uri === 'string';
-          if (!isValid) {
-            console.warn(`Playlist ${index} is invalid:`, playlist);
-          }
-          return isValid;
-        });
-
-        if (validPlaylists.length === 0) {
-          throw new Error('No valid playlists found in master playlist');
-        }
-
-        console.log(`Found ${validPlaylists.length} valid playlists`);
-
-        // Select the highest quality stream from valid playlists
-        const bestPlaylist = validPlaylists.reduce((best: any, current: any) => {
-          const bestBandwidth = best.attributes?.BANDWIDTH || 0;
-          const currentBandwidth = current.attributes?.BANDWIDTH || 0;
-          return currentBandwidth > bestBandwidth ? current : best;
-        });
-
-        // Safely resolve the URL for the selected stream
-        let streamUrl: string;
-        try {
-          if (bestPlaylist.uri.startsWith('http://') || bestPlaylist.uri.startsWith('https://')) {
-            streamUrl = bestPlaylist.uri;
-          } else {
-            streamUrl = url.substring(0, url.lastIndexOf('/') + 1) + bestPlaylist.uri;
-          }
-        } catch (uriError) {
-          console.error('Error resolving playlist URI:', uriError);
-          throw new Error(`Failed to resolve playlist URI: ${bestPlaylist.uri}`);
-        }
-
-        console.log(`Selected playlist with bandwidth: ${bestPlaylist.attributes?.BANDWIDTH || 'unknown'}, URL: ${streamUrl}`);
-
-        // Fetch the actual media playlist
-        return await this.fetchM3U8Playlist(streamUrl);
-      }
-
-      // Handle media playlist (contains segments)
-      if (!manifest.segments || manifest.segments.length === 0) {
-        throw new Error('No segments found in M3U8 playlist');
-      }
-
-      console.log(`Found ${manifest.segments.length} segments in media playlist`);
-
-      // Debug: Log first few segments to understand structure
-      if (manifest.segments.length > 0) {
-        console.log('First segment structure:', JSON.stringify(manifest.segments[0], null, 2));
-        if (manifest.segments.length > 1) {
-          console.log('Second segment structure:', JSON.stringify(manifest.segments[1], null, 2));
-        }
-      }
-
-      const processedSegments = manifest.segments.map((segment: any, index: number) => {
-        try {
-          // Debug log for problematic segments
-          if (!segment || typeof segment !== 'object') {
-            console.warn(`Segment ${index} is not a valid object:`, segment);
-            return null;
-          }
-          
-          if (!segment.uri || typeof segment.uri !== 'string') {
-            console.warn(`Segment ${index} has no valid URI:`, segment);
-            return null;
-          }
-          
-          return {
-            uri: segment.uri,
-            duration: typeof segment.duration === 'number' ? segment.duration : 10,
-            timeline: typeof segment.timeline === 'number' ? segment.timeline : 0,
-          };
-        } catch (segmentError) {
-          console.error(`Error processing segment ${index}:`, segmentError);
-          return null;
-        }
-      }).filter((segment): segment is M3U8Segment => segment !== null);
-
-      console.log(`Successfully processed ${processedSegments.length} valid segments`);
-
-      return {
-        segments: processedSegments,
-        targetDuration: manifest.targetDuration || 10,
-        mediaSequence: manifest.mediaSequence || 0,
-        endList: manifest.endList || false,
-        version: manifest.version || 3,
-      };
-    } catch (error) {
-      console.error('Failed to parse M3U8 playlist:', error);
-      if (error instanceof Error) {
-        console.error('Error stack:', error.stack);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Download M3U8 playlist and combine segments
-   */
-  private async downloadM3U8(downloadItem: DownloadItem, _options: DownloadOptions): Promise<void> {
-    try {
-      // Fetch and parse the M3U8 playlist
-      const playlist = await this.fetchM3U8Playlist(downloadItem.videoUrl);
-      
-      // Create segments directory
-      const segmentsDir = `${DownloadService.VIDEOS_DIR}/${downloadItem.id}_segments`;
-      await RNFS.mkdir(segmentsDir);
-
-      // Resolve relative URLs
-      const baseUrl = downloadItem.videoUrl.substring(0, downloadItem.videoUrl.lastIndexOf('/') + 1);
-      const segments = playlist.segments.map((segment, index) => {
-        try {
-          // Handle different segment URI formats
-          let resolvedUri: string;
-          
-          if (!segment.uri || typeof segment.uri !== 'string') {
-            throw new Error(`Segment ${index} has invalid or missing URI`);
-          }
-          
-          if (segment.uri.startsWith('http://') || segment.uri.startsWith('https://')) {
-            // Absolute URL
-            resolvedUri = segment.uri;
-          } else if (segment.uri.startsWith('/')) {
-            // Absolute path - need to get the protocol and domain from the base URL
-            const urlParts = downloadItem.videoUrl.match(/^(https?:\/\/[^/]+)/);
-            if (urlParts) {
-              resolvedUri = urlParts[1] + segment.uri;
-            } else {
-              // Fallback to relative resolution
-              resolvedUri = baseUrl + segment.uri.substring(1);
-            }
-          } else {
-            // Relative path
-            resolvedUri = baseUrl + segment.uri;
-          }
-          
-          return {
-            ...segment,
-            uri: resolvedUri,
-          };
-        } catch (error) {
-          console.error(`Failed to resolve URI for segment ${index}:`, error);
-          console.error(`Segment data:`, segment);
-          throw new Error(`Invalid segment URI at index ${index}: ${segment.uri || 'undefined'}`);
-        }
-      });
-
-      let downloadedSegments = 0;
-      const totalSegments = segments.length;
-      let totalDownloadedBytes = 0;
-      let totalExpectedBytes = 0;
-
-      // Download segments sequentially
-      for (let i = 0; i < segments.length; i++) {
-        const segment = segments[i];
-        const segmentPath = `${segmentsDir}/segment_${i.toString().padStart(4, '0')}.ts`;
-
-        try {
-          // Download segment using RNBackgroundDownloader
-          const task = RNBackgroundDownloader.download({
-            id: `${downloadItem.id}_segment_${i}`,
-            url: segment.uri,
-            destination: segmentPath,
-          });
-
-          await new Promise<void>((resolve, reject) => {
-            task
-              .begin(({ expectedBytes }) => {
-                totalExpectedBytes += expectedBytes;
-              })
-              .progress(({ bytesDownloaded, bytesTotal }) => {
-                // Update progress based on segments completed + current segment progress
-                const segmentProgress = (bytesDownloaded / bytesTotal) * 100;
-                const overallProgress = ((downloadedSegments + (segmentProgress / 100)) / totalSegments) * 100;
-                
-                downloadItem.progress = overallProgress;
-                downloadItem.downloadedSize = totalDownloadedBytes + bytesDownloaded;
-                downloadItem.totalSize = totalExpectedBytes;
-                downloadItem.updatedAt = new Date();
-
-                // Update the stored download item immediately
-                this.downloads.set(downloadItem.id, downloadItem);
-
-                // Save to storage to persist progress
-                this.saveDownloadsToStorage().catch((error) => {
-                  console.error('Failed to save M3U8 download progress to storage:', error);
-                });
-
-                // Notify progress listeners
-                const progressData: DownloadProgress = {
-                  downloadId: downloadItem.id,
-                  progress: overallProgress,
-                  downloadSpeed: downloadItem.downloadSpeed || 0,
-                  totalSize: totalExpectedBytes,
-                  downloadedSize: totalDownloadedBytes + bytesDownloaded,
-                  estimatedTimeRemaining: downloadItem.estimatedTimeRemaining || 0,
-                };
-
-                const listener = this.downloadListeners.get(downloadItem.id);
-                console.log('M3U8 progress update:', {
-                  downloadId: downloadItem.id,
-                  segmentIndex: i,
-                  segmentProgress: Math.round(segmentProgress),
-                  overallProgress: Math.round(overallProgress),
-                  hasListener: !!listener
-                });
-                
-                if (listener) {
-                  try {
-                    listener(progressData);
-                  } catch (error) {
-                    console.error('Error calling M3U8 progress listener:', error);
-                  }
-                }
-
-                // Update foreground service notification (throttled)
-                const now = Date.now();
-                const lastNotification = this.lastProgressNotification.get(downloadItem.id) || 0;
-                if (now - lastNotification >= DownloadService.PROGRESS_NOTIFICATION_INTERVAL) {
-                  this.lastProgressNotification.set(downloadItem.id, now);
-                  notificationService.updateForegroundService(downloadItem.id, downloadItem.title, overallProgress)
-                    .catch(err => console.warn('Failed to update M3U8 foreground service:', err));
-                }
-              })
-              .done(({ bytesDownloaded }) => {
-                totalDownloadedBytes += bytesDownloaded;
-                downloadedSegments++;
-                resolve();
-              })
-              .error(({ error }) => {
-                reject(new Error(`Failed to download segment ${i}: ${error}`));
-              });
-          });
-
-        } catch (error) {
-          console.error(`Failed to download segment ${i}:`, error);
-          throw error;
-        }
-      }
-
-      // Combine segments into final video file
-      await this.combineM3U8Segments(segmentsDir, downloadItem.filePath!, totalSegments);
-
-      // Clean up segments directory
-      try {
-        await RNFS.unlink(segmentsDir);
-      } catch (cleanupError) {
-        console.warn('Failed to cleanup segments directory:', cleanupError);
-        // Don't fail the download for cleanup errors
-      }
-
-      // Mark download as completed
-      downloadItem.status = DownloadStatus.COMPLETED;
-      downloadItem.progress = 100;
-      downloadItem.completedAt = new Date();
-      downloadItem.updatedAt = new Date();
-
-    } catch (error) {
-      console.error('Failed to download M3U8:', error);
-      
-      // Clean up on error
-      try {
-        const segmentsDir = `${DownloadService.VIDEOS_DIR}/${downloadItem.id}_segments`;
-        const segmentsDirExists = await RNFS.exists(segmentsDir);
-        if (segmentsDirExists) {
-          await RNFS.unlink(segmentsDir);
-        }
-        
-        if (downloadItem.filePath) {
-          const outputExists = await RNFS.exists(downloadItem.filePath);
-          if (outputExists) {
-            await RNFS.unlink(downloadItem.filePath);
-          }
-        }
-      } catch (cleanupError) {
-        console.warn('Failed to cleanup after error:', cleanupError);
-      }
-      
-      throw error;
-    }
-  }
-
-  /**
-   * Combine M3U8 segments into a single video file
-   */
-  private async combineM3U8Segments(segmentsDir: string, outputPath: string, totalSegments: number): Promise<void> {
-    try {
-      // Create an array of segment file paths in order
-      const segmentPaths: string[] = [];
-      for (let i = 0; i < totalSegments; i++) {
-        const segmentPath = `${segmentsDir}/segment_${i.toString().padStart(4, '0')}.ts`;
-        const exists = await RNFS.exists(segmentPath);
-        if (exists) {
-          segmentPaths.push(segmentPath);
-        } else {
-          console.warn(`Segment ${i} not found at ${segmentPath}`);
-        }
-      }
-
-      if (segmentPaths.length === 0) {
-        throw new Error('No segments found to combine');
-      }
-
-      console.log(`Combining ${segmentPaths.length} segments into ${outputPath}`);
-
-      // For React Native, we'll combine segments by concatenating their binary data
-      // This works for MPEG-TS segments which are designed to be concatenated
-      
-      for (let i = 0; i < segmentPaths.length; i++) {
-        const segmentPath = segmentPaths[i];
-        try {
-          const segmentData = await RNFS.readFile(segmentPath, 'base64');
-          
-          if (i === 0) {
-            // Write first segment
-            await RNFS.writeFile(outputPath, segmentData, 'base64');
-          } else {
-            // Append remaining segments
-            await RNFS.appendFile(outputPath, segmentData, 'base64');
-          }
-        } catch (error) {
-          console.error(`Failed to read segment ${i}:`, error);
-          // Continue with other segments
-        }
-      }
-
-      // Verify the output file exists and has content
-      const outputExists = await RNFS.exists(outputPath);
-      if (!outputExists) {
-        throw new Error('Failed to create combined video file');
-      }
-
-      const outputStats = await RNFS.stat(outputPath);
-      if (outputStats.size === 0) {
-        throw new Error('Combined video file is empty');
-      }
-
-      console.log(`Successfully combined ${segmentPaths.length} segments into ${outputPath} (${outputStats.size} bytes)`);
-    } catch (error) {
-      console.error('Failed to combine M3U8 segments:', error);
       throw error;
     }
   }
@@ -852,234 +394,12 @@ export class DownloadService {
       this.downloads.set(downloadItem.id, downloadItem);
       await this.saveDownloadsToStorage();
 
-      // Create subtitles directory if downloading subtitles
-      if (options.downloadSubtitles) {
-        const subtitlesDir = `${DownloadService.SUBTITLES_DIR}/${downloadItem.id}`;
-        const exists = await RNFS.exists(subtitlesDir);
-        if (!exists) {
-          await RNFS.mkdir(subtitlesDir);
-        }
-      }
-
       // Check if this is an M3U8 playlist
       if (this.isM3U8Url(downloadItem.videoUrl)) {
-        // Handle M3U8 playlist download
-        await this.downloadM3U8(downloadItem, options);
-        
-        // Download thumbnail
-        if (downloadItem.posterPath) {
-          this.downloadThumbnail(downloadItem);
-        }
-
-        // Download subtitles if requested
-        if (options.downloadSubtitles) {
-          this.downloadSubtitles(downloadItem);
-        }
-
-        this.downloads.set(downloadItem.id, downloadItem);
-        this.saveDownloadsToStorage();
-
-        // Send completion notification
-        this.sendNotification({
-          id: `download_completed_${downloadItem.id}`,
-          title: 'Download Completed',
-          message: `${downloadItem.title} downloaded successfully`,
-          type: 'success',
-          timestamp: new Date(),
-        });
-
-        // Show system notification for completion
-        await notificationService.showDownloadCompleted({
-          downloadId: downloadItem.id,
-          title: downloadItem.title,
-          status: 'completed',
-        });
-
-        // Stop foreground service (will only stop if no more active downloads)
-        await notificationService.stopForegroundService(downloadItem.id);
-
-        // Clean up progress notification tracking
-        this.lastProgressNotification.delete(downloadItem.id);
-
-        return;
+        await this.downloadM3U8Concurrent(downloadItem, options);
+      } else {
+        await this.downloadDirectFile(downloadItem, options);
       }
-
-      // Download regular video file using RNBackgroundDownloader
-      console.log('Starting background download for:', {
-        id: downloadItem.id,
-        url: downloadItem.videoUrl,
-        destination: downloadItem.filePath,
-      });
-
-      const task = RNBackgroundDownloader.download({
-        id: downloadItem.id,
-        url: downloadItem.videoUrl,
-        destination: downloadItem.filePath!,
-      }).begin(({ expectedBytes, headers: _headers }) => {
-        // Update total size when download begins
-        console.log('Download begin callback triggered:', {
-          downloadId: downloadItem.id,
-          expectedBytes,
-        });
-        downloadItem.totalSize = expectedBytes;
-        downloadItem.updatedAt = new Date();
-        this.downloads.set(downloadItem.id, downloadItem);
-      }).progress(({ bytesDownloaded, bytesTotal }) => {
-        const progress = (bytesDownloaded / bytesTotal) * 100;
-        const downloadSpeed = bytesDownloaded / ((Date.now() - downloadItem.startedAt!.getTime()) / 1000);
-        const estimatedTimeRemaining = (bytesTotal - bytesDownloaded) / downloadSpeed;
-
-        console.log('Download progress callback triggered:', {
-          downloadId: downloadItem.id,
-          progress: Math.round(progress * 100) / 100,
-          bytesDownloaded,
-          bytesTotal,
-          downloadSpeed: Math.round(downloadSpeed),
-        });
-
-        // Update download progress
-        downloadItem.progress = progress;
-        downloadItem.downloadSpeed = downloadSpeed;
-        downloadItem.totalSize = bytesTotal;
-        downloadItem.downloadedSize = bytesDownloaded;
-        downloadItem.estimatedTimeRemaining = estimatedTimeRemaining;
-        downloadItem.updatedAt = new Date();
-
-        this.downloads.set(downloadItem.id, downloadItem);
-
-        // Notify progress listeners
-        const progressData: DownloadProgress = {
-          downloadId: downloadItem.id,
-          progress,
-          downloadSpeed,
-          totalSize: bytesTotal,
-          downloadedSize: bytesDownloaded,
-          estimatedTimeRemaining,
-        };
-
-        const listener = this.downloadListeners.get(downloadItem.id);
-        console.log('Calling progress listener for download:', {
-          downloadId: downloadItem.id,
-          progress: Math.round(progress),
-          hasListener: !!listener,
-          bytesDownloaded,
-          bytesTotal
-        });
-        
-        if (listener) {
-          try {
-            listener(progressData);
-          } catch (error) {
-            console.error('Error calling progress listener:', error);
-          }
-        } else {
-          console.warn('No progress listener found for download:', downloadItem.id);
-        }
-
-        // Update foreground service notification (throttled to avoid too many updates)
-        const now = Date.now();
-        const lastNotification = this.lastProgressNotification.get(downloadItem.id) || 0;
-        if (now - lastNotification >= DownloadService.PROGRESS_NOTIFICATION_INTERVAL) {
-          this.lastProgressNotification.set(downloadItem.id, now);
-          notificationService.updateForegroundService(downloadItem.id, downloadItem.title, progress)
-            .catch(err => console.warn('Failed to update foreground service:', err));
-        }
-      }).done(({ bytesDownloaded: _bytesDownloaded, bytesTotal: _bytesTotal }) => {
-        console.log('Download completed callback triggered:', {
-          downloadId: downloadItem.id,
-        });
-        
-        // Download completed successfully
-        downloadItem.status = DownloadStatus.COMPLETED;
-        downloadItem.progress = 100;
-        downloadItem.completedAt = new Date();
-        downloadItem.updatedAt = new Date();
-
-        // Download thumbnail
-        if (downloadItem.posterPath) {
-          this.downloadThumbnail(downloadItem);
-        }
-
-        // Download subtitles if requested
-        if (options.downloadSubtitles) {
-          this.downloadSubtitles(downloadItem);
-        }
-
-        this.downloads.set(downloadItem.id, downloadItem);
-        this.saveDownloadsToStorage();
-
-        // Send completion notification
-        this.sendNotification({
-          id: `download_completed_${downloadItem.id}`,
-          title: 'Download Completed',
-          message: `${downloadItem.title} downloaded successfully`,
-          type: 'success',
-          timestamp: new Date(),
-        });
-
-        // Show system notification for completion
-        notificationService.showDownloadCompleted({
-          downloadId: downloadItem.id,
-          title: downloadItem.title,
-          status: 'completed',
-        }).catch(err => console.warn('Failed to show completion notification:', err));
-
-        // Stop foreground service (will only stop if no more active downloads)
-        notificationService.stopForegroundService(downloadItem.id)
-          .catch(err => console.warn('Failed to stop foreground service:', err));
-
-        // Clean up progress notification tracking
-        this.lastProgressNotification.delete(downloadItem.id);
-
-        this.activeDownloads.delete(downloadItem.id);
-      }).error(({ error, errorCode: _errorCode }) => {
-        console.log('Download error callback triggered:', {
-          downloadId: downloadItem.id,
-          error,
-        });
-        
-        // Download failed
-        downloadItem.status = DownloadStatus.FAILED;
-        downloadItem.error = error;
-        downloadItem.updatedAt = new Date();
-
-        this.downloads.set(downloadItem.id, downloadItem);
-        this.saveDownloadsToStorage();
-        this.activeDownloads.delete(downloadItem.id);
-
-        // Send error notification
-        this.sendNotification({
-          id: `download_failed_${downloadItem.id}`,
-          title: 'Download Failed',
-          message: `Failed to download ${downloadItem.title}: ${error}`,
-          type: 'error',
-          timestamp: new Date(),
-        });
-
-        // Show system notification for failure
-        notificationService.showDownloadFailed({
-          downloadId: downloadItem.id,
-          title: downloadItem.title,
-          status: 'failed',
-          error: error,
-        }).catch(err => console.warn('Failed to show failure notification:', err));
-
-        // Stop foreground service (will only stop if no more active downloads)
-        notificationService.stopForegroundService(downloadItem.id)
-          .catch(err => console.warn('Failed to stop foreground service:', err));
-
-        // Clean up progress notification tracking
-        this.lastProgressNotification.delete(downloadItem.id);
-
-        throw new Error(`Download failed: ${error}`);
-      });
-
-      const downloadJob: DownloadJobResult = {
-        task,
-        taskId: downloadItem.id,
-      };
-
-      this.activeDownloads.set(downloadItem.id, downloadJob);
     } catch (error) {
       // Download failed
       downloadItem.status = DownloadStatus.FAILED;
@@ -1088,9 +408,7 @@ export class DownloadService {
 
       this.downloads.set(downloadItem.id, downloadItem);
       await this.saveDownloadsToStorage();
-      this.activeDownloads.delete(downloadItem.id);
 
-      // Send error notification
       this.sendNotification({
         id: `download_failed_${downloadItem.id}`,
         title: 'Download Failed',
@@ -1099,23 +417,818 @@ export class DownloadService {
         timestamp: new Date(),
       });
 
-      // Show system notification for failure
-      notificationService.showDownloadFailed({
+      await notificationService.showDownloadFailed({
         downloadId: downloadItem.id,
         title: downloadItem.title,
         status: 'failed',
         error: downloadItem.error,
-      }).catch(err => console.warn('Failed to show failure notification:', err));
+      });
 
-      // Stop foreground service (will only stop if no more active downloads)
-      notificationService.stopForegroundService(downloadItem.id)
-        .catch(err => console.warn('Failed to stop foreground service:', err));
-
-      // Clean up progress notification tracking
+      await notificationService.stopForegroundService(downloadItem.id);
       this.lastProgressNotification.delete(downloadItem.id);
+      this.lastProgressSave.delete(downloadItem.id);
 
       throw error;
     }
+  }
+
+  /**
+   * Fetch and parse M3U8 playlist
+   */
+  private async fetchM3U8Playlist(url: string, selectedStreamUrl?: string): Promise<M3U8Playlist> {
+    console.log(`[M3U8] Fetching playlist from: ${url}`);
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch M3U8 playlist: ${response.status}`);
+    }
+
+    const playlistText = await response.text();
+    const lines = playlistText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    
+    // Check if this is a master playlist
+    const isMasterPlaylist = lines.some(line => line.includes('#EXT-X-STREAM-INF'));
+    
+    if (isMasterPlaylist) {
+      return await this.parseMasterPlaylist(lines, url, selectedStreamUrl);
+    }
+    
+    return this.parseMediaPlaylist(lines, url);
+  }
+
+  /**
+   * Get available resolutions from M3U8 master playlist
+   * Call this before starting download to let user select quality
+   */
+  async getAvailableResolutions(videoUrl: string): Promise<M3U8StreamInfo[]> {
+    try {
+      if (!this.isM3U8Url(videoUrl)) {
+        // Not an M3U8, return empty array (direct file download)
+        return [];
+      }
+
+      console.log(`[M3U8] Fetching available resolutions from: ${videoUrl}`);
+      
+      const response = await fetch(videoUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch M3U8 playlist: ${response.status}`);
+      }
+
+      const playlistText = await response.text();
+      const lines = playlistText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+      
+      // Check if this is a master playlist
+      const isMasterPlaylist = lines.some(line => line.includes('#EXT-X-STREAM-INF'));
+      
+      if (!isMasterPlaylist) {
+        // Single quality stream, no selection needed
+        return [];
+      }
+
+      const streams: M3U8StreamInfo[] = [];
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        if (line.startsWith('#EXT-X-STREAM-INF:')) {
+          const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
+          const resolutionMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
+          const codecsMatch = line.match(/CODECS="([^"]+)"/);
+          const frameRateMatch = line.match(/FRAME-RATE=([\d.]+)/);
+          
+          if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
+            const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0;
+            const width = resolutionMatch ? parseInt(resolutionMatch[1], 10) : 0;
+            const height = resolutionMatch ? parseInt(resolutionMatch[2], 10) : 0;
+            const codecs = codecsMatch ? codecsMatch[1] : undefined;
+            const frameRate = frameRateMatch ? parseFloat(frameRateMatch[1]) : undefined;
+            
+            // Generate user-friendly label
+            const label = this.generateResolutionLabel(height, bandwidth, frameRate);
+            
+            streams.push({
+              bandwidth,
+              resolution: resolutionMatch ? `${width}x${height}` : 'unknown',
+              width,
+              height,
+              url: this.resolveUrl(lines[i + 1], videoUrl),
+              codecs,
+              frameRate,
+              label,
+            });
+          }
+        }
+      }
+      
+      // Sort by height (resolution) descending
+      streams.sort((a, b) => b.height - a.height);
+      
+      console.log(`[M3U8] Found ${streams.length} available resolutions`);
+      return streams;
+    } catch (error) {
+      console.error('Failed to get available resolutions:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Generate user-friendly resolution label
+   */
+  private generateResolutionLabel(height: number, bandwidth: number, frameRate?: number): string {
+    let qualityLabel = '';
+    
+    if (height >= 2160) {
+      qualityLabel = '4K Ultra HD';
+    } else if (height >= 1440) {
+      qualityLabel = '1440p QHD';
+    } else if (height >= 1080) {
+      qualityLabel = '1080p Full HD';
+    } else if (height >= 720) {
+      qualityLabel = '720p HD';
+    } else if (height >= 480) {
+      qualityLabel = '480p SD';
+    } else if (height >= 360) {
+      qualityLabel = '360p';
+    } else if (height > 0) {
+      qualityLabel = `${height}p`;
+    } else {
+      // Estimate from bandwidth
+      const mbps = bandwidth / 1000000;
+      if (mbps >= 15) {
+        qualityLabel = '4K (estimated)';
+      } else if (mbps >= 8) {
+        qualityLabel = '1080p (estimated)';
+      } else if (mbps >= 4) {
+        qualityLabel = '720p (estimated)';
+      } else {
+        qualityLabel = 'SD (estimated)';
+      }
+    }
+    
+    // Add frame rate if high
+    if (frameRate && frameRate >= 50) {
+      qualityLabel += ` ${Math.round(frameRate)}fps`;
+    }
+    
+    // Add bandwidth info
+    const mbps = (bandwidth / 1000000).toFixed(1);
+    qualityLabel += ` • ${mbps} Mbps`;
+    
+    return qualityLabel;
+  }
+
+  /**
+   * Parse master playlist and select best quality (or use selected stream)
+   */
+  private async parseMasterPlaylist(lines: string[], baseUrl: string, selectedStreamUrl?: string): Promise<M3U8Playlist> {
+    // If a specific stream URL is selected, use it directly
+    if (selectedStreamUrl) {
+      console.log(`[M3U8] Using selected stream URL: ${selectedStreamUrl}`);
+      return await this.fetchM3U8Playlist(selectedStreamUrl);
+    }
+
+    const streams: { bandwidth: number; resolution: string; url: string }[] = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      if (line.startsWith('#EXT-X-STREAM-INF:')) {
+        const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
+        const resolutionMatch = line.match(/RESOLUTION=([^\s,]+)/);
+        
+        if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
+          streams.push({
+            bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0,
+            resolution: resolutionMatch ? resolutionMatch[1] : 'unknown',
+            url: lines[i + 1],
+          });
+        }
+      }
+    }
+    
+    if (streams.length === 0) {
+      throw new Error('No streams found in master playlist');
+    }
+    
+    // Select highest bandwidth by default
+    const bestStream = streams.reduce((best, current) => 
+      current.bandwidth > best.bandwidth ? current : best
+    );
+    
+    console.log(`[M3U8] Auto-selected stream: ${bestStream.resolution} at ${bestStream.bandwidth} bps`);
+    
+    const resolvedUrl = this.resolveUrl(bestStream.url, baseUrl);
+    return await this.fetchM3U8Playlist(resolvedUrl);
+  }
+
+  /**
+   * Parse media playlist
+   */
+  private parseMediaPlaylist(lines: string[], baseUrl: string): M3U8Playlist {
+    const segments: M3U8Segment[] = [];
+    let targetDuration = 10;
+    let mediaSequence = 0;
+    let version = 3;
+    let endList = false;
+    let currentDuration = 10;
+    let segmentIndex = 0;
+    let totalDuration = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      if (line.startsWith('#EXT-X-TARGETDURATION:')) {
+        targetDuration = parseInt(line.split(':')[1], 10) || 10;
+      } else if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+        mediaSequence = parseInt(line.split(':')[1], 10) || 0;
+      } else if (line.startsWith('#EXT-X-VERSION:')) {
+        version = parseInt(line.split(':')[1], 10) || 3;
+      } else if (line === '#EXT-X-ENDLIST') {
+        endList = true;
+      } else if (line.startsWith('#EXTINF:')) {
+        const durationMatch = line.match(/#EXTINF:([\d.]+)/);
+        if (durationMatch) {
+          currentDuration = parseFloat(durationMatch[1]);
+        }
+      } else if (!line.startsWith('#') && line.length > 0) {
+        const resolvedUri = this.resolveUrl(line, baseUrl);
+        segments.push({
+          uri: resolvedUri,
+          duration: currentDuration,
+          timeline: 0,
+          index: segmentIndex++,
+        });
+        totalDuration += currentDuration;
+        currentDuration = targetDuration;
+      }
+    }
+    
+    console.log(`[M3U8] Parsed ${segments.length} segments, total duration: ${Math.round(totalDuration)}s`);
+    
+    if (segments.length === 0) {
+      throw new Error('No segments found in M3U8 playlist');
+    }
+    
+    return { segments, targetDuration, mediaSequence, endList, version, totalDuration };
+  }
+
+  /**
+   * Resolve relative URL
+   */
+  private resolveUrl(url: string, baseUrl: string): string {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    if (url.startsWith('/')) {
+      const urlParts = baseUrl.match(/^(https?:\/\/[^/]+)/);
+      return urlParts ? urlParts[1] + url : baseUrl.substring(0, baseUrl.lastIndexOf('/')) + url;
+    }
+    return baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) + url;
+  }
+
+  /**
+   * Download M3U8 with concurrent segment downloads
+   */
+  private async downloadM3U8Concurrent(downloadItem: DownloadItem, options: DownloadOptions): Promise<void> {
+    // Pass selected stream URL if user chose a specific resolution
+    const playlist = await this.fetchM3U8Playlist(downloadItem.videoUrl, options.selectedStreamUrl);
+    const filePaths = this.generateFilePaths(downloadItem.id, downloadItem.quality);
+    
+    // Create or restore M3U8 state
+    let state = this.m3u8Downloads.get(downloadItem.id);
+    
+    console.log(`[M3U8] downloadM3U8Concurrent called for ${downloadItem.id}, existing state:`, state ? `isPaused=${state.isPaused}, isCancelled=${state.isCancelled}` : 'none');
+    
+    // If state exists but was cancelled, remove it and start fresh
+    if (state && state.isCancelled) {
+      console.log(`[M3U8] Removing cancelled state for ${downloadItem.id}`);
+      this.m3u8Downloads.delete(downloadItem.id);
+      state = undefined;
+    }
+    
+    if (!state) {
+      // Create segments directory
+      const exists = await RNFS.exists(filePaths.segmentsDir);
+      if (!exists) {
+        await RNFS.mkdir(filePaths.segmentsDir);
+      }
+      
+      state = {
+        downloadId: downloadItem.id,
+        playlistUrl: downloadItem.videoUrl,
+        segments: playlist.segments,
+        downloadedSegments: new Set<number>(),
+        failedSegments: new Map<number, number>(),
+        totalSegments: playlist.segments.length,
+        segmentsDir: filePaths.segmentsDir,
+        outputPath: downloadItem.filePath!,
+        isPaused: false,
+        isCancelled: false,
+        totalBytes: 0,
+        downloadedBytes: 0,
+      };
+      
+      // Check for already downloaded segments (resume support)
+      for (let i = 0; i < playlist.segments.length; i++) {
+        const segmentPath = `${filePaths.segmentsDir}/segment_${i.toString().padStart(5, '0')}.ts`;
+        const segmentExists = await RNFS.exists(segmentPath);
+        if (segmentExists) {
+          const segmentStat = await RNFS.stat(segmentPath);
+          if (segmentStat.size > 0) {
+            state.downloadedSegments.add(i);
+            state.downloadedBytes += segmentStat.size;
+          }
+        }
+      }
+      
+      this.m3u8Downloads.set(downloadItem.id, state);
+    } else {
+      state.isPaused = false;
+      state.isCancelled = false;
+    }
+
+    console.log(`[M3U8] Starting concurrent download: ${state.downloadedSegments.size}/${state.totalSegments} already downloaded`);
+
+    // Get segments that need to be downloaded
+    const pendingSegments = state.segments.filter(
+      segment => !state!.downloadedSegments.has(segment.index)
+    );
+
+    if (pendingSegments.length === 0) {
+      // All segments already downloaded, just combine
+      await this.combineAndFinalize(downloadItem, state);
+      return;
+    }
+
+    // Download segments concurrently with limited concurrency
+    const concurrency = CONFIG.M3U8_CONCURRENCY;
+    let activeDownloads = 0;
+    
+    const downloadQueue = [...pendingSegments];
+    const downloadPromises: Promise<void>[] = [];
+    const abortController = new AbortController();
+
+    // Ensure state is clean before starting download loop
+    state.isPaused = false;
+    state.isCancelled = false;
+    console.log(`[M3U8] Starting download loop with ${pendingSegments.length} pending segments`);
+
+    const processQueue = async (): Promise<void> => {
+      while (downloadQueue.length > 0 && !state!.isPaused && !state!.isCancelled) {
+        // Wait if at max concurrency
+        while (activeDownloads >= concurrency && !state!.isPaused && !state!.isCancelled) {
+          await this.delay(100);
+        }
+
+        if (state!.isPaused || state!.isCancelled) break;
+
+        const segment = downloadQueue.shift();
+        if (!segment) break;
+
+        activeDownloads++;
+        
+        const downloadPromise = this.downloadSegment(state!, segment, downloadItem, abortController.signal)
+          .finally(() => {
+            activeDownloads--;
+          });
+        
+        downloadPromises.push(downloadPromise);
+      }
+    };
+
+    // Start processing queue
+    await processQueue();
+    
+    // If paused or cancelled, abort ongoing fetches and wait for cleanup
+    if (state.isPaused || state.isCancelled) {
+      abortController.abort();
+    }
+
+    // Wait for all in-flight downloads to complete (they will handle abort gracefully)
+    await Promise.allSettled(downloadPromises);
+
+    // Check if cancelled or paused
+    if (state.isCancelled) {
+      throw new Error('Download cancelled');
+    }
+
+    if (state.isPaused) {
+      // Save state and return - don't throw error
+      await this.saveM3U8State(state);
+      return;
+    }
+
+    // Retry failed segments
+    let retryAttempt = 0;
+    while (state.failedSegments.size > 0 && retryAttempt < CONFIG.MAX_RETRIES) {
+      retryAttempt++;
+      console.log(`[M3U8] Retry attempt ${retryAttempt} for ${state.failedSegments.size} failed segments`);
+      
+      await this.delay(CONFIG.RETRY_DELAY);
+      
+      const failedSegmentIndices = Array.from(state.failedSegments.keys());
+      const retrySegments = failedSegmentIndices.map(index => 
+        state!.segments.find(s => s.index === index)!
+      ).filter(Boolean);
+
+      for (const segment of retrySegments) {
+        if (state.isPaused || state.isCancelled) break;
+        await this.downloadSegment(state, segment, downloadItem);
+      }
+    }
+
+    // Check if all segments downloaded
+    if (state.downloadedSegments.size < state.totalSegments) {
+      const remaining = state.totalSegments - state.downloadedSegments.size;
+      throw new Error(`Failed to download ${remaining} segments after ${CONFIG.MAX_RETRIES} retries`);
+    }
+
+    // Combine segments and finalize
+    await this.combineAndFinalize(downloadItem, state);
+  }
+
+  /**
+   * Download a single segment
+   */
+  private async downloadSegment(
+    state: M3U8DownloadState, 
+    segment: M3U8Segment, 
+    downloadItem: DownloadItem,
+    abortSignal?: AbortSignal
+  ): Promise<void> {
+    const segmentPath = `${state.segmentsDir}/segment_${segment.index.toString().padStart(5, '0')}.ts`;
+    
+    try {
+      // Skip if already downloaded
+      if (state.downloadedSegments.has(segment.index)) {
+        return;
+      }
+
+      // Check if paused or cancelled
+      if (state.isPaused || state.isCancelled) {
+        return;
+      }
+
+      // Download using fetch and write to file
+      const response = await fetch(segment.uri, { signal: abortSignal });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      // Check again after fetch (might have been paused/cancelled during download)
+      if (state.isPaused || state.isCancelled || abortSignal?.aborted) {
+        return;
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      
+      // Check again before writing
+      if (state.isPaused || state.isCancelled || abortSignal?.aborted) {
+        return;
+      }
+
+      // Verify segments directory still exists (might have been deleted if cancelled)
+      const dirExists = await RNFS.exists(state.segmentsDir);
+      if (!dirExists) {
+        return; // Directory deleted, likely cancelled
+      }
+
+      const base64Data = this.arrayBufferToBase64(arrayBuffer);
+      await RNFS.writeFile(segmentPath, base64Data, 'base64');
+
+      // Update state
+      state.downloadedSegments.add(segment.index);
+      state.downloadedBytes += arrayBuffer.byteLength;
+      state.failedSegments.delete(segment.index);
+
+      // Update progress
+      this.updateM3U8Progress(state, downloadItem);
+
+    } catch (error) {
+      // Don't log warnings if download was cancelled or paused (expected behavior)
+      if (!state.isCancelled && !state.isPaused) {
+        console.warn(`[M3U8] Failed to download segment ${segment.index}:`, error);
+        
+        const retryCount = (state.failedSegments.get(segment.index) || 0) + 1;
+        state.failedSegments.set(segment.index, retryCount);
+        
+        // Delete partial file if exists
+        try {
+          const exists = await RNFS.exists(segmentPath);
+          if (exists) {
+            await RNFS.unlink(segmentPath);
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  }
+
+  /**
+   * Convert ArrayBuffer to Base64
+   * Uses a simple approach that works in React Native
+   */
+  private arrayBufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    const chunkSize = 8192; // Process in chunks to avoid call stack issues
+    let binary = '';
+    
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+      binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    
+    // Use the encode function from react-native's base64
+    const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let result = '';
+    let i = 0;
+    const len = binary.length;
+    
+    while (i < len) {
+      const char1 = binary.charCodeAt(i++);
+      const char2 = i < len ? binary.charCodeAt(i++) : 0;
+      const char3 = i < len ? binary.charCodeAt(i++) : 0;
+      
+      // eslint-disable-next-line no-bitwise
+      const enc1 = char1 >> 2;
+      // eslint-disable-next-line no-bitwise
+      const enc2 = ((char1 & 3) << 4) | (char2 >> 4);
+      // eslint-disable-next-line no-bitwise
+      const enc3 = ((char2 & 15) << 2) | (char3 >> 6);
+      // eslint-disable-next-line no-bitwise
+      const enc4 = char3 & 63;
+      
+      result += base64Chars.charAt(enc1) + base64Chars.charAt(enc2);
+      result += i > len + 1 ? '=' : base64Chars.charAt(enc3);
+      result += i > len ? '=' : base64Chars.charAt(enc4);
+    }
+    
+    return result;
+  }
+
+  /**
+   * Update M3U8 download progress
+   */
+  private updateM3U8Progress(state: M3U8DownloadState, downloadItem: DownloadItem): void {
+    const progress = (state.downloadedSegments.size / state.totalSegments) * 100;
+    const now = Date.now();
+    
+    // Update download item
+    downloadItem.progress = progress;
+    downloadItem.downloadedSize = state.downloadedBytes;
+    downloadItem.updatedAt = new Date();
+    
+    // Estimate download speed
+    if (downloadItem.startedAt) {
+      const elapsedSeconds = (now - downloadItem.startedAt.getTime()) / 1000;
+      if (elapsedSeconds > 0) {
+        downloadItem.downloadSpeed = state.downloadedBytes / elapsedSeconds;
+        
+        // Estimate total size based on downloaded ratio
+        if (state.downloadedSegments.size > 0) {
+          const estimatedTotalBytes = (state.downloadedBytes / state.downloadedSegments.size) * state.totalSegments;
+          downloadItem.totalSize = estimatedTotalBytes;
+          
+          const remainingBytes = estimatedTotalBytes - state.downloadedBytes;
+          downloadItem.estimatedTimeRemaining = remainingBytes / downloadItem.downloadSpeed;
+        }
+      }
+    }
+
+    this.downloads.set(downloadItem.id, downloadItem);
+
+    // Notify progress listener
+    const listener = this.downloadListeners.get(downloadItem.id);
+    if (listener) {
+      listener({
+        downloadId: downloadItem.id,
+        progress,
+        downloadSpeed: downloadItem.downloadSpeed || 0,
+        totalSize: downloadItem.totalSize || 0,
+        downloadedSize: state.downloadedBytes,
+        estimatedTimeRemaining: downloadItem.estimatedTimeRemaining || 0,
+      });
+    }
+
+    // Throttled notification update
+    const lastNotification = this.lastProgressNotification.get(downloadItem.id) || 0;
+    if (now - lastNotification >= CONFIG.PROGRESS_NOTIFICATION_INTERVAL) {
+      this.lastProgressNotification.set(downloadItem.id, now);
+      notificationService.updateForegroundService(downloadItem.id, downloadItem.title, progress)
+        .catch(err => console.warn('Failed to update notification:', err));
+    }
+
+    // Throttled state save
+    const lastSave = this.lastProgressSave.get(downloadItem.id) || 0;
+    if (now - lastSave >= CONFIG.PROGRESS_SAVE_INTERVAL) {
+      this.lastProgressSave.set(downloadItem.id, now);
+      this.saveDownloadsToStorage();
+      this.saveM3U8State(state);
+    }
+  }
+
+  /**
+   * Combine segments and finalize download
+   */
+  private async combineAndFinalize(downloadItem: DownloadItem, state: M3U8DownloadState): Promise<void> {
+    console.log(`[M3U8] Combining ${state.totalSegments} segments...`);
+    
+    // Combine segments
+    for (let i = 0; i < state.totalSegments; i++) {
+      const segmentPath = `${state.segmentsDir}/segment_${i.toString().padStart(5, '0')}.ts`;
+      
+      try {
+        const segmentData = await RNFS.readFile(segmentPath, 'base64');
+        
+        if (i === 0) {
+          await RNFS.writeFile(state.outputPath, segmentData, 'base64');
+        } else {
+          await RNFS.appendFile(state.outputPath, segmentData, 'base64');
+        }
+      } catch (error) {
+        console.error(`Failed to read segment ${i}:`, error);
+      }
+    }
+
+    // Verify output
+    const outputStats = await RNFS.stat(state.outputPath);
+    if (outputStats.size === 0) {
+      throw new Error('Combined video file is empty');
+    }
+
+    console.log(`[M3U8] Combined file size: ${Math.round(outputStats.size / 1024 / 1024)}MB`);
+
+    // Clean up segments
+    try {
+      await RNFS.unlink(state.segmentsDir);
+    } catch (e) {
+      console.warn('Failed to cleanup segments:', e);
+    }
+
+    // Delete M3U8 state
+    await this.deleteM3U8State(downloadItem.id);
+
+    // Finalize download
+    downloadItem.status = DownloadStatus.COMPLETED;
+    downloadItem.progress = 100;
+    downloadItem.totalSize = outputStats.size;
+    downloadItem.downloadedSize = outputStats.size;
+    downloadItem.completedAt = new Date();
+    downloadItem.updatedAt = new Date();
+
+    // Download thumbnail
+    if (downloadItem.posterPath) {
+      await this.downloadThumbnail(downloadItem);
+    }
+
+    this.downloads.set(downloadItem.id, downloadItem);
+    await this.saveDownloadsToStorage();
+
+    this.sendNotification({
+      id: `download_completed_${downloadItem.id}`,
+      title: 'Download Completed',
+      message: `${downloadItem.title} downloaded successfully`,
+      type: 'success',
+      timestamp: new Date(),
+    });
+
+    await notificationService.showDownloadCompleted({
+      downloadId: downloadItem.id,
+      title: downloadItem.title,
+      status: 'completed',
+    });
+
+    await notificationService.stopForegroundService(downloadItem.id);
+    this.lastProgressNotification.delete(downloadItem.id);
+    this.lastProgressSave.delete(downloadItem.id);
+  }
+
+  /**
+   * Download direct video file (non-M3U8)
+   */
+  private async downloadDirectFile(downloadItem: DownloadItem, options: DownloadOptions): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const task = RNBackgroundDownloader.download({
+        id: downloadItem.id,
+        url: downloadItem.videoUrl,
+        destination: downloadItem.filePath!,
+      });
+
+      task
+        .begin(({ expectedBytes }) => {
+          downloadItem.totalSize = expectedBytes;
+          downloadItem.updatedAt = new Date();
+          this.downloads.set(downloadItem.id, downloadItem);
+        })
+        .progress(({ bytesDownloaded, bytesTotal }) => {
+          const progress = (bytesDownloaded / bytesTotal) * 100;
+          const now = Date.now();
+          const elapsedSeconds = downloadItem.startedAt 
+            ? (now - downloadItem.startedAt.getTime()) / 1000 
+            : 1;
+          const downloadSpeed = bytesDownloaded / elapsedSeconds;
+          const estimatedTimeRemaining = (bytesTotal - bytesDownloaded) / downloadSpeed;
+
+          downloadItem.progress = progress;
+          downloadItem.downloadSpeed = downloadSpeed;
+          downloadItem.totalSize = bytesTotal;
+          downloadItem.downloadedSize = bytesDownloaded;
+          downloadItem.estimatedTimeRemaining = estimatedTimeRemaining;
+          downloadItem.updatedAt = new Date();
+
+          this.downloads.set(downloadItem.id, downloadItem);
+
+          // Notify listener
+          const listener = this.downloadListeners.get(downloadItem.id);
+          if (listener) {
+            listener({
+              downloadId: downloadItem.id,
+              progress,
+              downloadSpeed,
+              totalSize: bytesTotal,
+              downloadedSize: bytesDownloaded,
+              estimatedTimeRemaining,
+            });
+          }
+
+          // Throttled notification
+          const lastNotification = this.lastProgressNotification.get(downloadItem.id) || 0;
+          if (now - lastNotification >= CONFIG.PROGRESS_NOTIFICATION_INTERVAL) {
+            this.lastProgressNotification.set(downloadItem.id, now);
+            notificationService.updateForegroundService(downloadItem.id, downloadItem.title, progress)
+              .catch(err => console.warn('Failed to update notification:', err));
+          }
+        })
+        .done(async () => {
+          downloadItem.status = DownloadStatus.COMPLETED;
+          downloadItem.progress = 100;
+          downloadItem.completedAt = new Date();
+          downloadItem.updatedAt = new Date();
+
+          if (downloadItem.posterPath) {
+            await this.downloadThumbnail(downloadItem);
+          }
+
+          if (options.downloadSubtitles) {
+            await this.downloadSubtitles(downloadItem);
+          }
+
+          this.downloads.set(downloadItem.id, downloadItem);
+          await this.saveDownloadsToStorage();
+
+          this.sendNotification({
+            id: `download_completed_${downloadItem.id}`,
+            title: 'Download Completed',
+            message: `${downloadItem.title} downloaded successfully`,
+            type: 'success',
+            timestamp: new Date(),
+          });
+
+          await notificationService.showDownloadCompleted({
+            downloadId: downloadItem.id,
+            title: downloadItem.title,
+            status: 'completed',
+          });
+
+          await notificationService.stopForegroundService(downloadItem.id);
+          this.lastProgressNotification.delete(downloadItem.id);
+          this.activeDownloads.delete(downloadItem.id);
+
+          resolve();
+        })
+        .error(({ error }) => {
+          downloadItem.status = DownloadStatus.FAILED;
+          downloadItem.error = error;
+          downloadItem.updatedAt = new Date();
+
+          this.downloads.set(downloadItem.id, downloadItem);
+          this.saveDownloadsToStorage();
+          this.activeDownloads.delete(downloadItem.id);
+
+          this.sendNotification({
+            id: `download_failed_${downloadItem.id}`,
+            title: 'Download Failed',
+            message: `Failed to download ${downloadItem.title}: ${error}`,
+            type: 'error',
+            timestamp: new Date(),
+          });
+
+          notificationService.showDownloadFailed({
+            downloadId: downloadItem.id,
+            title: downloadItem.title,
+            status: 'failed',
+            error: error,
+          });
+
+          notificationService.stopForegroundService(downloadItem.id);
+          this.lastProgressNotification.delete(downloadItem.id);
+
+          reject(new Error(error));
+        });
+
+      this.activeDownloads.set(downloadItem.id, { task, taskId: downloadItem.id });
+    });
   }
 
   /**
@@ -1133,21 +1246,17 @@ export class DownloadService {
       }).promise;
     } catch (error) {
       console.warn('Failed to download thumbnail:', error);
-      // Don't fail the entire download for thumbnail errors
     }
   }
 
   /**
-   * Download subtitles for content
+   * Download subtitles
    */
   private async downloadSubtitles(downloadItem: DownloadItem): Promise<void> {
     try {
-      // This would integrate with your subtitle service
-      // For now, we'll just create a placeholder
-      downloadItem.subtitlePaths = []; // Would be populated with actual subtitle files
+      downloadItem.subtitlePaths = [];
     } catch (error) {
       console.warn('Failed to download subtitles:', error);
-      // Don't fail the entire download for subtitle errors
     }
   }
 
@@ -1161,8 +1270,27 @@ export class DownloadService {
         throw this.createDownloadError('Download not found', null);
       }
 
+      // Check if download is in a pausable state
+      if (downloadItem.status !== DownloadStatus.DOWNLOADING && 
+          downloadItem.status !== DownloadStatus.PENDING) {
+        console.log(`[Pause] Download ${downloadId} is not in pausable state: ${downloadItem.status}`);
+        return;
+      }
+
+      console.log(`[Pause] Pausing download: ${downloadId}`);
+
+      // Pause M3U8 download
+      const m3u8State = this.m3u8Downloads.get(downloadId);
+      if (m3u8State) {
+        console.log(`[Pause] Setting M3U8 state isPaused=true for ${downloadId}`);
+        m3u8State.isPaused = true;
+        await this.saveM3U8State(m3u8State);
+      }
+
+      // Pause direct download
       const activeDownload = this.activeDownloads.get(downloadId);
       if (activeDownload) {
+        console.log(`[Pause] Pausing active download task for ${downloadId}`);
         activeDownload.task.pause();
       }
 
@@ -1179,7 +1307,6 @@ export class DownloadService {
         timestamp: new Date(),
       });
 
-      // Show system notification for paused state
       await notificationService.showDownloadPaused({
         downloadId: downloadId,
         title: downloadItem.title,
@@ -1187,8 +1314,8 @@ export class DownloadService {
         status: 'paused',
       });
 
-      // Stop foreground service when paused (will only stop if no more active downloads)
       await notificationService.stopForegroundService(downloadId);
+      console.log(`[Pause] Download ${downloadId} paused successfully`);
     } catch (error) {
       console.error('Failed to pause download:', error);
       throw error;
@@ -1205,25 +1332,66 @@ export class DownloadService {
         throw this.createDownloadError('Download not found', null);
       }
 
-      if (downloadItem.status !== DownloadStatus.PAUSED) {
-        throw this.createDownloadError('Download is not paused', null);
+      if (downloadItem.status !== DownloadStatus.PAUSED && 
+          downloadItem.status !== DownloadStatus.FAILED) {
+        throw this.createDownloadError('Download is not paused or failed', null);
       }
 
-      // Check if we have an active task to resume
+      console.log(`[Resume] Resuming download: ${downloadId}`);
+
+      // Start foreground service
+      await notificationService.startForegroundService(downloadId, downloadItem.title);
+
+      // Check if this is an M3U8 download
+      const isM3U8 = this.isM3U8Url(downloadItem.videoUrl);
+      
+      if (isM3U8) {
+        // Try to load M3U8 state from memory or disk
+        let m3u8State = this.m3u8Downloads.get(downloadId);
+        
+        if (!m3u8State) {
+          // Try to load from disk (app might have been restarted)
+          await this.loadM3U8States();
+          m3u8State = this.m3u8Downloads.get(downloadId);
+        }
+        
+        if (m3u8State) {
+          console.log(`[Resume] Found M3U8 state with ${m3u8State.downloadedSegments.size}/${m3u8State.totalSegments} segments, isPaused=${m3u8State.isPaused}, isCancelled=${m3u8State.isCancelled}`);
+          m3u8State.isPaused = false;
+          m3u8State.isCancelled = false;
+          // Update the state in the map to ensure consistency
+          this.m3u8Downloads.set(downloadId, m3u8State);
+          console.log(`[Resume] Reset M3U8 state: isPaused=${m3u8State.isPaused}, isCancelled=${m3u8State.isCancelled}`);
+        } else {
+          console.log(`[Resume] No M3U8 state found, will create fresh state`);
+        }
+        
+        downloadItem.status = DownloadStatus.DOWNLOADING;
+        downloadItem.updatedAt = new Date();
+        if (!downloadItem.startedAt) {
+          downloadItem.startedAt = new Date();
+        }
+        this.downloads.set(downloadId, downloadItem);
+        await this.saveDownloadsToStorage();
+        
+        // Continue downloading - downloadM3U8Concurrent will handle the state
+        const options: DownloadOptions = { quality: downloadItem.quality };
+        await this.downloadM3U8Concurrent(downloadItem, options);
+        return;
+      }
+
+      // Resume direct download
       const activeDownload = this.activeDownloads.get(downloadId);
       if (activeDownload) {
-        // Resume existing task
+        console.log(`[Resume] Resuming active download task for ${downloadId}`);
         activeDownload.task.resume();
         downloadItem.status = DownloadStatus.DOWNLOADING;
         downloadItem.updatedAt = new Date();
         this.downloads.set(downloadId, downloadItem);
         await this.saveDownloadsToStorage();
-
-        // Start foreground service to maintain download speed
-        // This also shows the download notification
-        await notificationService.startForegroundService(downloadId, downloadItem.title);
       } else {
-        // Restart download if no active task exists
+        // Restart download if no active task
+        console.log(`[Resume] No active task found, restarting download for ${downloadId}`);
         downloadItem.status = DownloadStatus.PENDING;
         const options: DownloadOptions = {
           quality: downloadItem.quality,
@@ -1233,6 +1401,18 @@ export class DownloadService {
       }
     } catch (error) {
       console.error('Failed to resume download:', error);
+      
+      // Update status to failed if resume fails
+      const downloadItem = this.downloads.get(downloadId);
+      if (downloadItem) {
+        downloadItem.status = DownloadStatus.FAILED;
+        downloadItem.error = error instanceof Error ? error.message : 'Resume failed';
+        downloadItem.updatedAt = new Date();
+        this.downloads.set(downloadId, downloadItem);
+        await this.saveDownloadsToStorage();
+      }
+      
+      await notificationService.stopForegroundService(downloadId);
       throw error;
     }
   }
@@ -1247,18 +1427,77 @@ export class DownloadService {
         throw this.createDownloadError('Download not found', null);
       }
 
+      console.log(`[Cancel] Cancelling download: ${downloadId}, current status: ${downloadItem.status}`);
+
+      // Cancel M3U8 download
+      const m3u8State = this.m3u8Downloads.get(downloadId);
+      if (m3u8State) {
+        console.log(`[Cancel] Setting M3U8 state isCancelled=true for ${downloadId}`);
+        m3u8State.isCancelled = true;
+        m3u8State.isPaused = false; // Ensure not paused to allow cleanup
+        
+        // Clean up segments directory
+        try {
+          const exists = await RNFS.exists(m3u8State.segmentsDir);
+          if (exists) {
+            // Delete all segment files first
+            const files = await RNFS.readDir(m3u8State.segmentsDir);
+            for (const file of files) {
+              try {
+                await RNFS.unlink(file.path);
+              } catch (e) {
+                console.warn(`Failed to delete segment ${file.path}:`, e);
+              }
+            }
+            // Then delete directory
+            await RNFS.unlink(m3u8State.segmentsDir);
+            console.log(`[Cancel] Cleaned up segments directory for ${downloadId}`);
+          }
+        } catch (e) {
+          console.warn('Failed to cleanup segments:', e);
+        }
+        
+        await this.deleteM3U8State(downloadId);
+      }
+
+      // Cancel direct download
       const activeDownload = this.activeDownloads.get(downloadId);
       if (activeDownload) {
+        console.log(`[Cancel] Stopping active download task for ${downloadId}`);
         activeDownload.task.stop();
         this.activeDownloads.delete(downloadId);
       }
 
-      // Delete partial files
+      // Delete partial video file
       if (downloadItem.filePath) {
-        const exists = await RNFS.exists(downloadItem.filePath);
-        if (exists) {
-          await RNFS.unlink(downloadItem.filePath);
+        try {
+          const exists = await RNFS.exists(downloadItem.filePath);
+          if (exists) {
+            await RNFS.unlink(downloadItem.filePath);
+            console.log(`[Cancel] Deleted partial file: ${downloadItem.filePath}`);
+          }
+        } catch (e) {
+          console.warn('Failed to delete partial file:', e);
         }
+      }
+
+      // Also try to delete segments directory by generating paths (in case m3u8State wasn't found)
+      const filePaths = this.generateFilePaths(downloadId, downloadItem.quality);
+      try {
+        const segmentsDirExists = await RNFS.exists(filePaths.segmentsDir);
+        if (segmentsDirExists) {
+          const files = await RNFS.readDir(filePaths.segmentsDir);
+          for (const file of files) {
+            try {
+              await RNFS.unlink(file.path);
+            } catch {
+              // Ignore
+            }
+          }
+          await RNFS.unlink(filePaths.segmentsDir);
+        }
+      } catch {
+        // Ignore - directory might not exist
       }
 
       downloadItem.status = DownloadStatus.CANCELLED;
@@ -1274,18 +1513,18 @@ export class DownloadService {
         timestamp: new Date(),
       });
 
-      // Cancel system notification
       await notificationService.showDownloadCancelled({
         downloadId: downloadId,
         title: downloadItem.title,
         status: 'cancelled',
       });
 
-      // Stop foreground service (will only stop if no more active downloads)
       await notificationService.stopForegroundService(downloadId);
-
-      // Clean up progress notification tracking
       this.lastProgressNotification.delete(downloadId);
+      this.lastProgressSave.delete(downloadId);
+      this.downloadListeners.delete(downloadId);
+      
+      console.log(`[Cancel] Download ${downloadId} cancelled successfully`);
     } catch (error) {
       console.error('Failed to cancel download:', error);
       throw error;
@@ -1303,9 +1542,13 @@ export class DownloadService {
       }
 
       // Cancel if actively downloading
-      if (downloadItem.status === DownloadStatus.DOWNLOADING) {
+      if (downloadItem.status === DownloadStatus.DOWNLOADING || 
+          downloadItem.status === DownloadStatus.PENDING) {
         await this.cancelDownload(downloadId);
       }
+
+      // Delete M3U8 state if exists
+      await this.deleteM3U8State(downloadId);
 
       // Delete files
       const filesToDelete = [
@@ -1315,21 +1558,51 @@ export class DownloadService {
       ].filter(Boolean) as string[];
 
       for (const filePath of filesToDelete) {
-        const exists = await RNFS.exists(filePath);
-        if (exists) {
-          await RNFS.unlink(filePath);
+        try {
+          const exists = await RNFS.exists(filePath);
+          if (exists) {
+            await RNFS.unlink(filePath);
+          }
+        } catch (e) {
+          console.warn(`Failed to delete file ${filePath}:`, e);
         }
       }
 
-      // Delete subtitles directory
-      const subtitlesDir = `${DownloadService.SUBTITLES_DIR}/${downloadId}`;
-      const subtitlesDirExists = await RNFS.exists(subtitlesDir);
-      if (subtitlesDirExists) {
-        await RNFS.unlink(subtitlesDir);
+      // Delete segments directory (for M3U8 downloads that may have partial data)
+      const filePaths = this.generateFilePaths(downloadId, downloadItem.quality);
+      try {
+        const segmentsDirExists = await RNFS.exists(filePaths.segmentsDir);
+        if (segmentsDirExists) {
+          // Read directory contents and delete each file first
+          const files = await RNFS.readDir(filePaths.segmentsDir);
+          for (const file of files) {
+            try {
+              await RNFS.unlink(file.path);
+            } catch (e) {
+              console.warn(`Failed to delete segment file ${file.path}:`, e);
+            }
+          }
+          // Then delete the directory
+          await RNFS.unlink(filePaths.segmentsDir);
+        }
+      } catch (e) {
+        console.warn('Failed to delete segments dir:', e);
       }
 
-      // Remove from downloads map
+      // Delete subtitles directory
+      try {
+        const subtitlesDirExists = await RNFS.exists(filePaths.subtitlesDir);
+        if (subtitlesDirExists) {
+          await RNFS.unlink(filePaths.subtitlesDir);
+        }
+      } catch (e) {
+        console.warn('Failed to delete subtitles dir:', e);
+      }
+
       this.downloads.delete(downloadId);
+      this.downloadListeners.delete(downloadId);
+      this.lastProgressNotification.delete(downloadId);
+      this.lastProgressSave.delete(downloadId);
       await this.saveDownloadsToStorage();
 
       this.sendNotification({
@@ -1343,6 +1616,13 @@ export class DownloadService {
       console.error('Failed to delete download:', error);
       throw error;
     }
+  }
+
+  /**
+   * Helper delay function
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**

@@ -374,6 +374,18 @@ export enum DownloadQuality {
   ULTRA = '4K',
 }
 
+// M3U8 stream resolution info for download selection
+export interface M3U8StreamInfo {
+  bandwidth: number;
+  resolution: string;
+  width: number;
+  height: number;
+  url: string;
+  codecs?: string;
+  frameRate?: number;
+  label: string; // User-friendly label like "1080p HD"
+}
+
 export interface DownloadItem {
   id: string;
   contentId: number;

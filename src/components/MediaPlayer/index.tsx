@@ -122,9 +122,9 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const { isFullscreen, toggleFullscreen } = useFullscreen((val) => {
     if (setFullscreen) setFullscreen(val);
     if (onFullscreenChange) onFullscreenChange(val);
-  });
+  }, fullscreen); // Pass initial fullscreen state from prop
 
-  // Sync internal fullscreen state with prop
+  // Sync internal fullscreen state with prop (for dynamic changes after mount)
   useEffect(() => {
     if (typeof fullscreen === 'boolean' && fullscreen !== isFullscreen) {
       // Only update if different
@@ -174,7 +174,16 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
   // Seek to initial progress when video loads
   useEffect(() => {
+    console.log('[MediaPlayer] Initial progress check:', {
+      duration,
+      initialProgress,
+      hasStartedFromProgress,
+      hasVideoRef: !!videoRef.current,
+      shouldSeek: duration > 0 && initialProgress > 0 && !hasStartedFromProgress && videoRef.current,
+    });
+    
     if (duration > 0 && initialProgress > 0 && !hasStartedFromProgress && videoRef.current) {
+      console.log('[MediaPlayer] Seeking to initial progress:', initialProgress);
       videoRef.current.seek(initialProgress);
       setCurrentTime(initialProgress);
       setHasStartedFromProgress(true);
