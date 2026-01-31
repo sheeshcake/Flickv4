@@ -19,6 +19,7 @@ import {downloadService} from '../services/DownloadService';
 import {SubtitleSettings, SubtitleStyleSettings} from '../components';
 import {useNavigation} from '@react-navigation/native';
 import type {BottomTabNavigationProp} from '@react-navigation/bottom-tabs';
+import {version as appVersion} from '../../package.json';
 
 type Props = MainTabScreenProps<'Settings'>;
 
@@ -39,7 +40,6 @@ export const SettingsScreen: React.FC<Props> = () => {
   const [showSubtitleStyleSettings, setShowSubtitleStyleSettings] = useState(false);
 
   const isDarkTheme = state.ui.theme === 'dark';
-  const appVersion = '1.0.2'; // From package.json
 
   // Load storage info on component mount
   useEffect(() => {

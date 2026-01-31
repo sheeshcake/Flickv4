@@ -2,6 +2,7 @@ import { View, Text, Modal, Image, TouchableOpacity, ScrollView, Linking, StyleS
 import React, { useEffect, useState } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, sizes } from '../../constants/theme';
+import { version as appVersion } from '../../../package.json';
 
 interface CreditsModalProps {
     isOpen: boolean;
@@ -50,7 +51,7 @@ const CreditsModal: React.FC<CreditsModalProps> = ({ isOpen, onClose }) => {
                         style={styles.logo}
                         resizeMode="contain"
                     />
-                    <Text style={styles.versionText}>1.1.0</Text>
+                    <Text style={styles.versionText}>{appVersion}</Text>
                     <ScrollView>
                         <Text style={styles.sectionTitle}>
                             What is Flick?

@@ -5,6 +5,7 @@ import {
   DownloadStatus, 
   DownloadNotification,
   DownloadQuality,
+  M3U8StreamInfo,
   Movie,
   TVShow
 } from '../types';
@@ -16,6 +17,7 @@ export interface UseDownloadsReturn {
   isDownloaded: (contentId: number, contentType: 'movie' | 'tv', season?: number, episode?: number) => boolean;
   getDownloadProgress: (contentId: number, contentType: 'movie' | 'tv', season?: number, episode?: number) => number;
   getDownloadedPath: (contentId: number, contentType: 'movie' | 'tv', season?: number, episode?: number) => string | null;
+  getAvailableResolutions: (videoUrl: string) => Promise<M3U8StreamInfo[]>;
   startDownload: (
     content: Movie | TVShow,
     videoUrl: string,
@@ -244,12 +246,23 @@ export const useDownloads = (): UseDownloadsReturn => {
     await loadDownloads();
   }, [loadDownloads]);
 
+  // Get available resolutions for M3U8 streams
+  const getAvailableResolutions = useCallback(async (videoUrl: string): Promise<M3U8StreamInfo[]> => {
+    try {
+      return await downloadService.getAvailableResolutions(videoUrl);
+    } catch (error) {
+      console.error('Failed to get available resolutions:', error);
+      return [];
+    }
+  }, []);
+
   return {
     downloads,
     isDownloading,
     isDownloaded,
     getDownloadProgress,
     getDownloadedPath,
+    getAvailableResolutions,
     startDownload,
     pauseDownload,
     resumeDownload,
@@ -258,6 +271,7 @@ export const useDownloads = (): UseDownloadsReturn => {
     refreshDownloads,
     storageInfo,
   };
+};
 };
 
 export default useDownloads;

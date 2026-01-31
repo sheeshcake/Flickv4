@@ -91,6 +91,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   const [pendingDownload, setPendingDownload] = useState(false);
   const [isVideoFullscreen, setIsVideoFullscreen] = useState(false);
   const hasAppliedWatchProgressRef = useRef(false);
+  const pendingFullscreenRef = useRef(false); // Track if we should restore fullscreen after episode change
 
   // Get autoplay preference from user settings
   const autoplayEnabled = state.user.preferences.autoplay;
@@ -359,6 +360,8 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   const handleEpisodeChange = useCallback(
     (episodeNumber: number, _episodeName: string) => {
       hasAppliedWatchProgressRef.current = true; // Mark as applied to prevent watchProgress from overriding
+      // Save current fullscreen state to restore after new episode loads
+      pendingFullscreenRef.current = isVideoFullscreen;
       setSelectedEpisode(episodeNumber);
       setInitialVideoDuration(0); // Reset seek time to 0 for new episode
       setCurrentVideoUrl(''); // Clear current video URL to force re-render of MediaPlayer
@@ -370,7 +373,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
         setScrapingError(null);
       }
     },
-    [autoplayEnabled],
+    [autoplayEnabled, isVideoFullscreen],
   );
 
   // Auto-start video if autoplay is enabled
@@ -425,11 +428,54 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
       setShowScrapper(false);
       setScrapingVideo(false);
 
-      // Only apply watch progress if not manually changed episode (hasAppliedWatchProgressRef is false)
-      // When user changes episode manually, hasAppliedWatchProgressRef is set to true, so we start from 0
-      if (!hasAppliedWatchProgressRef.current && watchProgress && watchProgress.progress > 0) {
-        setInitialVideoDuration((watchProgress.progress / 100) * watchProgress.duration);
+      // Only apply watch progress if:
+      // 1. watchProgress exists and has progress > 0
+      // 2. For TV shows: the saved season/episode matches the currently selected season/episode
+      //    OR the selected season/episode hasn't been set yet (we're resuming from watchProgress)
+      // Note: hasAppliedWatchProgressRef tracks if user MANUALLY changed episode - if true, don't apply saved progress
+      //       But if resuming from continue watching (auto-selected), we SHOULD apply the progress
+      const isTVShowResumingFromProgress = !isMovie(content) && 
+        watchProgress && 
+        watchProgress.season && 
+        watchProgress.episode &&
+        (
+          // Either we match the saved progress exactly
+          (watchProgress.season === selectedSeason && watchProgress.episode === selectedEpisode) ||
+          // Or selectedEpisode is still null/unset (we're resuming and episode selection effect hasn't completed)
+          selectedEpisode === null
+        );
+      
+      // For TV shows resuming from watchProgress, we should apply progress even if hasAppliedWatchProgressRef is true
+      // because hasAppliedWatchProgressRef only indicates that the episode SELECTION was applied, not that seek was applied
+      const isManualEpisodeChange = hasAppliedWatchProgressRef.current && !isTVShowResumingFromProgress;
+      
+      const shouldApplyProgress = !isManualEpisodeChange && 
+        watchProgress && 
+        watchProgress.progress > 0 &&
+        (isMovie(content) || isTVShowResumingFromProgress);
+
+      console.log('handleVideoExtracted - shouldApplyProgress check:', {
+        hasAppliedWatchProgressRef: hasAppliedWatchProgressRef.current,
+        watchProgressExists: !!watchProgress,
+        watchProgressProgress: watchProgress?.progress,
+        watchProgressSeason: watchProgress?.season,
+        watchProgressEpisode: watchProgress?.episode,
+        watchProgressDuration: watchProgress?.duration,
+        selectedSeason,
+        selectedEpisode,
+        isMovieContent: isMovie(content),
+        isTVShowResumingFromProgress,
+        isManualEpisodeChange,
+        shouldApplyProgress,
+        calculatedSeekTime: shouldApplyProgress && watchProgress ? (watchProgress.progress / 100) * watchProgress.duration : 0,
+      });
+
+      if (shouldApplyProgress) {
+        const seekTime = (watchProgress.progress / 100) * watchProgress.duration;
+        console.log('Setting initialVideoDuration to:', seekTime);
+        setInitialVideoDuration(seekTime);
       } else {
+        console.log('Setting initialVideoDuration to 0');
         setInitialVideoDuration(0); // Start from beginning for new episode selection
       }
 
@@ -593,6 +639,7 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
                     : undefined
                 }
                 navigation={navigation}
+                fullscreen={pendingFullscreenRef.current}
                 onFullscreenChange={setIsVideoFullscreen}
               />
             ) : (

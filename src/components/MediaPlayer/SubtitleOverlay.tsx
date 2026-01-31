@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, ViewStyle, TextStyle } from 'react-native';
+import { View, Text, ViewStyle, TextStyle } from 'react-native';
 import { SubtitleStyle, DEFAULT_SUBTITLE_STYLE } from '../../types';
 
 interface SubtitleCue {
@@ -95,12 +95,11 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   // Dynamic container style based on position
   const containerStyle: ViewStyle = useMemo(() => ({
     position: 'absolute',
-    left: 0,
-    right: 0,
     alignItems: 'center',
     paddingHorizontal: 20,
-    ...(style.position === 'top' ? { top: 50 } : { bottom: 20 }),
-  }), [style.position]);
+    // backgroundColor: 'red', // For debugging
+    ...(style.position === 'top' ? { top: 50 } : { bottom: isVideoFullscreen ? -70 : 20 }),
+  }), [style.position, isVideoFullscreen]);
 
   // Dynamic text style
   const textStyle: TextStyle = useMemo(() => ({
