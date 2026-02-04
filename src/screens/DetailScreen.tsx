@@ -156,6 +156,18 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
     }
   }, [validContent]);
 
+  // Stop video when navigating away from this screen (blur event)
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('blur', () => {
+      // Stop video playback when leaving the screen
+      setShowVideoPlayer(false);
+      setCurrentVideoUrl('');
+      setIsVideoFullscreen(false);
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
   // Hide tab bar when video is in fullscreen
   useEffect(() => {
     // Try to find and hide the tab navigator
@@ -256,6 +268,13 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   const handleSimilarItemPress = useCallback(
     (item: Movie | TVShow) => {
       if (!item) return;
+      
+      // Stop current video before navigating to prevent audio/video overlap
+      setShowVideoPlayer(false);
+      setCurrentVideoUrl('');
+      setIsVideoFullscreen(false);
+      
+      // Navigate to the new content
       navigation.push('Detail', { content: item });
     },
     [navigation],
@@ -734,7 +753,6 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
                   size="medium"
                   style={styles.downloadButton}
                   onVideoNeeded={() => {
-                    // Trigger video scraping when download is attempted but no URL is available
                     setPendingDownload(true);
                     setShowScrapper(true);
                     setScrapingVideo(true);

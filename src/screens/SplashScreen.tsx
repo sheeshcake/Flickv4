@@ -1,19 +1,45 @@
-import React, {useEffect, useMemo} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {View, StyleSheet, Image, ActivityIndicator, Text} from 'react-native';
 import type {RootStackScreenProps} from '../types/navigation';
 import {useAppContext} from '../context/AppContext';
 import {COLORS} from '../utils/constants';
+import {updateService, UpdateInfo} from '../services/UpdateService';
+import {UpdateModal} from '../components/UpdateModal';
 
 const SplashScreen: React.FC<RootStackScreenProps<'Splash'>> = ({navigation}) => {
   const {state} = useAppContext();
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [updateCheckComplete, setUpdateCheckComplete] = useState(false);
 
   const isInitialLoading = useMemo(() => {
     const loadingFlag = state.ui.loading.initialLoad;
     return loadingFlag === undefined ? true : loadingFlag;
   }, [state.ui.loading.initialLoad]);
 
+  // Check for updates in the background
   useEffect(() => {
-    if (!isInitialLoading) {
+    const checkForUpdates = async () => {
+      try {
+        const info = await updateService.checkForUpdates();
+        if (info.hasUpdate) {
+          setUpdateInfo(info);
+          setShowUpdateModal(true);
+        } else {
+          setUpdateCheckComplete(true);
+        }
+      } catch (_error) {
+        // Silently fail - don't block the app if update check fails
+        setUpdateCheckComplete(true);
+      }
+    };
+
+    checkForUpdates();
+  }, []);
+
+  // Navigate to main screen when both loading is complete and no update modal is showing
+  useEffect(() => {
+    if (!isInitialLoading && updateCheckComplete && !showUpdateModal) {
       const timeoutId = setTimeout(() => {
         navigation.reset({
           index: 0,
@@ -23,7 +49,17 @@ const SplashScreen: React.FC<RootStackScreenProps<'Splash'>> = ({navigation}) =>
 
       return () => clearTimeout(timeoutId);
     }
-  }, [isInitialLoading, navigation]);
+  }, [isInitialLoading, updateCheckComplete, showUpdateModal, navigation]);
+
+  const handleCloseUpdateModal = () => {
+    setShowUpdateModal(false);
+    setUpdateCheckComplete(true);
+  };
+
+  const handleSkipVersion = () => {
+    setShowUpdateModal(false);
+    setUpdateCheckComplete(true);
+  };
 
   return (
     <View style={styles.container}>
@@ -34,6 +70,14 @@ const SplashScreen: React.FC<RootStackScreenProps<'Splash'>> = ({navigation}) =>
       />
       <ActivityIndicator size="large" color={COLORS.NETFLIX_RED} />
       <Text style={styles.subtitle}>Loading your experience...</Text>
+
+      <UpdateModal
+        visible={showUpdateModal}
+        onClose={handleCloseUpdateModal}
+        isDarkTheme={true}
+        initialUpdateInfo={updateInfo}
+        onSkipVersion={handleSkipVersion}
+      />
     </View>
   );
 };

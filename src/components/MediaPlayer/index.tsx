@@ -115,7 +115,13 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const [subtitleDelay, setSubtitleDelay] = useState(0);
 
   const videoRef = useRef<any>(null);
+  const videoUrlRef = useRef<string>(videoUrl); // Track current URL for error handling
   const { state, updateWatchProgress } = useAppState();
+
+  // Keep the ref updated with the latest videoUrl
+  useEffect(() => {
+    videoUrlRef.current = videoUrl;
+  }, [videoUrl]);
 
   // Custom hooks
   // If fullscreen/setFullscreen are provided, use them as the source of truth
@@ -241,10 +247,17 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   }, []);
 
   const handleError = useCallback((error: any) => {
+    // Don't log errors when video URL is empty (happens during navigation cleanup)
+    // Use ref to get the current URL value, not the stale closure value
+    const currentUrl = videoUrlRef.current;
+    if (!currentUrl || currentUrl.trim() === '') {
+      console.log('[MediaPlayer] Video error ignored - URL is empty (navigation cleanup)');
+      return;
+    }
     console.error('[MediaPlayer] Video error:', error);
     setVideoStatus('error');
     setIsBuffering(false);
-  }, []);
+  }, []); // No dependencies needed since we use ref
 
   const handleSeek = useCallback((time: number) => {
     if (videoRef.current && duration > 0) {

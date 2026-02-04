@@ -137,7 +137,7 @@ const DownloadsScreen: React.FC<DownloadsScreenProps> = ({ navigation }) => {
         ]
       );
     }
-  }, [loadDownloads]);
+  }, [navigation, loadDownloads]);
 
   // Handle delete download
   const handleDeleteDownload = useCallback((download: DownloadItem) => {

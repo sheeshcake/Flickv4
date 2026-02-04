@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Alert } from 'react-native';
 import { 
   DownloadItem, 
@@ -42,6 +42,7 @@ export interface UseDownloadsReturn {
 
 /**
  * Hook for managing downloads in the app
+ * Optimized to reduce re-renders and main thread pressure
  */
 export const useDownloads = (): UseDownloadsReturn => {
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
@@ -52,6 +53,10 @@ export const useDownloads = (): UseDownloadsReturn => {
     usedSpace: 0,
     availableSpace: 0,
   });
+  
+  // Throttle notification handling to prevent excessive refreshes
+  const lastRefreshRef = useRef<number>(0);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Generate download ID (same logic as in DownloadService)
   const generateDownloadId = useCallback((
@@ -67,9 +72,27 @@ export const useDownloads = (): UseDownloadsReturn => {
     return base;
   }, []);
 
-  // Load downloads from service
+  // Load downloads from service - heavily throttled
   const loadDownloads = useCallback(async () => {
+    const now = Date.now();
+    const timeSinceLastRefresh = now - lastRefreshRef.current;
+    
+    // Throttle refreshes to at most once per 2 seconds
+    if (timeSinceLastRefresh < 2000) {
+      // Schedule a delayed refresh if one isn't already scheduled
+      if (!refreshTimeoutRef.current) {
+        refreshTimeoutRef.current = setTimeout(() => {
+          refreshTimeoutRef.current = null;
+          loadDownloads();
+        }, 2000 - timeSinceLastRefresh);
+      }
+      return;
+    }
+    
+    lastRefreshRef.current = now;
+    
     try {
+      // Direct update - already throttled
       const allDownloads = downloadService.getAllDownloads();
       setDownloads(allDownloads);
 
@@ -80,18 +103,14 @@ export const useDownloads = (): UseDownloadsReturn => {
     }
   }, []);
 
-  // Handle download notifications
+  // Handle download notifications - with debouncing
   const handleNotification = useCallback((notification: DownloadNotification) => {
-    console.log('Download notification:', notification);
-    
     // Show user-friendly notifications for important events
-    if (notification.type === 'success') {
-      // Optionally show success toast
-    } else if (notification.type === 'error') {
+    if (notification.type === 'error') {
       Alert.alert('Download Error', notification.message);
     }
     
-    // Refresh downloads when there's a notification
+    // Refresh downloads when there's a notification (throttled)
     loadDownloads();
   }, [loadDownloads]);
 
@@ -104,6 +123,10 @@ export const useDownloads = (): UseDownloadsReturn => {
 
     return () => {
       downloadService.removeNotificationListener(handleNotification);
+      // Clear any pending refresh timeout
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
     };
   }, [loadDownloads, handleNotification]);
 
@@ -271,7 +294,6 @@ export const useDownloads = (): UseDownloadsReturn => {
     refreshDownloads,
     storageInfo,
   };
-};
 };
 
 export default useDownloads;
