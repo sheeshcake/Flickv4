@@ -44,6 +44,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
     <View
       style={[
         styles.bottomBar,
+        fullscreen ? styles.bottomBarFullscreen : styles.bottomBarRegular,
         hidden ? styles.bottomBarHidden : styles.bottomBarVisible,
       ]}
     >

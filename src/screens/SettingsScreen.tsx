@@ -16,7 +16,7 @@ import {AppActionType} from '../types';
 import {StorageService} from '../services/StorageService';
 import {TMDBService} from '../services/TMDBService';
 import {downloadService} from '../services/DownloadService';
-import {SubtitleSettings, SubtitleStyleSettings} from '../components';
+import {SubtitleSettings, SubtitleStyleSettings, UpdateModal} from '../components';
 import {useNavigation} from '@react-navigation/native';
 import type {BottomTabNavigationProp} from '@react-navigation/bottom-tabs';
 import {version as appVersion} from '../../package.json';
@@ -38,6 +38,7 @@ export const SettingsScreen: React.FC<Props> = () => {
   const [showLikedContent, setShowLikedContent] = useState(false);
   const [showSubtitleSettings, setShowSubtitleSettings] = useState(false);
   const [showSubtitleStyleSettings, setShowSubtitleStyleSettings] = useState(false);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   const isDarkTheme = state.ui.theme === 'dark';
 
@@ -487,6 +488,12 @@ export const SettingsScreen: React.FC<Props> = () => {
               <Text style={styles.infoLabel}>Data Source</Text>
               <Text style={styles.infoValue}>The Movie Database (TMDB)</Text>
             </View>
+
+            <TouchableOpacity
+              style={[styles.button, styles.updateButton]}
+              onPress={() => setShowUpdateModal(true)}>
+              <Text style={styles.buttonText}>Check for Updates</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -510,6 +517,13 @@ export const SettingsScreen: React.FC<Props> = () => {
       >
         <SubtitleStyleSettings onClose={() => setShowSubtitleStyleSettings(false)} />
       </Modal>
+
+      {/* Update Modal */}
+      <UpdateModal
+        visible={showUpdateModal}
+        onClose={() => setShowUpdateModal(false)}
+        isDarkTheme={isDarkTheme}
+      />
     </View>
   );
 };
@@ -816,6 +830,9 @@ const getStyles = (isDarkTheme: boolean) =>
     },
     secondaryButtonText: {
       color: isDarkTheme ? '#FFFFFF' : '#000000',
+    },
+    updateButton: {
+      backgroundColor: '#4CAF50',
     },
     likedContentContainer: {
       marginTop: 15,

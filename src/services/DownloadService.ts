@@ -1,5 +1,6 @@
 import RNFS from 'react-native-fs';
 import RNBackgroundDownloader, { DownloadTask } from '@kesha-antonov/react-native-background-downloader';
+import { fromByteArray } from 'react-native-quick-base64';
 import { 
   DownloadItem, 
   DownloadStatus, 
@@ -15,6 +16,12 @@ import {
 import { TMDBService } from './TMDBService';
 import { StorageService } from './StorageService';
 import { notificationService } from './NotificationService';
+import {
+  startBackgroundDownload,
+  stopBackgroundDownload,
+  isBackgroundDownloadRunning,
+  BackgroundDownloadParams,
+} from './BackgroundDownloadTask';
 
 export interface DownloadOptions {
   quality: DownloadQuality;
@@ -22,6 +29,7 @@ export interface DownloadOptions {
   wifiOnly?: boolean;
   overwriteExisting?: boolean;
   selectedStreamUrl?: string; // For M3U8: specific stream URL from getAvailableResolutions
+  useBackgroundTask?: boolean; // Use HeadlessJS background task for better performance
 }
 
 export interface DownloadJobResult {
@@ -62,11 +70,12 @@ export interface M3U8DownloadState {
 
 // Configuration
 const CONFIG = {
-  M3U8_CONCURRENCY: 5, // Download 5 segments at a time
+  M3U8_CONCURRENCY: 3, // Download 3 segments at a time (reduced for better performance)
   MAX_RETRIES: 3, // Retry failed segments up to 3 times
   RETRY_DELAY: 1000, // Wait 1 second before retrying
-  PROGRESS_NOTIFICATION_INTERVAL: 2000, // Update notification every 2 seconds
-  PROGRESS_SAVE_INTERVAL: 5000, // Save progress to storage every 5 seconds
+  PROGRESS_NOTIFICATION_INTERVAL: 5000, // Update notification every 5 seconds
+  PROGRESS_SAVE_INTERVAL: 15000, // Save progress to storage every 15 seconds
+  PROGRESS_LISTENER_INTERVAL: 2000, // Minimum interval between progress listener calls (2 seconds)
 };
 
 /**
@@ -89,6 +98,7 @@ export class DownloadService {
   private tmdbService: TMDBService;
   private lastProgressNotification: Map<string, number> = new Map();
   private lastProgressSave: Map<string, number> = new Map();
+  private lastProgressListener: Map<string, number> = new Map();
 
   // Storage paths
   private static readonly DOWNLOADS_DIR = `${RNFS.DocumentDirectoryPath}/FlickDownloads`;
@@ -369,10 +379,10 @@ export class DownloadService {
         timestamp: new Date(),
       });
 
-      // Start foreground service
-      await notificationService.startForegroundService(downloadId, downloadItem.title);
-
       // Start the actual download
+      // Note: Foreground service is started inside performDownload based on download type
+      // M3U8 background downloads use react-native-background-actions which has its own notification
+      // Direct downloads and non-background M3U8 use notifee foreground service
       await this.performDownload(downloadItem, options);
 
       return downloadId;
@@ -396,8 +406,19 @@ export class DownloadService {
 
       // Check if this is an M3U8 playlist
       if (this.isM3U8Url(downloadItem.videoUrl)) {
-        await this.downloadM3U8Concurrent(downloadItem, options);
+        // Use background task for M3U8 downloads to keep JS thread free
+        if (options.useBackgroundTask !== false) {
+          // Background task uses react-native-background-actions which has its own notification
+          // Do NOT start notifee foreground service to avoid duplicate notifications
+          await this.performBackgroundM3U8Download(downloadItem, options);
+        } else {
+          // Non-background M3U8 download - use notifee foreground service
+          await notificationService.startForegroundService(downloadItem.id, downloadItem.title);
+          await this.downloadM3U8Concurrent(downloadItem, options);
+        }
       } else {
+        // Direct file download - use notifee foreground service
+        await notificationService.startForegroundService(downloadItem.id, downloadItem.title);
         await this.downloadDirectFile(downloadItem, options);
       }
     } catch (error) {
@@ -430,6 +451,222 @@ export class DownloadService {
 
       throw error;
     }
+  }
+
+  /**
+   * Perform M3U8 download using HeadlessJS background task
+   * This runs completely separate from the UI thread, preventing any lag
+   */
+  private async performBackgroundM3U8Download(downloadItem: DownloadItem, options: DownloadOptions): Promise<void> {
+    const filePaths = this.generateFilePaths(downloadItem.id, downloadItem.quality);
+    
+    // Create segments directory
+    const segmentsDirExists = await RNFS.exists(filePaths.segmentsDir);
+    if (!segmentsDirExists) {
+      await RNFS.mkdir(filePaths.segmentsDir);
+    }
+
+    // Start the background task
+    const params: BackgroundDownloadParams = {
+      downloadId: downloadItem.id,
+      videoUrl: downloadItem.videoUrl,
+      filePath: downloadItem.filePath!,
+      title: downloadItem.title,
+      segmentsDir: filePaths.segmentsDir,
+      selectedStreamUrl: options.selectedStreamUrl,
+    };
+
+    try {
+      // Check if already running
+      if (isBackgroundDownloadRunning()) {
+        console.log('[DownloadService] Background service already running, using concurrent download');
+        await this.downloadM3U8Concurrent(downloadItem, options);
+        return;
+      }
+
+      console.log('[DownloadService] Starting background download task');
+      await startBackgroundDownload(params);
+      
+      // Poll for completion (the background task saves state to storage)
+      const stateKey = `@flick:background_download_state:${downloadItem.id}`;
+      let checkCount = 0;
+      const maxChecks = 60 * 60; // 1 hour max (checking every second)
+      
+      while (isBackgroundDownloadRunning() && checkCount < maxChecks) {
+        await this.delay(1000);
+        checkCount++;
+        
+        // Check state from storage
+        const stateJson = await StorageService.getItem(stateKey);
+        if (stateJson) {
+          const state = JSON.parse(stateJson);
+          
+          // Update progress in main thread (throttled)
+          if (state.totalSegments > 0) {
+            const progress = (state.downloadedSegments?.length || 0) / state.totalSegments * 100;
+            const downloadedBytes = state.downloadedBytes || 0;
+            
+            // Calculate download speed and estimates
+            let downloadSpeed = 0;
+            let estimatedTotalSize = 0;
+            let estimatedTimeRemaining = 0;
+            
+            if (downloadItem.startedAt) {
+              const elapsedSeconds = (Date.now() - downloadItem.startedAt.getTime()) / 1000;
+              if (elapsedSeconds > 0) {
+                downloadSpeed = downloadedBytes / elapsedSeconds;
+                
+                // Estimate total size based on downloaded ratio
+                const downloadedSegments = state.downloadedSegments?.length || 0;
+                if (downloadedSegments > 0) {
+                  estimatedTotalSize = (downloadedBytes / downloadedSegments) * state.totalSegments;
+                  const remainingBytes = estimatedTotalSize - downloadedBytes;
+                  if (downloadSpeed > 0) {
+                    estimatedTimeRemaining = remainingBytes / downloadSpeed;
+                  }
+                }
+              }
+            }
+            
+            downloadItem.progress = progress;
+            downloadItem.downloadedSize = downloadedBytes;
+            downloadItem.downloadSpeed = downloadSpeed;
+            downloadItem.totalSize = estimatedTotalSize;
+            downloadItem.estimatedTimeRemaining = estimatedTimeRemaining;
+            downloadItem.updatedAt = new Date();
+            this.downloads.set(downloadItem.id, downloadItem);
+            
+            // Call progress listener (throttled)
+            const now = Date.now();
+            const lastCall = this.lastProgressListener.get(downloadItem.id) || 0;
+            if (now - lastCall >= CONFIG.PROGRESS_LISTENER_INTERVAL) {
+              this.lastProgressListener.set(downloadItem.id, now);
+              const listener = this.downloadListeners.get(downloadItem.id);
+              if (listener) {
+                listener({
+                  downloadId: downloadItem.id,
+                  progress,
+                  downloadedSize: downloadedBytes,
+                  totalSize: estimatedTotalSize,
+                  downloadSpeed: downloadSpeed,
+                  estimatedTimeRemaining: estimatedTimeRemaining,
+                });
+              }
+            }
+          }
+          
+          // Check if completed or failed
+          if (state.status === 'completed') {
+            console.log('[DownloadService] Background download completed');
+            // Stop the background service first
+            if (isBackgroundDownloadRunning()) {
+              await stopBackgroundDownload();
+            }
+            await this.finalizeDownload(downloadItem);
+            return;
+          } else if (state.status === 'failed') {
+            throw new Error(state.error || 'Background download failed');
+          } else if (state.status === 'cancelled') {
+            throw new Error('Download cancelled');
+          } else if (state.status === 'paused') {
+            return; // Just return, don't throw
+          }
+        }
+      }
+      
+      // If we get here without completion, check final state
+      const finalStateJson = await StorageService.getItem(stateKey);
+      if (finalStateJson) {
+        const finalState = JSON.parse(finalStateJson);
+        if (finalState.status === 'completed') {
+          // Stop the background service first
+          if (isBackgroundDownloadRunning()) {
+            await stopBackgroundDownload();
+          }
+          await this.finalizeDownload(downloadItem);
+          return;
+        } else if (finalState.status !== 'paused') {
+          throw new Error('Download timed out or failed');
+        }
+      }
+      
+    } catch (error) {
+      console.error('[DownloadService] Background download error:', error);
+      // Stop background service if running
+      if (isBackgroundDownloadRunning()) {
+        await stopBackgroundDownload();
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Finalize a completed download
+   */
+  private async finalizeDownload(downloadItem: DownloadItem): Promise<void> {
+    // Verify output file exists and has content
+    if (downloadItem.filePath) {
+      const exists = await RNFS.exists(downloadItem.filePath);
+      if (!exists) {
+        throw new Error('Downloaded file not found');
+      }
+      
+      const stats = await RNFS.stat(downloadItem.filePath);
+      if (stats.size === 0) {
+        throw new Error('Downloaded file is empty');
+      }
+      
+      downloadItem.totalSize = stats.size;
+      downloadItem.downloadedSize = stats.size;
+    }
+    
+    // Update status
+    downloadItem.status = DownloadStatus.COMPLETED;
+    downloadItem.progress = 100;
+    downloadItem.completedAt = new Date();
+    downloadItem.updatedAt = new Date();
+    
+    this.downloads.set(downloadItem.id, downloadItem);
+    await this.saveDownloadsToStorage();
+    
+    // Clean up M3U8 state
+    this.m3u8Downloads.delete(downloadItem.id);
+    
+    // Notify
+    this.sendNotification({
+      id: `download_complete_${downloadItem.id}`,
+      title: 'Download Complete',
+      message: `${downloadItem.title} is ready to watch offline`,
+      type: 'success',
+      timestamp: new Date(),
+    });
+    
+    await notificationService.showDownloadComplete({
+      downloadId: downloadItem.id,
+      title: downloadItem.title,
+      status: 'completed',
+      filePath: downloadItem.filePath,
+    });
+    
+    await notificationService.stopForegroundService(downloadItem.id);
+    
+    // Call completion listener
+    const listener = this.downloadListeners.get(downloadItem.id);
+    if (listener) {
+      listener({
+        downloadId: downloadItem.id,
+        progress: 100,
+        downloadedSize: downloadItem.totalSize || 0,
+        totalSize: downloadItem.totalSize || 0,
+        speed: 0,
+        status: DownloadStatus.COMPLETED,
+      });
+    }
+    
+    // Cleanup
+    this.lastProgressNotification.delete(downloadItem.id);
+    this.lastProgressSave.delete(downloadItem.id);
+    this.lastProgressListener.delete(downloadItem.id);
   }
 
   /**
@@ -809,7 +1046,16 @@ export class DownloadService {
 
     // Check if cancelled or paused
     if (state.isCancelled) {
-      throw new Error('Download cancelled');
+      console.log(`[M3U8] Download cancelled for ${downloadItem.id}, cleaning up`);
+      // Clean up segments directory
+      try {
+        const dirExists = await RNFS.exists(state.segmentsDir);
+        if (dirExists) {
+          await RNFS.unlink(state.segmentsDir);
+        }
+      } catch (error) {
+        console.warn(`[M3U8] Failed to clean up segments directory after cancellation:`, error);
+      }
     }
 
     if (state.isPaused) {
@@ -927,60 +1173,30 @@ export class DownloadService {
 
   /**
    * Convert ArrayBuffer to Base64
-   * Uses a simple approach that works in React Native
+   * Uses native C++/JSI implementation for ~16x faster performance
    */
   private arrayBufferToBase64(buffer: ArrayBuffer): string {
     const bytes = new Uint8Array(buffer);
-    const chunkSize = 8192; // Process in chunks to avoid call stack issues
-    let binary = '';
-    
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
-      binary += String.fromCharCode.apply(null, Array.from(chunk));
-    }
-    
-    // Use the encode function from react-native's base64
-    const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    let result = '';
-    let i = 0;
-    const len = binary.length;
-    
-    while (i < len) {
-      const char1 = binary.charCodeAt(i++);
-      const char2 = i < len ? binary.charCodeAt(i++) : 0;
-      const char3 = i < len ? binary.charCodeAt(i++) : 0;
-      
-      // eslint-disable-next-line no-bitwise
-      const enc1 = char1 >> 2;
-      // eslint-disable-next-line no-bitwise
-      const enc2 = ((char1 & 3) << 4) | (char2 >> 4);
-      // eslint-disable-next-line no-bitwise
-      const enc3 = ((char2 & 15) << 2) | (char3 >> 6);
-      // eslint-disable-next-line no-bitwise
-      const enc4 = char3 & 63;
-      
-      result += base64Chars.charAt(enc1) + base64Chars.charAt(enc2);
-      result += i > len + 1 ? '=' : base64Chars.charAt(enc3);
-      result += i > len ? '=' : base64Chars.charAt(enc4);
-    }
-    
-    return result;
+    return fromByteArray(bytes);
   }
 
   /**
    * Update M3U8 download progress
+   * Optimized to reduce main thread pressure by throttling all updates
    */
   private updateM3U8Progress(state: M3U8DownloadState, downloadItem: DownloadItem): void {
     const progress = (state.downloadedSegments.size / state.totalSegments) * 100;
     const now = Date.now();
     
-    // Update download item
+    // Update download item (in-memory only, cheap operation)
     downloadItem.progress = progress;
     downloadItem.downloadedSize = state.downloadedBytes;
-    downloadItem.updatedAt = new Date();
     
-    // Estimate download speed
-    if (downloadItem.startedAt) {
+    // Estimate download speed (only calculate periodically to reduce CPU)
+    const lastListenerCall = this.lastProgressListener.get(downloadItem.id) || 0;
+    const shouldUpdateListener = now - lastListenerCall >= CONFIG.PROGRESS_LISTENER_INTERVAL;
+    
+    if (shouldUpdateListener && downloadItem.startedAt) {
       const elapsedSeconds = (now - downloadItem.startedAt.getTime()) / 1000;
       if (elapsedSeconds > 0) {
         downloadItem.downloadSpeed = state.downloadedBytes / elapsedSeconds;
@@ -994,37 +1210,44 @@ export class DownloadService {
           downloadItem.estimatedTimeRemaining = remainingBytes / downloadItem.downloadSpeed;
         }
       }
+      downloadItem.updatedAt = new Date();
     }
 
     this.downloads.set(downloadItem.id, downloadItem);
 
-    // Notify progress listener
-    const listener = this.downloadListeners.get(downloadItem.id);
-    if (listener) {
-      listener({
-        downloadId: downloadItem.id,
-        progress,
-        downloadSpeed: downloadItem.downloadSpeed || 0,
-        totalSize: downloadItem.totalSize || 0,
-        downloadedSize: state.downloadedBytes,
-        estimatedTimeRemaining: downloadItem.estimatedTimeRemaining || 0,
-      });
+    // Throttled progress listener notification (reduces React re-renders)
+    if (shouldUpdateListener) {
+      this.lastProgressListener.set(downloadItem.id, now);
+      const listener = this.downloadListeners.get(downloadItem.id);
+      if (listener) {
+        // Call directly - already throttled, no need to defer
+        listener({
+          downloadId: downloadItem.id,
+          progress,
+          downloadSpeed: downloadItem.downloadSpeed || 0,
+          totalSize: downloadItem.totalSize || 0,
+          downloadedSize: state.downloadedBytes,
+          estimatedTimeRemaining: downloadItem.estimatedTimeRemaining || 0,
+        });
+      }
     }
 
     // Throttled notification update
     const lastNotification = this.lastProgressNotification.get(downloadItem.id) || 0;
     if (now - lastNotification >= CONFIG.PROGRESS_NOTIFICATION_INTERVAL) {
       this.lastProgressNotification.set(downloadItem.id, now);
+      // Fire and forget - don't await
       notificationService.updateForegroundService(downloadItem.id, downloadItem.title, progress)
-        .catch(err => console.warn('Failed to update notification:', err));
+        .catch(() => {}); // Silently ignore notification errors
     }
 
-    // Throttled state save
+    // Throttled state save (most expensive operation)
     const lastSave = this.lastProgressSave.get(downloadItem.id) || 0;
     if (now - lastSave >= CONFIG.PROGRESS_SAVE_INTERVAL) {
       this.lastProgressSave.set(downloadItem.id, now);
-      this.saveDownloadsToStorage();
-      this.saveM3U8State(state);
+      // Save asynchronously without blocking
+      this.saveDownloadsToStorage().catch(() => {});
+      this.saveM3U8State(state).catch(() => {});
     }
   }
 
@@ -1429,6 +1652,26 @@ export class DownloadService {
 
       console.log(`[Cancel] Cancelling download: ${downloadId}, current status: ${downloadItem.status}`);
 
+      // FIRST: Stop background service if running to prevent further file operations
+      if (isBackgroundDownloadRunning()) {
+        console.log(`[Cancel] Stopping background service for ${downloadId}`);
+        await stopBackgroundDownload();
+      }
+
+      // Update background download state in storage to 'cancelled' so any remaining operations stop
+      const stateKey = `@flick:background_download_state:${downloadId}`;
+      try {
+        const stateJson = await StorageService.getItem(stateKey);
+        if (stateJson) {
+          const state = JSON.parse(stateJson);
+          state.status = 'cancelled';
+          await StorageService.setItem(stateKey, JSON.stringify(state));
+          console.log(`[Cancel] Updated background state to cancelled for ${downloadId}`);
+        }
+      } catch (e) {
+        console.warn('Failed to update background state:', e);
+      }
+
       // Cancel M3U8 download
       const m3u8State = this.m3u8Downloads.get(downloadId);
       if (m3u8State) {
@@ -1522,9 +1765,8 @@ export class DownloadService {
       await notificationService.stopForegroundService(downloadId);
       this.lastProgressNotification.delete(downloadId);
       this.lastProgressSave.delete(downloadId);
+      this.lastProgressListener.delete(downloadId);
       this.downloadListeners.delete(downloadId);
-      
-      console.log(`[Cancel] Download ${downloadId} cancelled successfully`);
     } catch (error) {
       console.error('Failed to cancel download:', error);
       throw error;

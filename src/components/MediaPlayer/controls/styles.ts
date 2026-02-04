@@ -8,7 +8,6 @@ export const styles = StyleSheet.create({
     top: 0,
     left: 0,
     alignItems: 'center',
-    paddingVertical: 10,
     justifyContent: 'space-between',
     overflow: 'hidden',
     width: '100%',
@@ -30,10 +29,11 @@ export const styles = StyleSheet.create({
     width: '100%',
   },
   topBarFullscreen: {
+    paddingTop: 10,
     alignItems: 'center',
   },
   topBarRegular: {
-    paddingTop: 15,
+    paddingTop: 20,
   },
   topBarHidden: {
     opacity: 0,
@@ -52,7 +52,7 @@ export const styles = StyleSheet.create({
   },
   titleText: {
     color: colors.white,
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: 'bold',
   },
   centerOverlay: {
@@ -60,14 +60,14 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     width: '100%',
-    height: sizes.height * 0.20,
+    height: sizes.height * 0.15,
     position: 'relative',
     zIndex: 2,
   },
   centerOverlayHidden: {
     justifyContent: 'center',
     position: 'absolute',
-    height: sizes.height * 0.40,
+    height: '100%',
     width: '100%',
     zIndex: 20,
   },
@@ -110,7 +110,6 @@ export const styles = StyleSheet.create({
   },
   bottomBar: {
     flexDirection: 'row',
-    height: 50,
     width: '100%',
     justifyContent: 'space-between',
     backgroundColor: colors.transparentBlack,
@@ -119,6 +118,14 @@ export const styles = StyleSheet.create({
   },
   bottomBarHidden: {
     opacity: 0,
+  },
+  bottomBarFullscreen: {
+    paddingBottom: 20,
+    height: 60,
+  },
+  bottomBarRegular: {
+    paddingBottom: 0,
+    height: 50,
   },
   bottomBarVisible: {
     opacity: 1,

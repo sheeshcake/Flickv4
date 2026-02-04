@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -27,7 +27,7 @@ import { downloadService } from '../services';
 import { COLORS } from '../utils/constants';
 
 // Helper component: DownloadThumbnail - resolves local file or TMDB fallback
-const DownloadThumbnail: React.FC<{ download: DownloadItem }> = ({ download }) => {
+const DownloadThumbnail: React.FC<{ download: DownloadItem }> = React.memo(({ download }) => {
   const [uri, setUri] = useState<string | null>(null);
 
   useEffect(() => {
@@ -80,7 +80,7 @@ const DownloadThumbnail: React.FC<{ download: DownloadItem }> = ({ download }) =
   return (
     <Image source={{ uri }} style={styles.thumbnail} resizeMode="cover" />
   );
-};
+});
 
 interface CircularProgressProps {
   size: number;
@@ -88,7 +88,8 @@ interface CircularProgressProps {
   children?: React.ReactNode;
 }
 
-const CircularProgress: React.FC<CircularProgressProps> = ({
+// Memoize CircularProgress to prevent unnecessary re-renders
+const CircularProgress: React.FC<CircularProgressProps> = React.memo(({
   size,
   progress,
   children,
@@ -137,7 +138,11 @@ const CircularProgress: React.FC<CircularProgressProps> = ({
       </View>
     </View>
   );
-};
+}, (prevProps, nextProps) => {
+  // Custom comparison - only re-render if progress changed significantly (by 1% or more)
+  return prevProps.size === nextProps.size && 
+         Math.abs(prevProps.progress - nextProps.progress) < 1;
+});
 
 interface DownloadButtonProps {
   content: Movie | TVShow;
@@ -165,7 +170,10 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
   const [downloadItem, setDownloadItem] = useState<DownloadItem | null>(null);
   const [progress, setProgress] = useState(0);
   const [_isLocalDownloading, setIsLocalDownloading] = useState(false);
-  const [_lastProgressUpdate, _setLastProgressUpdate] = useState<number>(0);
+  
+  // Track last progress to avoid unnecessary state updates
+  const lastProgressRef = useRef<number>(0);
+  const lastStatusRef = useRef<DownloadStatus | null>(null);
   
   // Resolution selection state
   const [showResolutionModal, setShowResolutionModal] = useState(false);
@@ -180,20 +188,13 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
     episode
   );
 
-  const generateDownloadId = useCallback((
-    itemContentId: number, 
-    itemContentType: 'movie' | 'tv', 
-    itemSeason?: number, 
-    itemEpisode?: number
-  ): string => {
-    const base = `${itemContentType}_${itemContentId}`;
-    if (itemContentType === 'tv' && itemSeason !== undefined && itemEpisode !== undefined) {
-      return `${base}_s${itemSeason}_e${itemEpisode}`;
+  const downloadId = useMemo(() => {
+    const base = `${contentType}_${content.id}`;
+    if (contentType === 'tv' && season !== undefined && episode !== undefined) {
+      return `${base}_s${season}_e${episode}`;
     }
     return base;
-  }, []);
-
-  const downloadId = generateDownloadId(content.id, contentType, season, episode);
+  }, [content.id, contentType, season, episode]);
 
   useEffect(() => {
     // Check if content is already downloaded or downloading
@@ -203,31 +204,44 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
       setDownloadItem(existingDownload);
       setProgress(existingDownload.progress || 0);
       setIsLocalDownloading(existingDownload.status === DownloadStatus.DOWNLOADING);
+      lastProgressRef.current = existingDownload.progress || 0;
+      lastStatusRef.current = existingDownload.status;
     } else {
       // Reset state when no existing download
       setDownloadItem(null);
       setProgress(0);
       setIsLocalDownloading(false);
+      lastProgressRef.current = 0;
+      lastStatusRef.current = null;
     }
 
-    // Set up progress listener for any existing downloads (not just downloading ones)
+    // Set up progress listener with debouncing to reduce re-renders
     const progressListener = (progressData: DownloadProgress) => {
-      console.log('Progress update received:', {
-        downloadId: progressData.downloadId,
-        progress: progressData.progress,
-        status: existingDownload?.status,
-        applying: true
-      });
+      // Only update if progress changed significantly (by at least 2%)
+      const progressDiff = Math.abs(progressData.progress - lastProgressRef.current);
+      if (progressDiff < 2 && progressData.progress < 100) {
+        return;
+      }
       
-      // Force state updates
+      lastProgressRef.current = progressData.progress;
+      
+      // Direct state update - service already throttles to 2 seconds
       setProgress(progressData.progress);
       setIsLocalDownloading(progressData.progress < 100 && progressData.progress > 0);
       
-      // Also update the download item with the latest progress
-      const currentDownload = downloadService.getDownload(downloadId);
-      if (currentDownload) {
-        setDownloadItem({...currentDownload, progress: progressData.progress});
-      }
+      // Update download item with progress data (including speed)
+      setDownloadItem(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          progress: progressData.progress,
+          downloadSpeed: progressData.downloadSpeed,
+          downloadedSize: progressData.downloadedSize,
+          totalSize: progressData.totalSize,
+          estimatedTimeRemaining: progressData.estimatedTimeRemaining,
+          updatedAt: new Date(),
+        };
+      });
       
       // Update download item if progress is complete
       if (progressData.progress >= 100) {
@@ -249,63 +263,55 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
 
   // Monitor download item changes to update local state
   useEffect(() => {
-    if (downloadItem) {
+    if (downloadItem && downloadItem.status !== lastStatusRef.current) {
+      lastStatusRef.current = downloadItem.status;
       setProgress(downloadItem.progress || 0);
       setIsLocalDownloading(downloadItem.status === DownloadStatus.DOWNLOADING);
-      console.log('Download item state updated:', {
-        id: downloadItem.id,
-        status: downloadItem.status,
-        progress: downloadItem.progress,
-        isLocalDownloading: downloadItem.status === DownloadStatus.DOWNLOADING
-      });
     }
   }, [downloadItem]);
 
   // Minimal polling only for downloads without active progress listeners
+  // Significantly increased interval to reduce CPU usage
   useEffect(() => {
-    if (_isLocalDownloading || (downloadItem?.status === DownloadStatus.DOWNLOADING)) {
-      // For downloads that are actively downloading with listeners, minimal fallback polling
-      const pollInterval = setInterval(() => {
-        // Only poll if we haven't received progress updates recently (more than 10 seconds)
-        const timeSinceLastUpdate = downloadItem?.updatedAt ? 
-          Date.now() - downloadItem.updatedAt.getTime() : 
-          Date.now();
-        
-        if (timeSinceLastUpdate > 10000) { // 10 seconds without updates
-          const currentDownload = downloadService.getDownload(downloadId);
-          if (currentDownload) {
-            console.log('Polling download status (no recent updates):', {
-              id: currentDownload.id,
-              status: currentDownload.status,
-              progress: currentDownload.progress,
-              timeSinceLastUpdate
-            });
-            
-            // Only update if the polled data is different from current state
-            if (currentDownload.progress !== progress || 
-                currentDownload.status !== downloadItem?.status) {
-              setDownloadItem(currentDownload);
-              setProgress(currentDownload.progress || 0);
-            }
-            
-            // Stop polling if download is complete or failed
-            if (currentDownload.status === DownloadStatus.COMPLETED || 
-                currentDownload.status === DownloadStatus.FAILED ||
-                currentDownload.status === DownloadStatus.CANCELLED) {
-              setIsLocalDownloading(false);
-            }
-          } else {
+    // Only set up polling if actively downloading
+    if (!(_isLocalDownloading || downloadItem?.status === DownloadStatus.DOWNLOADING)) {
+      return;
+    }
+    
+    // Poll every 10 seconds but only act on very stale data (30 seconds)
+    const pollInterval = setInterval(() => {
+      const timeSinceLastUpdate = downloadItem?.updatedAt ? 
+        Date.now() - downloadItem.updatedAt.getTime() : 
+        Date.now();
+      
+      // Only poll if very stale (30 seconds without updates)
+      if (timeSinceLastUpdate > 30000) {
+        const currentDownload = downloadService.getDownload(downloadId);
+        if (currentDownload) {
+          // Only update if significant change
+          if (Math.abs((currentDownload.progress || 0) - progress) >= 2 || 
+              currentDownload.status !== downloadItem?.status) {
+            setDownloadItem(currentDownload);
+            setProgress(currentDownload.progress || 0);
+          }
+          
+          // Stop polling if download is complete or failed
+          if (currentDownload.status === DownloadStatus.COMPLETED || 
+              currentDownload.status === DownloadStatus.FAILED ||
+              currentDownload.status === DownloadStatus.CANCELLED) {
             setIsLocalDownloading(false);
           }
+        } else {
+          setIsLocalDownloading(false);
         }
-      }, 2000); // Poll every 2 seconds but only act on stale data
+      }
+    }, 10000); // Poll every 10 seconds
 
-      return () => clearInterval(pollInterval);
-    }
-  }, [_isLocalDownloading, downloadItem?.status, downloadId, progress, downloadItem?.updatedAt]);
+    return () => clearInterval(pollInterval);
+  }, [_isLocalDownloading, downloadItem?.status, downloadId]);
 
   // Fetch available resolutions for the video
-  const fetchResolutions = async () => {
+  const fetchResolutions = useCallback(async () => {
     if (!videoUrl) return;
     
     setLoadingResolutions(true);
@@ -327,21 +333,16 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
     } finally {
       setLoadingResolutions(false);
     }
-  };
+  }, [videoUrl]);
 
   // Start download with selected resolution
-  const startDownloadWithResolution = async (selectedStream?: M3U8StreamInfo) => {
+  const startDownloadWithResolution = useCallback(async (selectedStream?: M3U8StreamInfo) => {
     setShowResolutionModal(false);
     
     try {
       setProgress(0);
       setIsLocalDownloading(true);
-      console.log('Starting download for:', {
-        contentId: content.id,
-        downloadId,
-        videoUrl: videoUrl ? 'available' : 'missing',
-        selectedResolution: selectedStream?.label || 'auto (highest)',
-      });
+      lastProgressRef.current = 0;
 
       // Determine quality label from resolution
       let qualityLabel = '720p';
@@ -367,23 +368,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         episodeTitle
       );
 
-      console.log('Download started with ID:', newDownloadId);
-
       // Set up progress listener immediately after starting download
-      const progressListener = (progressData: DownloadProgress) => {
-        console.log('Download progress listener called:', progressData);
-        setProgress(progressData.progress);
-        setIsLocalDownloading(progressData.progress < 100);
-        if (progressData.progress >= 100) {
-          setProgress(100);
-          setIsLocalDownloading(false);
-          // Download completed - get updated download item
-          const updatedDownload = downloadService.getDownload(newDownloadId);
-          setDownloadItem(updatedDownload);
-        }
-      };
-
-      downloadService.addProgressListener(newDownloadId, progressListener);
+      // Note: The main useEffect already handles progress listening
+      // This is just to ensure immediate feedback
 
       // Update download item
       const download = downloadService.getDownload(newDownloadId);
@@ -391,12 +378,11 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
 
     } catch (error: any) {
       setIsLocalDownloading(false);
-      console.error('Download start failed:', error);
       Alert.alert('Download Error', error.message || 'Failed to start download');
     }
-  };
+  }, [content, videoUrl, season, episode, episodeTitle]);
 
-  const handleDownload = async () => {
+  const handleDownload = useCallback(async () => {
     if (!videoUrl) {
       if (onVideoNeeded) {
         // If callback is provided, trigger video scraping
@@ -419,9 +405,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
 
     // Fetch available resolutions and show selection modal
     await fetchResolutions();
-  };
+  }, [videoUrl, onVideoNeeded, fetchResolutions]);
 
-  const handlePause = async () => {
+  const handlePause = useCallback(async () => {
     if (!downloadItem) return;
 
     try {
@@ -432,9 +418,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to pause download');
     }
-  };
+  }, [downloadItem]);
 
-  const handleResume = async () => {
+  const handleResume = useCallback(async () => {
     if (!downloadItem) return;
 
     try {
@@ -445,9 +431,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to resume download');
     }
-  };
+  }, [downloadItem]);
 
-  const handleCancel = async () => {
+  const handleCancel = useCallback(async () => {
     if (!downloadItem) return;
 
     Alert.alert(
@@ -470,17 +456,17 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         },
       ]
     );
-  };
+  }, [downloadItem]);
 
-  const handleLongPress = () => {
+  const handleLongPress = useCallback(() => {
     if (downloadItem?.status === DownloadStatus.DOWNLOADING) {
       handleCancel();
     } else if (downloadItem?.status === DownloadStatus.COMPLETED) {
       handleDelete();
     }
-  };
+  }, [downloadItem, handleCancel]);
 
-  const handleDelete = async () => {
+  const handleDelete = useCallback(async () => {
     if (!downloadItem) return;
 
     Alert.alert(
@@ -503,23 +489,23 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         },
       ]
     );
-  };
+  }, [downloadItem]);
 
-  const getIconSize = () => {
+  const getIconSize = useMemo(() => {
     switch (size) {
       case 'small': return 18;
       case 'large': return 32;
       default: return 24;
     }
-  };
+  }, [size]);
 
-  const getButtonSize = () => {
+  const getButtonSize = useMemo(() => {
     switch (size) {
       case 'small': return 36;
       case 'large': return 52;
       default: return 44;
     }
-  };
+  }, [size]);
 
   // Show different states based on download status
   if (isDownloaded && downloadItem?.status === DownloadStatus.COMPLETED) {
@@ -528,9 +514,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         style={[
           styles.downloadButtonContainer,
           {
-            width: getButtonSize(),
-            height: getButtonSize(),
-            borderRadius: getButtonSize() / 2,
+            width: getButtonSize,
+            height: getButtonSize,
+            borderRadius: getButtonSize / 2,
           },
           style
         ]}
@@ -539,7 +525,7 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         activeOpacity={0.7}
       >
         <View style={styles.iconContainer}>
-          <Icon name="check-circle" size={getIconSize()} color="#00ff00" />
+          <Icon name="check-circle" size={getIconSize} color="#00ff00" />
         </View>
       </TouchableOpacity>
     );
@@ -547,22 +533,14 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
 
   if (downloadItem?.status === DownloadStatus.DOWNLOADING || _isLocalDownloading) {
     const progressToShow = Math.max(0, Math.min(100, progress));
-    console.log('Rendering download progress:', {
-      downloadId: downloadItem?.id || 'local',
-      status: downloadItem?.status,
-      isLocalDownloading: _isLocalDownloading,
-      progress,
-      progressToShow,
-      buttonSize: getButtonSize()
-    });
     
     return (
       <TouchableOpacity
         style={[
           {
-            width: getButtonSize(),
-            height: getButtonSize(),
-            borderRadius: getButtonSize() / 2,
+            width: getButtonSize,
+            height: getButtonSize,
+            borderRadius: getButtonSize / 2,
           },
           style
         ]}
@@ -570,8 +548,8 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         onLongPress={handleLongPress}
         activeOpacity={0.7}
       >
-        <CircularProgress size={getButtonSize()} progress={progressToShow}>
-          <Icon name="pause" size={getIconSize() * 0.6} color={COLORS.NETFLIX_WHITE} />
+        <CircularProgress size={getButtonSize} progress={progressToShow}>
+          <Icon name="pause" size={getIconSize * 0.6} color={COLORS.NETFLIX_WHITE} />
         </CircularProgress>
       </TouchableOpacity>
     );
@@ -583,9 +561,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         style={[
           styles.downloadButtonContainer,
           {
-            width: getButtonSize(),
-            height: getButtonSize(),
-            borderRadius: getButtonSize() / 2,
+            width: getButtonSize,
+            height: getButtonSize,
+            borderRadius: getButtonSize / 2,
           },
           style
         ]}
@@ -593,8 +571,8 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         onLongPress={handleLongPress}
         activeOpacity={0.7}
       >
-        <CircularProgress size={getButtonSize()} progress={progress}>
-          <Icon name="play-arrow" size={getIconSize() * 0.6} color={COLORS.NETFLIX_WHITE} />
+        <CircularProgress size={getButtonSize} progress={progress}>
+          <Icon name="play-arrow" size={getIconSize * 0.6} color={COLORS.NETFLIX_WHITE} />
         </CircularProgress>
       </TouchableOpacity>
     );
@@ -607,9 +585,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         style={[
           styles.downloadButtonContainer,
           {
-            width: getButtonSize(),
-            height: getButtonSize(),
-            borderRadius: getButtonSize() / 2,
+            width: getButtonSize,
+            height: getButtonSize,
+            borderRadius: getButtonSize / 2,
           },
           style
         ]}
@@ -619,7 +597,7 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         <View style={styles.iconContainer}>
           <Icon 
             name="cloud-download" 
-            size={getIconSize()} 
+            size={getIconSize} 
             color={COLORS.NETFLIX_GRAY}
           />
         </View>
@@ -682,9 +660,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
         style={[
           styles.downloadButtonContainer,
           {
-            width: getButtonSize(),
-            height: getButtonSize(),
-            borderRadius: getButtonSize() / 2,
+            width: getButtonSize,
+            height: getButtonSize,
+            borderRadius: getButtonSize / 2,
           },
           style
         ]}
@@ -698,7 +676,7 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
           ) : (
             <Icon 
               name="download" 
-              size={getIconSize()} 
+              size={getIconSize} 
               color={COLORS.NETFLIX_WHITE} 
             />
           )}
@@ -738,9 +716,9 @@ export const DownloadsList: React.FC<DownloadsListProps> = ({
 
   const getStatusColor = (status: DownloadStatus): string => {
     switch (status) {
-      case DownloadStatus.COMPLETED: return '#00ff00';
-      case DownloadStatus.DOWNLOADING: return '#0099ff';
-      case DownloadStatus.PAUSED: return '#ff9900';
+      case DownloadStatus.COMPLETED: return '#75af42';
+      case DownloadStatus.DOWNLOADING: return '#124191';
+      case DownloadStatus.PAUSED: return '#ed812b';
       case DownloadStatus.FAILED: return COLORS.NETFLIX_RED;
       default: return COLORS.NETFLIX_GRAY;
     }

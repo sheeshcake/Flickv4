@@ -1,6 +1,6 @@
 {
   "name": "Flickv4",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "clean:android": "cd android && ./gradlew clean",
@@ -29,11 +29,13 @@
     "m3u8-parser": "^7.2.0",
     "react": "19.1.1",
     "react-native": "0.82.1",
+    "react-native-background-actions": "^4.0.1",
     "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "^2.21.2",
     "react-native-google-cast": "^4.9.1",
     "react-native-linear-gradient": "^2.8.3",
     "react-native-orientation-locker": "^1.7.0",
+    "react-native-quick-base64": "^2.2.2",
     "react-native-reanimated": "^4.1.5",
     "react-native-reanimated-carousel": "^4.0.3",
     "react-native-safe-area-context": "^5.5.2",

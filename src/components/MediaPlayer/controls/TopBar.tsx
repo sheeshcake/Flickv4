@@ -25,7 +25,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <Icon name="arrow-left" size={sizes.width * 0.05} color={colors.white} />
       </TouchableOpacity>
       {(!fullscreen || !hidden) && (
-        <Text style={styles.titleText}>{trimText(title) || 'Movie'}</Text>
+        <Text style={styles.titleText}>{trimText(title, fullscreen) || 'Movie'}</Text>
       )}
       {upperRightComponent || <View style={styles.topBarRightPlaceholder} />}
     </View>

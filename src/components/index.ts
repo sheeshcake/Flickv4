@@ -13,3 +13,5 @@ export {default as SubtitleSelector} from './SubtitleSelector';
 export {default as SubtitleSettings} from './SubtitleSettings';
 export {default as SubtitleStyleSettings} from './SubtitleStyleSettings';
 export * from './DownloadComponents';
+export {UpdateModal} from './UpdateModal';
+export {UpdateChecker} from './UpdateChecker';

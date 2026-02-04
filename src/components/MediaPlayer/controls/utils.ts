@@ -11,10 +11,11 @@ export const formatTime = (seconds: number): string => {
   return new Date(clampedSeconds * 1000).toISOString().substr(11, 8);
 };
 
-export const trimText = (text: string, maxLength = 12): string => {
+export const trimText = (text: string, fullscreen: boolean, maxLength = 12): string => {
   if (!text) {
     return '';
   }
 
-  return text.length > maxLength ? `${text.substring(0, maxLength)}...` : text;
+  const effectiveMaxLength = fullscreen ? maxLength * 2 : maxLength;
+  return text.length > effectiveMaxLength ? `${text.substring(0, effectiveMaxLength)}...` : text;
 };
