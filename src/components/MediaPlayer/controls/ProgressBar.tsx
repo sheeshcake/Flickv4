@@ -5,13 +5,6 @@ import { ProgressBarProps } from './types';
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(value, max));
 
-/**
- * Optimized ProgressBar Component
- * Features:
- * - Better performance with refs to avoid unnecessary renders
- * - Smoother dragging with optimized pan responder
- * - Accurate progress tracking
- */
 const ProgressBarComponent: React.FC<ProgressBarProps> = ({
   currentPosition,
   duration,
@@ -27,19 +20,16 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
   const dragPercentageRef = useRef(0);
   const trackRef = useRef<View>(null);
 
-  // Calculate progress percentage
   const progressPercentage = useMemo(() => {
     if (!duration || duration === 0) return 0;
     return clamp(currentPosition / duration, 0, 1);
   }, [currentPosition, duration]);
 
-  // Calculate buffered percentage
   const bufferedPercentage = useMemo(() => {
     if (!duration || duration === 0) return 0;
     return clamp(bufferedPosition / duration, 0, 1);
   }, [bufferedPosition, duration]);
 
-  // Sync drag percentage with actual progress when not dragging
   useEffect(() => {
     if (!isDragging) {
       dragPercentageRef.current = progressPercentage;
@@ -47,7 +37,6 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
     }
   }, [isDragging, progressPercentage]);
 
-  // Update position from touch location
   const updateFromLocation = useCallback((pageX: number) => {
     if (!trackWidth || !duration || !trackRef.current) return;
 
@@ -65,7 +54,6 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
     });
   }, [duration, onTimePreview, trackWidth]);
 
-  // Commit seek when drag ends
   const commitSeek = useCallback(() => {
     if (!duration) return;
 
@@ -73,7 +61,6 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
     onSeek(newTime);
   }, [duration, onSeek]);
 
-  // Pan responder for touch handling
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
@@ -97,15 +84,12 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
     },
   }), [commitSeek, onSeekingStateChange, updateFromLocation]);
 
-  // Track width measurement
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     setTrackWidth(event.nativeEvent.layout.width);
   }, []);
 
-  // Display percentage (use drag when dragging, otherwise use actual progress)
   const displayPercentage = isDragging ? dragPercentage : progressPercentage;
 
-  // Memoized styles for performance
   const bufferedStyle = useMemo(() => ({
     width: bufferedPercentage * trackWidth,
   }), [bufferedPercentage, trackWidth]);

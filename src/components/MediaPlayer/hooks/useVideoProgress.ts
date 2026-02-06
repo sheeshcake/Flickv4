@@ -13,14 +13,10 @@ interface UseVideoProgressProps {
   isPlaying: boolean;
 }
 
-const PLAYBACK_START_THRESHOLD = 10; // seconds
-const PROGRESS_SAVE_THRESHOLD = 5; // Save progress every 5 seconds
-const PROGRESS_COMPLETION_THRESHOLD = 95; // Mark as completed at 95%
+const PLAYBACK_START_THRESHOLD = 10;
+const PROGRESS_SAVE_THRESHOLD = 5;
+const PROGRESS_COMPLETION_THRESHOLD = 95;
 
-/**
- * Custom hook for managing video watch progress
- * Handles automatic saving of watch progress at intervals and on pause
- */
 export const useVideoProgress = ({
   contentId,
   contentType,
@@ -34,7 +30,6 @@ export const useVideoProgress = ({
 }: UseVideoProgressProps) => {
   const lastSavedTimeRef = useRef(0);
 
-  // Memoized watch progress object
   const watchProgress = useMemo((): WatchProgress | null => {
     if (duration > 0 && currentTime > PLAYBACK_START_THRESHOLD) {
       const progressPercentage = (currentTime / duration) * 100;
@@ -52,7 +47,6 @@ export const useVideoProgress = ({
     return null;
   }, [contentId, contentType, duration, currentTime, season, episode, selectedSubtitle]);
 
-  // Save progress function
   const saveProgress = useCallback((progress: WatchProgress) => {
     try {
       updateWatchProgress(progress);
@@ -61,13 +55,11 @@ export const useVideoProgress = ({
     }
   }, [updateWatchProgress]);
 
-  // Save progress periodically during playback
   useEffect(() => {
     if (!watchProgress || watchProgress.progress >= PROGRESS_COMPLETION_THRESHOLD) {
       return;
     }
 
-    // Check if enough time has passed since last save
     const timeSinceLastSave = Math.floor(currentTime) - lastSavedTimeRef.current;
     
     if (timeSinceLastSave >= PROGRESS_SAVE_THRESHOLD && Math.floor(currentTime) % PROGRESS_SAVE_THRESHOLD === 0) {
@@ -75,7 +67,6 @@ export const useVideoProgress = ({
       lastSavedTimeRef.current = Math.floor(currentTime);
     }
 
-    // Mark as completed if threshold reached
     if (watchProgress.progress >= PROGRESS_COMPLETION_THRESHOLD) {
       saveProgress({
         ...watchProgress,
@@ -84,14 +75,12 @@ export const useVideoProgress = ({
     }
   }, [watchProgress, currentTime, saveProgress]);
 
-  // Save progress on pause
   useEffect(() => {
     if (!isPlaying && watchProgress && watchProgress.progress < PROGRESS_COMPLETION_THRESHOLD) {
       saveProgress(watchProgress);
     }
   }, [isPlaying, watchProgress, saveProgress]);
 
-  // Save progress on unmount
   useEffect(() => {
     return () => {
       if (watchProgress && watchProgress.progress < PROGRESS_COMPLETION_THRESHOLD) {

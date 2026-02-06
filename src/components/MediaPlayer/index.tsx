@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
 import { View, BackHandler, Dimensions, StyleSheet, Text } from 'react-native';
 import Video, { BufferingStrategyType, TextTrackType, SelectedTrackType } from 'react-native-video';
 import { CastButton } from 'react-native-google-cast';
@@ -18,11 +18,9 @@ import {
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-// Constants
 const RESIZE_MODES = ['contain', 'cover', 'stretch', 'none'] as const;
-const NEXT_EPISODE_THRESHOLD = 150; // seconds (2.5 minutes)
+const NEXT_EPISODE_THRESHOLD = 150;
 
-// Convert SRT to VTT format for better native player compatibility
 const convertSrtToVtt = (srtContent: string): string => {
   // Add VTT header
   let vttContent = 'WEBVTT\n\n';
@@ -69,14 +67,6 @@ interface MediaPlayerProps {
   setFullscreen?: (fullscreen: boolean) => void;
 }
 
-/**
- * Optimized MediaPlayer Component
- * Features:
- * - Custom hooks for state management (progress, subtitles, fullscreen, controls)
- * - Improved performance with memoization
- * - Better error handling and logging
- * - Cleaner code organization
- */
 const MediaPlayer: React.FC<MediaPlayerProps> = ({
   videoUrl,
   title,
@@ -105,42 +95,35 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const [showSubtitleSelector, setShowSubtitleSelector] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
 
-  // State for subtitle content (used by SubtitleOverlay)
   const [subtitleContent, setSubtitleContent] = useState<string | null>(null);
-  // State for native VTT subtitle path (used for PiP mode)
   const [subtitleVttPath, setSubtitleVttPath] = useState<string | null>(null);
-  // Track if PiP is active (subtitles overlay won't show in PiP)
   const [isPipActive, setIsPipActive] = useState(false);
-  // Subtitle delay in seconds (positive = later, negative = earlier)
   const [subtitleDelay, setSubtitleDelay] = useState(0);
 
   const videoRef = useRef<any>(null);
-  const videoUrlRef = useRef<string>(videoUrl); // Track current URL for error handling
+  const videoUrlRef = useRef<string>(videoUrl);
+  const prevFullscreenPropRef = useRef<boolean | undefined>(fullscreen);
   const { state, updateWatchProgress } = useAppState();
 
-  // Keep the ref updated with the latest videoUrl
   useEffect(() => {
     videoUrlRef.current = videoUrl;
   }, [videoUrl]);
 
-  // Custom hooks
-  // If fullscreen/setFullscreen are provided, use them as the source of truth
   const { isFullscreen, toggleFullscreen } = useFullscreen((val) => {
     if (setFullscreen) setFullscreen(val);
     if (onFullscreenChange) onFullscreenChange(val);
-  }, fullscreen); // Pass initial fullscreen state from prop
+  }, fullscreen);
 
-  // Sync internal fullscreen state with prop (for dynamic changes after mount)
-  useEffect(() => {
-    if (typeof fullscreen === 'boolean' && fullscreen !== isFullscreen) {
-      // Only update if different
+  useLayoutEffect(() => {
+    if (typeof fullscreen === 'boolean' && fullscreen !== prevFullscreenPropRef.current && fullscreen !== isFullscreen) {
       toggleFullscreen();
     }
+    prevFullscreenPropRef.current = fullscreen;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullscreen]);
+
   const { controlsVisible, toggleControls, showControls } = useControlsVisibility(isPlaying, isSeeking);
 
-  // Get saved subtitle from continue watching
   const savedSubtitle = useMemo(() => {
     const watchProgress = state.user.continueWatching.find(
       item =>
@@ -165,7 +148,6 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     savedSubtitle,
   });
 
-  // Video progress tracking
   useVideoProgress({
     contentId,
     contentType,
@@ -178,18 +160,8 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     isPlaying,
   });
 
-  // Seek to initial progress when video loads
   useEffect(() => {
-    console.log('[MediaPlayer] Initial progress check:', {
-      duration,
-      initialProgress,
-      hasStartedFromProgress,
-      hasVideoRef: !!videoRef.current,
-      shouldSeek: duration > 0 && initialProgress > 0 && !hasStartedFromProgress && videoRef.current,
-    });
-    
     if (duration > 0 && initialProgress > 0 && !hasStartedFromProgress && videoRef.current) {
-      console.log('[MediaPlayer] Seeking to initial progress:', initialProgress);
       videoRef.current.seek(initialProgress);
       setCurrentTime(initialProgress);
       setHasStartedFromProgress(true);
@@ -202,7 +174,6 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     }
   }, [duration, initialProgress, hasStartedFromProgress, autoplay]);
 
-  // Check if near end for next episode button
   useEffect(() => {
     if (contentType === 'tv' && duration > 0) {
       const timeRemaining = duration - currentTime;
@@ -210,7 +181,6 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     }
   }, [contentType, duration, currentTime]);
 
-  // Back button handler
   useEffect(() => {
     const handleBackPress = () => {
       if (isFullscreen) {
@@ -225,7 +195,6 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     const backHandler = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
     return () => backHandler.remove();
   }, [isFullscreen, navigation, toggleFullscreen]);
-
 
   const handleLoad = useCallback(({ duration: videoDuration }: { duration: number }) => {
     setDuration(videoDuration);
@@ -246,18 +215,14 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     setVideoStatus(buffering ? 'loading' : 'loaded');
   }, []);
 
-  const handleError = useCallback((error: any) => {
-    // Don't log errors when video URL is empty (happens during navigation cleanup)
-    // Use ref to get the current URL value, not the stale closure value
+  const handleError = useCallback((_error: any) => {
     const currentUrl = videoUrlRef.current;
     if (!currentUrl || currentUrl.trim() === '') {
-      console.log('[MediaPlayer] Video error ignored - URL is empty (navigation cleanup)');
       return;
     }
-    console.error('[MediaPlayer] Video error:', error);
     setVideoStatus('error');
     setIsBuffering(false);
-  }, []); // No dependencies needed since we use ref
+  }, []);
 
   const handleSeek = useCallback((time: number) => {
     if (videoRef.current && duration > 0) {
@@ -317,11 +282,8 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         const srtExists = await RNFS.exists(srtPath);
         
         if (srtExists) {
-          // File already exists, read content from cache
           srtContent = await RNFS.readFile(srtPath, 'utf8');
-          console.log('[MediaPlayer] Using cached subtitle:', srtPath);
         } else {
-          // Download subtitle
           const response = await fetch(selectedSubtitle.url);
           
           if (!response.ok) {
@@ -330,24 +292,19 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
           
           srtContent = await response.text();
           await RNFS.writeFile(srtPath, srtContent, 'utf8');
-          console.log('[MediaPlayer] Downloaded and cached subtitle:', srtPath);
         }
         
-        // Set SRT content for overlay
         setSubtitleContent(srtContent);
         
-        // Convert to VTT and save for native player (PiP support)
         const vttExists = await RNFS.exists(vttPath);
         if (!vttExists) {
           const vttContent = convertSrtToVtt(srtContent);
           await RNFS.writeFile(vttPath, vttContent, 'utf8');
-          console.log('[MediaPlayer] Created VTT subtitle:', vttPath);
         }
         
         setSubtitleVttPath(`file://${vttPath}`);
         
-      } catch (error) {
-        console.error('[MediaPlayer] Failed to process subtitle:', error);
+      } catch {
         setSubtitleContent(null);
         setSubtitleVttPath(null);
       }
@@ -374,7 +331,6 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     width: isFullscreen ? screenHeight : screenWidth,
   }), [isFullscreen]);
 
-  // Native text tracks for PiP mode (VTT format for better compatibility)
   const textTracks = useMemo(() => {
     if (!subtitleVttPath || !selectedSubtitle) return undefined;
     
@@ -386,7 +342,6 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     }];
   }, [subtitleVttPath, selectedSubtitle]);
 
-  // Selected text track - enable when we have subtitles
   const selectedTextTrack = useMemo(() => {
     if (!subtitleVttPath || !selectedSubtitle) {
       return { type: SelectedTrackType.DISABLED };
@@ -397,24 +352,19 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     };
   }, [subtitleVttPath, selectedSubtitle]);
 
-  // Handle PiP status changes
   const handlePictureInPictureStatusChanged = useCallback((data: { isActive: boolean }) => {
     setIsPipActive(data.isActive);
-    console.log('[MediaPlayer] PiP status changed:', data.isActive);
   }, []);
 
-  // Subtitle delay handlers
   const handleSubtitleDelayChange = useCallback((delta: number) => {
     setSubtitleDelay(prev => {
-      const newDelay = Math.round((prev + delta) * 10) / 10; // Round to 1 decimal
-      console.log('[MediaPlayer] Subtitle delay changed:', newDelay, 'seconds');
+      const newDelay = Math.round((prev + delta) * 10) / 10;
       return newDelay;
     });
   }, []);
 
   const handleResetSubtitleDelay = useCallback(() => {
     setSubtitleDelay(0);
-    console.log('[MediaPlayer] Subtitle delay reset to 0');
   }, []);
 
   if (!videoUrl) {
@@ -502,7 +452,6 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         }
       />
 
-      {/* Custom subtitle overlay - hidden during PiP (native subtitles used instead) */}
       {!isPipActive && (
         <SubtitleOverlay
           subtitleContent={subtitleContent}

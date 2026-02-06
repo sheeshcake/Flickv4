@@ -12,28 +12,25 @@ interface SubtitleOverlayProps {
   subtitleContent: string | null;
   currentTime: number;
   isVideoFullscreen: boolean;
-  delay?: number; // Delay in seconds (positive = subtitles later, negative = subtitles earlier)
-  style?: SubtitleStyle; // Custom subtitle style from settings
+  delay?: number;
+  style?: SubtitleStyle;
 }
 
 const parseSRT = (srtContent: string): SubtitleCue[] => {
   const cues: SubtitleCue[] = [];
   
-  // Split by double newline to get subtitle blocks
   const blocks = srtContent.trim().split(/\r?\n\r?\n/);
   
   for (const block of blocks) {
     const lines = block.trim().split(/\r?\n/);
     if (lines.length < 3) continue;
     
-    // Find the timestamp line (contains -->)
     const timestampIndex = lines.findIndex(line => line.includes('-->'));
     if (timestampIndex === -1) continue;
     
     const timestampLine = lines[timestampIndex];
     const textLines = lines.slice(timestampIndex + 1);
     
-    // Parse SRT timestamps: 00:00:01,000 --> 00:00:03,500
     const match = timestampLine.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
     if (!match) continue;
     
@@ -47,10 +44,9 @@ const parseSRT = (srtContent: string): SubtitleCue[] => {
     const start = startHours * 3600 + startMinutes * 60 + startSeconds;
     const end = endHours * 3600 + endMinutes * 60 + endSeconds;
     
-    // Clean text (remove tags and extra whitespace)
     const text = textLines
       .join('\n')
-      .replace(/<[^>]*>/g, '') // Remove HTML tags
+      .replace(/<[^>]*>/g, '')
       .trim();
     
     if (text) {
@@ -71,7 +67,6 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   const [cues, setCues] = useState<SubtitleCue[]>([]);
   const [currentCue, setCurrentCue] = useState<string | null>(null);
 
-  // Compute font size based on style setting and fullscreen mode
   const computedFontSize = useMemo(() => {
     const baseSizes = {
       small: isVideoFullscreen ? 14 : 10,
@@ -82,7 +77,6 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     return baseSizes[style.fontSize] || baseSizes.medium;
   }, [style.fontSize, isVideoFullscreen]);
 
-  // Compute background color with opacity
   const computedBackgroundColor = useMemo(() => {
     if (style.backgroundOpacity === 0) return 'transparent';
     const hex = style.backgroundColor.replace('#', '');
@@ -92,16 +86,13 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     return `rgba(${r}, ${g}, ${b}, ${style.backgroundOpacity})`;
   }, [style.backgroundColor, style.backgroundOpacity]);
 
-  // Dynamic container style based on position
   const containerStyle: ViewStyle = useMemo(() => ({
     position: 'absolute',
     alignItems: 'center',
     paddingHorizontal: 20,
-    // backgroundColor: 'red', // For debugging
     ...(style.position === 'top' ? { top: 50 } : { bottom: isVideoFullscreen ? -70 : 20 }),
   }), [style.position, isVideoFullscreen]);
 
-  // Dynamic text style
   const textStyle: TextStyle = useMemo(() => ({
     color: style.fontColor,
     textAlign: 'center',
@@ -112,7 +103,6 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     textShadowRadius: style.textShadow ? 2 : 0,
   }), [style.fontColor, style.fontWeight, style.textShadow, computedFontSize]);
 
-  // Dynamic text container style
   const textContainerStyle: ViewStyle = useMemo(() => ({
     backgroundColor: computedBackgroundColor,
     paddingVertical: 8,
@@ -126,9 +116,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       try {
         const parsedCues = parseSRT(subtitleContent);
         setCues(parsedCues);
-        console.log('[SubtitleOverlay] Parsed SRT cues:', parsedCues.length);
-      } catch (error) {
-        console.error('[SubtitleOverlay] Failed to parse SRT:', error);
+      } catch {
       }
     } else {
       setCues([]);
@@ -142,8 +130,6 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       return;
     }
 
-    // Apply delay: positive delay means subtitles appear later (subtract from currentTime)
-    // negative delay means subtitles appear earlier (add to currentTime)
     const adjustedTime = currentTime - delay + 0.5;
     const activeCue = cues.find(
       cue => adjustedTime >= cue.start && adjustedTime <= cue.end
