@@ -29,10 +29,8 @@ export const useSubtitles = ({
   const [isLoadingSubtitles, setIsLoadingSubtitles] = useState(false);
   const hasAutoSelectedRef = useRef(false);
 
-  // Fetch subtitles from Wyzie
   const fetchSubtitles = useCallback(async () => {
     if (!contentId || contentId <= 0) {
-      console.warn('[useSubtitles] Invalid contentId:', contentId);
       return;
     }
 
@@ -47,16 +45,12 @@ export const useSubtitles = ({
         params.episode = episode;
       }
 
-      console.log('[useSubtitles] Fetching with params:', params);
-
       let wyzieSubtitles: WyzieSubtitleData[] = [];
 
       try {
         wyzieSubtitles = await searchSubtitles(params);
       } catch (firstError) {
-        // Fallback: try without season/episode for TV shows
         if (contentType === 'tv' && params.season && params.episode) {
-          console.log('[useSubtitles] Retrying without season/episode...');
           wyzieSubtitles = await searchSubtitles({ tmdb_id: contentId });
         } else {
           throw firstError;
@@ -64,12 +58,10 @@ export const useSubtitles = ({
       }
 
       if (wyzieSubtitles.length === 0) {
-        console.log('[useSubtitles] No subtitles found');
         setIsLoadingSubtitles(false);
         return;
       }
 
-      // Convert to internal format
       const subtitles: SubtitleTrack[] = wyzieSubtitles.map((sub, index) => ({
         id: `wyzie_${sub.id}_${index}`,
         title: `${sub.display} (Wyzie)`,
@@ -84,40 +76,31 @@ export const useSubtitles = ({
         isConverted: false,
       }));
 
-      console.log('[useSubtitles] Fetched subtitles:', subtitles.length);
       setAvailableSubtitles(subtitles);
 
-      // Auto-select preferred language
       if (defaultSubtitleLanguage && !hasAutoSelectedRef.current) {
         const preferred = subtitles.find(
           sub => sub.language === defaultSubtitleLanguage
         );
         if (preferred) {
-          console.log('[useSubtitles] Auto-selected:', preferred.title);
           setSelectedSubtitle(preferred);
           hasAutoSelectedRef.current = true;
         }
       }
     } catch (error) {
-      console.error('[useSubtitles] Fetch failed:', error);
     } finally {
       setIsLoadingSubtitles(false);
     }
   }, [contentId, contentType, season, episode, defaultSubtitleLanguage]);
 
-  // Load saved subtitle or auto-fetch
   useEffect(() => {
-    // Reset auto-select flag when content changes
     hasAutoSelectedRef.current = false;
 
-    // Load saved subtitle
     if (savedSubtitle) {
-      console.log('[useSubtitles] Loading saved subtitle:', savedSubtitle.title);
       setSelectedSubtitle(savedSubtitle);
       return;
     }
 
-    // Auto-fetch if enabled
     if (autoSelectSubtitles && contentId) {
       fetchSubtitles();
     }

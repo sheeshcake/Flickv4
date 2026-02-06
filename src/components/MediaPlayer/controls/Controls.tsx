@@ -24,13 +24,6 @@ import type { ControlsProps, VideoStatus } from './types';
 const loadingMessagesModule = require('../../../constants/loadingmessage.js');
 const loadingMessages: string[] = loadingMessagesModule?.default ?? [];
 
-/**
- * Optimized Controls Component
- * Features:
- * - Better memoization to prevent unnecessary re-renders
- * - Improved auto-hide logic with proper cleanup
- * - Cleaner state management
- */
 const ControlsComponent: React.FC<ControlsProps> = ({
   hide,
   title,
@@ -64,19 +57,16 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   
   const messageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Update time label when not seeking
   useEffect(() => {
     if (!isSeeking) {
       setTimeLabel(formatTime(currentPosition));
     }
   }, [currentPosition, isSeeking]);
 
-  // Update status
   useEffect(() => {
     setStatus(videoStatus as VideoStatus);
   }, [videoStatus]);
 
-  // Loading message rotation
   useEffect(() => {
     if (videoStatus === 'loading' && loadingMessages.length > 0) {
       if (messageTimeoutRef.current) {
@@ -96,37 +86,30 @@ const ControlsComponent: React.FC<ControlsProps> = ({
     }
   }, [videoStatus]);
 
-  // Handle seeking state changes
   const handleSeekingStateChange = useCallback((isCurrentlySeeking: boolean) => {
     setIsSeeking(isCurrentlySeeking);
     onSeekingStateChange?.(isCurrentlySeeking);
   }, [onSeekingStateChange]);
 
-  // Auto-hide is now handled by the useControlsVisibility hook in MediaPlayer
-  // This component no longer manages its own auto-hide timer
-
-  // Time preview handler for progress bar
   const handleTimePreview = useCallback((newTime: number) => {
     setTimeLabel(formatTime(newTime));
   }, []);
 
-  // Seek with offset
   const handleSeekOffset = useCallback((seconds: number) => {
     const newTime = Math.max(0, Math.min(currentPosition + seconds, duration));
     onSeek(newTime);
   }, [currentPosition, duration, onSeek]);
 
-  // Back button handler
   const handleBackPress = useCallback(() => {
-    Orientation.lockToPortrait();
     if (fullscreen) {
       onFullscreen();
     } else {
+      Orientation.lockToPortrait();
+      setTimeout(() => Orientation.unlockAllOrientations(), 300);
       navigation.goBack();
     }
   }, [fullscreen, navigation, onFullscreen]);
 
-  // Play/Pause toggle
   const handlePlayPause = useCallback(() => {
     if (playing) {
       onPause();
@@ -135,13 +118,11 @@ const ControlsComponent: React.FC<ControlsProps> = ({
     }
   }, [onPause, onPlay, playing]);
 
-  // Memoize container dimensions
   const containerDimensions = useMemo(() => ({
     width: fullscreen ? sizes.height : sizes.width,
     height: fullscreen ? sizes.width : sizes.height * 0.3,
   }), [fullscreen]);
 
-  // Memoize controls visibility
   const isControlsHidden = useMemo(() => hide && !isSeeking, [hide, isSeeking]);
 
   return (
