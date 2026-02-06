@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useState, useCallback} from 'react';
 import {
   View,
   Text,
@@ -16,12 +16,17 @@ import {
   accessibilityRoles,
   getContentDescription,
 } from '../utils/accessibility';
+import {isTV, TV_FOCUS_BORDER_COLOR} from '../utils/tv';
+import TVFocusable from './TVFocusable';
 
 interface ContentCardProps {
   item: Movie | TVShow;
   onPress: (item: Movie | TVShow) => void;
   size?: 'small' | 'medium' | 'large';
   style?: ViewStyle;
+  hasTVPreferredFocus?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }
 
 const ContentCard: React.FC<ContentCardProps> = ({
@@ -29,8 +34,24 @@ const ContentCard: React.FC<ContentCardProps> = ({
   onPress,
   size = 'medium',
   style,
+  hasTVPreferredFocus = false,
+  onFocus,
+  onBlur,
 }) => {
-  const cardDimensions = getCardDimensions(size);
+  const [isFocused, setIsFocused] = useState(false);
+  const cardDimensions = isTV
+    ? {width: getCardDimensions(size).width * 1.2, height: getCardDimensions(size).height * 1.2}
+    : getCardDimensions(size);
+
+  const handleFocus = useCallback(() => {
+    setIsFocused(true);
+    onFocus?.();
+  }, [onFocus]);
+
+  const handleBlur = useCallback(() => {
+    setIsFocused(false);
+    onBlur?.();
+  }, [onBlur]);
   const imageUrl = item.poster_path
     ? `${TMDB_CONFIG.IMAGE_BASE_URL}${item.poster_path}`
     : '';
@@ -46,23 +67,35 @@ const ContentCard: React.FC<ContentCardProps> = ({
   const contentDescription = getContentDescription(item);
 
   return (
-    <TouchableOpacity
-      style={[styles.container, {width: cardDimensions.width}, style]}
+    <TVFocusable
+      style={[
+        styles.container,
+        {width: cardDimensions.width},
+        style,
+        isFocused && styles.focusedContainer,
+      ]}
       onPress={() => onPress(item)}
       activeOpacity={0.8}
       accessible={true}
       accessibilityRole={accessibilityRoles.button}
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHints.contentCard}
-      accessibilityValue={{text: contentDescription}}>
-      <View style={[styles.imageContainer, cardDimensions]}>
+      hasTVPreferredFocus={hasTVPreferredFocus}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      showFocusBorder={false}>
+      <View style={[
+        styles.imageContainer,
+        cardDimensions,
+        isFocused && styles.focusedImage,
+      ]}>
         <OptimizedImage
           uri={imageUrl}
           style={[styles.image, cardDimensions] as any}
           fallbackText="No Image"
           showLoadingIndicator={true}
         />
-        {rating > 0 && (
+        {rating !== undefined && rating > 0 && (
           <View
             style={styles.ratingContainer}
             accessible={true}
@@ -75,7 +108,10 @@ const ContentCard: React.FC<ContentCardProps> = ({
       {size !== 'small' && (
         <View style={styles.titleContainer}>
           <Text
-            style={styles.title}
+            style={[
+              styles.title,
+              isFocused && styles.focusedTitle,
+            ]}
             numberOfLines={2}
             ellipsizeMode="tail"
             accessible={true}
@@ -84,7 +120,7 @@ const ContentCard: React.FC<ContentCardProps> = ({
           </Text>
         </View>
       )}
-    </TouchableOpacity>
+    </TVFocusable>
   );
 };
 
@@ -92,11 +128,20 @@ const styles = StyleSheet.create({
   container: {
     marginRight: spacing.sm,
   },
+  focusedContainer: {
+    zIndex: 10,
+  },
   imageContainer: {
     borderRadius: spacing.sm,
     overflow: 'hidden',
     backgroundColor: COLORS.NETFLIX_DARK_GRAY,
     position: 'relative',
+  },
+  focusedImage: {
+    borderWidth: 3,
+    borderColor: TV_FOCUS_BORDER_COLOR,
+    borderRadius: spacing.sm + 2,
+    transform: [{scale: 1.05}],
   },
   image: {
     borderRadius: spacing.sm,
@@ -125,6 +170,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     lineHeight: typography.caption * 1.2,
+  },
+  focusedTitle: {
+    color: TV_FOCUS_BORDER_COLOR,
+    fontWeight: 'bold',
   },
 });
 

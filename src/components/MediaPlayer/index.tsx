@@ -14,7 +14,9 @@ import {
   useSubtitles,
   useFullscreen,
   useControlsVisibility,
+  useTVRemote,
 } from './hooks';
+import { isTV } from '../../utils/tv';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -232,6 +234,43 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
       showControls();
     }
   }, [duration, showControls]);
+
+  // TV Remote Control Support
+  const TV_SEEK_AMOUNT = 10; // seconds to seek on left/right
+  
+  useTVRemote(
+    {
+      onPlayPause: useCallback(() => {
+        setIsPlaying(prev => !prev);
+        showControls();
+      }, [showControls]),
+      onSelect: useCallback(() => {
+        setIsPlaying(prev => !prev);
+        showControls();
+      }, [showControls]),
+      onLeft: useCallback(() => {
+        handleSeek(currentTime - TV_SEEK_AMOUNT);
+      }, [currentTime, handleSeek]),
+      onRight: useCallback(() => {
+        handleSeek(currentTime + TV_SEEK_AMOUNT);
+      }, [currentTime, handleSeek]),
+      onRewind: useCallback(() => {
+        handleSeek(currentTime - TV_SEEK_AMOUNT * 3);
+      }, [currentTime, handleSeek]),
+      onFastForward: useCallback(() => {
+        handleSeek(currentTime + TV_SEEK_AMOUNT * 3);
+      }, [currentTime, handleSeek]),
+      onBack: useCallback(() => {
+        if (isFullscreen) {
+          toggleFullscreen();
+        } else {
+          setIsPlaying(false);
+          navigation?.goBack();
+        }
+      }, [isFullscreen, toggleFullscreen, navigation]),
+    },
+    isTV && !!videoUrl,
+  );
 
   const handleResizeModeToggle = useCallback(() => {
     setResizeMode(prev => (prev + 1) % RESIZE_MODES.length);

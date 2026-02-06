@@ -1,4 +1,4 @@
-import React, {useCallback} from 'react';
+import React, {useCallback, useRef, useState} from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {COLORS} from '../utils/constants';
 import {ContentCard} from './ContentCard';
 import {getCardDimensions, spacing, typography} from '../utils/responsive';
 import {accessibilityRoles} from '../utils/accessibility';
+import {isTV} from '../utils/tv';
 
 interface HorizontalScrollListProps {
   title: string;
@@ -21,6 +22,8 @@ interface HorizontalScrollListProps {
   onEndReached?: () => void;
   hasMore?: boolean;
   loadingMore?: boolean;
+  hasTVPreferredFocus?: boolean;
+  sectionIndex?: number;
 }
 
 const HorizontalScrollList: React.FC<HorizontalScrollListProps> = ({
@@ -32,9 +35,32 @@ const HorizontalScrollList: React.FC<HorizontalScrollListProps> = ({
   onEndReached,
   hasMore = false,
   loadingMore = false,
+  hasTVPreferredFocus = false,
+  sectionIndex = 0,
 }) => {
-  const renderItem = ({item}: {item: Movie | TVShow}) => (
-    <ContentCard item={item} onPress={onItemPress} size={cardSize} />
+  const flatListRef = useRef<FlatList>(null);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+
+  const handleItemFocus = useCallback((index: number) => {
+    setFocusedIndex(index);
+    // Scroll to focused item on TV
+    if (isTV && flatListRef.current) {
+      flatListRef.current.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.3,
+      });
+    }
+  }, []);
+
+  const renderItem = ({item, index}: {item: Movie | TVShow; index: number}) => (
+    <ContentCard
+      item={item}
+      onPress={onItemPress}
+      size={cardSize}
+      hasTVPreferredFocus={hasTVPreferredFocus && index === 0}
+      onFocus={() => handleItemFocus(index)}
+    />
   );
 
   const renderLoadingItem = () => (
@@ -100,17 +126,21 @@ const HorizontalScrollList: React.FC<HorizontalScrollListProps> = ({
         </View>
       ) : (
         <FlatList
+          ref={flatListRef}
           data={data}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.listContainer}
+          contentContainerStyle={[
+            styles.listContainer,
+            isTV && styles.tvListContainer,
+          ]}
           getItemLayout={getItemLayout}
-          initialNumToRender={3}
-          maxToRenderPerBatch={5}
-          windowSize={5}
-          removeClippedSubviews={true}
+          initialNumToRender={isTV ? 6 : 3}
+          maxToRenderPerBatch={isTV ? 8 : 5}
+          windowSize={isTV ? 7 : 5}
+          removeClippedSubviews={!isTV}
           updateCellsBatchingPeriod={50}
           ListEmptyComponent={renderEmptyComponent}
           decelerationRate="normal"
@@ -153,6 +183,10 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingHorizontal: spacing.md,
+  },
+  tvListContainer: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   loadingContainer: {
     flexDirection: 'row',

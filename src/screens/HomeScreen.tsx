@@ -619,6 +619,8 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
               onEndReached={trendingMoviesHasMore ? loadMoreTrendingMovies : undefined}
               hasMore={trendingMoviesHasMore}
               loadingMore={loadingMoreTrendingMovies}
+              hasTVPreferredFocus={continueWatching.length === 0 && likedMovies.length === 0}
+              sectionIndex={0}
             />
 
             {/* Trending TV Shows */}
@@ -631,6 +633,7 @@ export const HomeScreen: React.FC<Props> = ({navigation}) => {
               onEndReached={trendingTVHasMore ? loadMoreTrendingTVShows : undefined}
               hasMore={trendingTVHasMore}
               loadingMore={loadingMoreTrendingTV}
+              sectionIndex={1}
             />
 
             {/* Genre Sections */}

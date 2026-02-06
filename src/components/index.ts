@@ -2,6 +2,7 @@
 export {ContentCard} from './ContentCard';
 export {default as MediaPlayer} from './MediaPlayer';
 export {default as HorizontalScrollList} from './HorizontalScrollList';
+export {TVFocusable} from './TVFocusable';
 export {default as ContinueWatchingCard} from './ContinueWatchingCard';
 export {default as ContinueWatchingList} from './ContinueWatchingList';
 export {default as OptimizedImage} from './OptimizedImage';
