@@ -16,3 +16,15 @@ export {default as SubtitleStyleSettings} from './SubtitleStyleSettings';
 export * from './DownloadComponents';
 export {UpdateModal} from './UpdateModal';
 export {UpdateChecker} from './UpdateChecker';
+
+// Platform Selection Components
+export * from './PlatformSelector';
+
+// TV Components
+export * from './tv';
+
+// Mobile Components
+export * from './mobile';
+
+// Shared Components
+export * from './shared';

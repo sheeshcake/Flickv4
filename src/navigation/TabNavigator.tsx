@@ -1,6 +1,6 @@
 import React from 'react';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
-import {Text, StyleSheet, Platform} from 'react-native';
+import {Text, StyleSheet} from 'react-native';
 import type {MainTabParamList} from '../types/navigation';
 import {HomeScreen, SearchScreen, DownloadsScreen, SettingsScreen} from '../screens';
 import {spacing, typography, getSafeAreaPadding} from '../utils/responsive';

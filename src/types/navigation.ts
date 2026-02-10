@@ -14,6 +14,10 @@ export type RootStackParamList = {
     isLocal?: boolean;
     autoPlay?: boolean;
   };
+  // TV-specific screens (used by TV navigator)
+  Search?: undefined;
+  Settings?: undefined;
+  Downloads?: undefined;
 };
 
 export type MainTabParamList = {

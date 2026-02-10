@@ -81,7 +81,7 @@ const WebViewScrapper: React.FC<WebViewScrapperProps> = ({
     if (type === 'tv' && seasonNumber != null && episodeNumber != null) {
       url += `/${seasonNumber}/${episodeNumber}`;
     }
-
+    console.log('[WebViewScrapper] Constructed URL:', `${url}?autoPlay=true`);
     return `${url}?autoPlay=true`;
   }, [tmdbId, seasonNumber, episodeNumber, type]);
 
@@ -174,7 +174,7 @@ const WebViewScrapper: React.FC<WebViewScrapperProps> = ({
     <View style={styles.hiddenContainer}>
       <WebView
         key={webViewKey}
-        source={{ uri: videoUrl }}
+        source={{ uri: `${videoUrl}` }}
         injectedJavaScript={INJECTED_JAVASCRIPT}
         onMessage={handleMessage}
         onLoadStart={handleLoadStart}
