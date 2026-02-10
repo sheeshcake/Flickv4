@@ -1,6 +1,6 @@
 import React from 'react';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
-import {Text, StyleSheet, Platform} from 'react-native';
+import {Text, StyleSheet} from 'react-native';
 import type {MainTabParamList} from '../types/navigation';
 import {HomeScreen, SearchScreen, DownloadsScreen, SettingsScreen} from '../screens';
 import {spacing, typography, getSafeAreaPadding} from '../utils/responsive';
@@ -9,7 +9,6 @@ import {
   accessibilityHints,
   accessibilityRoles,
 } from '../utils/accessibility';
-import {isTV} from '../utils/tv';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -18,52 +17,27 @@ interface TabNavigatorProps {
   initialRouteName?: keyof MainTabParamList;
 }
 
-// TV-aware icon sizes
-const ICON_SIZE = isTV ? 32 : 24;
-const TV_FOCUSED_COLOR = '#E50914';
-
 // Tab icon components defined outside render to avoid recreation
 const HomeTabIcon: React.FC<{focused: boolean}> = ({focused}) => (
-  <Icon
-    name="home"
-    size={ICON_SIZE}
-    color={focused ? (isTV ? TV_FOCUSED_COLOR : '#FFFFFF') : '#666666'}
-  />
+  <Icon name="home" size={24} color={focused ? '#FFFFFF' : '#666666'} />
 );
 
 const SearchTabIcon: React.FC<{focused: boolean}> = ({focused}) => (
-  <Icon
-    name="magnify"
-    size={ICON_SIZE}
-    color={focused ? (isTV ? TV_FOCUSED_COLOR : '#FFFFFF') : '#666666'}
-  />
+  <Icon name="magnify" size={24} color={focused ? '#FFFFFF' : '#666666'} />
 );
 
 const DownloadsTabIcon: React.FC<{focused: boolean}> = ({focused}) => (
-  <Icon
-    name="download"
-    size={ICON_SIZE}
-    color={focused ? (isTV ? TV_FOCUSED_COLOR : '#FFFFFF') : '#666666'}
-  />
+  <Icon name="download" size={24} color={focused ? '#FFFFFF' : '#666666'} />
 );
 
 const SettingsTabIcon: React.FC<{focused: boolean}> = ({focused}) => (
-  <Icon
-    name="cog"
-    size={ICON_SIZE}
-    color={focused ? (isTV ? TV_FOCUSED_COLOR : '#FFFFFF') : '#666666'}
-  />
+  <Icon name="cog" size={24} color={focused ? '#FFFFFF' : '#666666'} />
 );
 
 // Tab label components defined outside render to avoid recreation
 const HomeTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
   <Text
-    style={[
-      styles.tabBarLabel,
-      focused && styles.activeLabel,
-      isTV && styles.tvTabBarLabel,
-      isTV && focused && styles.tvActiveLabel,
-    ]}
+    style={[styles.tabBarLabel, focused && styles.activeLabel]}
     accessible={true}
     accessibilityRole={accessibilityRoles.tab}
     accessibilityLabel={accessibilityLabels.homeTab}
@@ -74,12 +48,7 @@ const HomeTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
 
 const SearchTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
   <Text
-    style={[
-      styles.tabBarLabel,
-      focused && styles.activeLabel,
-      isTV && styles.tvTabBarLabel,
-      isTV && focused && styles.tvActiveLabel,
-    ]}
+    style={[styles.tabBarLabel, focused && styles.activeLabel]}
     accessible={true}
     accessibilityRole={accessibilityRoles.tab}
     accessibilityLabel={accessibilityLabels.searchTab}
@@ -90,12 +59,7 @@ const SearchTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
 
 const DownloadsTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
   <Text
-    style={[
-      styles.tabBarLabel,
-      focused && styles.activeLabel,
-      isTV && styles.tvTabBarLabel,
-      isTV && focused && styles.tvActiveLabel,
-    ]}
+    style={[styles.tabBarLabel, focused && styles.activeLabel]}
     accessible={true}
     accessibilityRole={accessibilityRoles.tab}
     accessibilityLabel="Downloads tab"
@@ -106,12 +70,7 @@ const DownloadsTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
 
 const SettingsTabLabel: React.FC<{focused: boolean}> = ({focused}) => (
   <Text
-    style={[
-      styles.tabBarLabel,
-      focused && styles.activeLabel,
-      isTV && styles.tvTabBarLabel,
-      isTV && focused && styles.tvActiveLabel,
-    ]}
+    style={[styles.tabBarLabel, focused && styles.activeLabel]}
     accessible={true}
     accessibilityRole={accessibilityRoles.tab}
     accessibilityLabel={accessibilityLabels.settingsTab}
@@ -128,12 +87,12 @@ export const TabNavigator: React.FC<TabNavigatorProps> = ({
       initialRouteName={initialRouteName}
       screenOptions={{
         headerShown: false,
-        tabBarStyle: isTV ? styles.tvTabBar : styles.tabBar,
-        tabBarActiveTintColor: isTV ? TV_FOCUSED_COLOR : '#FFFFFF',
+        tabBarStyle: styles.tabBar,
+        tabBarActiveTintColor: '#FFFFFF',
         tabBarInactiveTintColor: '#666666',
         tabBarShowLabel: true,
-        tabBarLabelStyle: isTV ? styles.tvTabBarLabel : styles.tabBarLabel,
-        tabBarItemStyle: isTV ? styles.tvTabBarItem : styles.tabBarItem,
+        tabBarLabelStyle: styles.tabBarLabel,
+        tabBarItemStyle: styles.tabBarItem,
       }}>
       <Tab.Screen
         name="Home"
@@ -180,36 +139,16 @@ const styles = StyleSheet.create({
     borderTopColor: '#333333',
     height: 65 + safeArea.bottom,
   },
-  tvTabBar: {
-    backgroundColor: '#000000',
-    borderTopWidth: 2,
-    borderTopColor: '#333333',
-    height: 80,
-    paddingHorizontal: spacing.xl,
-  },
   tabBarLabel: {
     fontSize: typography.caption,
     fontWeight: '500',
-    color: '#666666',
-  },
-  tvTabBarLabel: {
-    fontSize: typography.body,
-    fontWeight: '600',
     color: '#666666',
   },
   activeLabel: {
     color: '#FFFFFF',
     fontWeight: '600',
   },
-  tvActiveLabel: {
-    color: TV_FOCUSED_COLOR,
-    fontWeight: 'bold',
-  },
   tabBarItem: {
     paddingVertical: spacing.xs,
-  },
-  tvTabBarItem: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
   },
 });
