@@ -16,6 +16,12 @@ export type RootStackParamList = {
   };
 };
 
+/** TV-specific stack – used inside TVNavigator */
+export type TVStackParamList = {
+  TVMain: undefined;
+  TVDetail: { content: Movie | TVShow };
+};
+
 export type MainTabParamList = {
   Home: undefined;
   Search: undefined;

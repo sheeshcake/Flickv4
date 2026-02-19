@@ -88,9 +88,11 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
 
   const containerStyle: ViewStyle = useMemo(() => ({
     position: 'absolute',
+    left: 0,
+    right: 0,
     alignItems: 'center',
     paddingHorizontal: 20,
-    ...(style.position === 'top' ? { top: 50 } : { bottom: isVideoFullscreen ? -70 : 20 }),
+    ...(style.position === 'top' ? { top: 50 } : { bottom: isVideoFullscreen ? 100 : 20 }),
   }), [style.position, isVideoFullscreen]);
 
   const textStyle: TextStyle = useMemo(() => ({

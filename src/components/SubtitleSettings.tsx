@@ -1,13 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   StyleSheet,
   ScrollView,
   Switch,
   Alert,
 } from 'react-native';
+
+// ─── TV-aware focusable pressable ────────────────────────────────
+const FP: React.FC<{
+  style?: any;
+  focusedStyle?: any;
+  onPress?: () => void;
+  disabled?: boolean;
+  hasTVPreferredFocus?: boolean;
+  accessibilityLabel?: string;
+  children: React.ReactNode;
+}> = ({ style, focusedStyle, onPress, disabled, hasTVPreferredFocus, accessibilityLabel, children }) => {
+  const [focused, setFocused] = useState(false);
+  const tvProps: any = { hasTVPreferredFocus };
+  return (
+    <Pressable
+      {...tvProps}
+      style={[style, focused && focusedStyle]}
+      onPress={disabled ? undefined : onPress}
+      onFocus={useCallback(() => setFocused(true), [])}
+      onBlur={useCallback(() => setFocused(false), [])}
+      focusable={!disabled}
+      accessible={true}
+      accessibilityLabel={accessibilityLabel}
+    >
+      {children}
+    </Pressable>
+  );
+};
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { colors } from '../constants/theme';
 import { useAppState } from '../hooks/useAppState';
@@ -126,7 +154,13 @@ const SubtitleSettings: React.FC<SubtitleSettingsProps> = ({ onClose }) => {
 
       {/* Auto-select subtitles toggle */}
       <View style={styles.section}>
-        <View style={styles.settingRow}>
+        <FP
+          style={styles.settingRow}
+          focusedStyle={styles.settingRowFocused}
+          onPress={() => handleAutoSelectToggle(!autoSelect)}
+          hasTVPreferredFocus={true}
+          accessibilityLabel="Auto-select subtitles"
+        >
           <View style={styles.settingInfo}>
             <Text style={styles.settingTitle}>Auto-select Subtitles</Text>
             <Text style={styles.settingDescription}>
@@ -138,8 +172,9 @@ const SubtitleSettings: React.FC<SubtitleSettingsProps> = ({ onClose }) => {
             onValueChange={handleAutoSelectToggle}
             trackColor={{ false: colors.light, true: colors.red + '80' }}
             thumbColor={autoSelect ? colors.red : colors.white}
+            focusable={false}
           />
-        </View>
+        </FP>
       </View>
 
       {/* Default language selection */}
@@ -160,25 +195,29 @@ const SubtitleSettings: React.FC<SubtitleSettingsProps> = ({ onClose }) => {
                 <Text style={styles.selectedLanguageName}>
                   {getSelectedLanguageInfo()?.name}
                 </Text>
-                <TouchableOpacity
+                <FP
                   onPress={() => setSelectedLanguage(undefined)}
                   style={styles.clearButton}
+                  focusedStyle={styles.clearButtonFocused}
+                  accessibilityLabel="Clear selected language"
                 >
                   <Icon name="close" size={16} color={colors.white} />
-                </TouchableOpacity>
+                </FP>
               </View>
             </View>
           )}
 
           <View style={styles.languageGrid}>
             {COMMON_LANGUAGES.map((language) => (
-              <TouchableOpacity
+              <FP
                 key={language.code}
                 style={[
                   styles.languageItem,
                   selectedLanguage === language.code && styles.selectedLanguageItem,
                 ]}
+                focusedStyle={styles.languageItemFocused}
                 onPress={() => handleLanguageSelect(language.code)}
+                accessibilityLabel={`${language.name} subtitle language`}
               >
                 <Text style={styles.languageFlag}>{language.flag}</Text>
                 <Text style={[
@@ -188,7 +227,7 @@ const SubtitleSettings: React.FC<SubtitleSettingsProps> = ({ onClose }) => {
                   {language.name}
                 </Text>
                 <Text style={styles.languageCode}>({language.code})</Text>
-              </TouchableOpacity>
+              </FP>
             ))}
           </View>
         </View>
@@ -207,20 +246,24 @@ const SubtitleSettings: React.FC<SubtitleSettingsProps> = ({ onClose }) => {
 
       {/* Action buttons */}
       <View style={styles.actionButtons}>
-        <TouchableOpacity
+        <FP
           style={styles.resetButton}
+          focusedStyle={styles.resetButtonFocused}
           onPress={handleReset}
+          accessibilityLabel="Reset subtitle settings to default"
         >
           <Text style={styles.resetButtonText}>Reset to Default</Text>
-        </TouchableOpacity>
+        </FP>
 
-        <TouchableOpacity
+        <FP
           style={[
             styles.saveButton,
             !hasChanges && styles.saveButtonDisabled,
           ]}
+          focusedStyle={styles.saveButtonFocused}
           onPress={handleSave}
           disabled={!hasChanges}
+          accessibilityLabel="Save subtitle changes"
         >
           <Text style={[
             styles.saveButtonText,
@@ -228,7 +271,7 @@ const SubtitleSettings: React.FC<SubtitleSettingsProps> = ({ onClose }) => {
           ]}>
             Save Changes
           </Text>
-        </TouchableOpacity>
+        </FP>
       </View>
     </ScrollView>
   );
@@ -277,6 +320,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.dark,
     padding: 16,
     borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  settingRowFocused: {
+    borderColor: '#E50914',
+    backgroundColor: 'rgba(229,9,20,0.12)',
   },
   settingInfo: {
     flex: 1,
@@ -327,6 +376,12 @@ const styles = StyleSheet.create({
     height: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  clearButtonFocused: {
+    borderColor: '#FFFFFF',
+    backgroundColor: '#FF1A1A',
   },
   languageGrid: {
     flexDirection: 'row',
@@ -340,8 +395,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 8,
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: 'transparent',
+  },
+  languageItemFocused: {
+    borderColor: '#E50914',
+    backgroundColor: 'rgba(229,9,20,0.18)',
   },
   selectedLanguageItem: {
     backgroundColor: colors.red + '20',
@@ -388,8 +447,12 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: colors.light,
+  },
+  resetButtonFocused: {
+    borderColor: '#E50914',
+    backgroundColor: 'rgba(229,9,20,0.12)',
   },
   resetButtonText: {
     color: colors.white,
@@ -402,6 +465,12 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  saveButtonFocused: {
+    borderColor: '#FFFFFF',
+    backgroundColor: '#FF1A1A',
   },
   saveButtonDisabled: {
     backgroundColor: colors.dark,

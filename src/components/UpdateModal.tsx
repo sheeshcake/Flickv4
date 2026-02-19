@@ -1,16 +1,44 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useCallback} from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Modal,
-  TouchableOpacity,
+  Pressable,
   ScrollView,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import FontAwesome6 from '@react-native-vector-icons/fontawesome6';
 import {updateService, UpdateInfo, DownloadProgress} from '../services/UpdateService';
+
+// ─── TV-aware focusable pressable ────────────────────────────────
+const FP: React.FC<{
+  style?: any;
+  focusedStyle?: any;
+  onPress?: () => void;
+  disabled?: boolean;
+  hasTVPreferredFocus?: boolean;
+  accessibilityLabel?: string;
+  children: React.ReactNode;
+}> = ({ style, focusedStyle, onPress, disabled, hasTVPreferredFocus, accessibilityLabel, children }) => {
+  const [focused, setFocused] = useState(false);
+  const tvProps: any = { hasTVPreferredFocus };
+  return (
+    <Pressable
+      {...tvProps}
+      style={[style, focused && focusedStyle]}
+      onPress={disabled ? undefined : onPress}
+      onFocus={useCallback(() => setFocused(true), [])}
+      onBlur={useCallback(() => setFocused(false), [])}
+      focusable={!disabled}
+      accessible={true}
+      accessibilityLabel={accessibilityLabel}
+    >
+      {children}
+    </Pressable>
+  );
+};
 
 interface UpdateModalProps {
   visible: boolean;
@@ -150,12 +178,15 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             <Text style={styles.versionText}>
               Version {updateInfo?.currentVersion} is the latest version.
             </Text>
-            <TouchableOpacity 
-              style={styles.secondaryButton} 
+            <FP
+              style={styles.secondaryButton}
+              focusedStyle={styles.secondaryButtonFocused}
               onPress={checkForUpdates}
+              hasTVPreferredFocus={true}
+              accessibilityLabel="Check again for updates"
             >
               <Text style={styles.secondaryButtonText}>Check Again</Text>
-            </TouchableOpacity>
+            </FP>
           </View>
         );
 
@@ -204,39 +235,49 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
 
             <View style={styles.buttonContainer}>
               {updateInfo?.downloadUrl ? (
-                <TouchableOpacity 
-                  style={styles.primaryButton} 
+                <FP
+                  style={styles.primaryButton}
+                  focusedStyle={styles.primaryButtonFocused}
                   onPress={handleDownload}
+                  hasTVPreferredFocus={true}
+                  accessibilityLabel="Download and install update"
                 >
                   <Text style={styles.primaryButtonText}>
                     Download & Install
                   </Text>
-                </TouchableOpacity>
+                </FP>
               ) : (
-                <TouchableOpacity 
-                  style={styles.primaryButton} 
+                <FP
+                  style={styles.primaryButton}
+                  focusedStyle={styles.primaryButtonFocused}
                   onPress={handleOpenReleasePage}
+                  hasTVPreferredFocus={true}
+                  accessibilityLabel="View update on GitHub"
                 >
                   <Text style={styles.primaryButtonText}>
                     View on GitHub
                   </Text>
-                </TouchableOpacity>
+                </FP>
               )}
 
-              <TouchableOpacity 
-                style={styles.secondaryButton} 
+              <FP
+                style={styles.secondaryButton}
+                focusedStyle={styles.secondaryButtonFocused}
                 onPress={handleOpenReleasePage}
+                accessibilityLabel="Open release page"
               >
                 <Text style={styles.secondaryButtonText}>Release Page</Text>
-              </TouchableOpacity>
+              </FP>
 
               {onSkipVersion && (
-                <TouchableOpacity 
-                  style={styles.skipButton} 
+                <FP
+                  style={styles.skipButton}
+                  focusedStyle={styles.skipButtonFocused}
                   onPress={onSkipVersion}
+                  accessibilityLabel="Skip this version"
                 >
                   <Text style={styles.skipButtonText}>Skip This Version</Text>
-                </TouchableOpacity>
+                </FP>
               )}
             </View>
           </ScrollView>
@@ -275,12 +316,15 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             <Text style={styles.errorIcon}>⚠️</Text>
             <Text style={styles.statusText}>Error</Text>
             <Text style={styles.errorText}>{errorMessage}</Text>
-            <TouchableOpacity 
-              style={styles.primaryButton} 
+            <FP
+              style={styles.primaryButton}
+              focusedStyle={styles.primaryButtonFocused}
               onPress={checkForUpdates}
+              hasTVPreferredFocus={true}
+              accessibilityLabel="Try checking for updates again"
             >
               <Text style={styles.primaryButtonText}>Try Again</Text>
-            </TouchableOpacity>
+            </FP>
           </View>
         );
 
@@ -299,9 +343,14 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>App Update</Text>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <FP
+            onPress={onClose}
+            style={styles.closeButton}
+            focusedStyle={styles.closeButtonFocused}
+            accessibilityLabel="Close update modal"
+          >
             <Text style={styles.closeButtonText}>✕</Text>
-          </TouchableOpacity>
+          </FP>
         </View>
         
         <View style={styles.content}>
@@ -340,6 +389,12 @@ const getStyles = (isDarkTheme: boolean) =>
       backgroundColor: isDarkTheme ? '#333333' : '#E0E0E0',
       alignItems: 'center',
       justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+    closeButtonFocused: {
+      borderColor: '#E50914',
+      backgroundColor: isDarkTheme ? '#4a1010' : '#f5c6c6',
     },
     closeButtonText: {
       fontSize: 18,
@@ -457,6 +512,12 @@ const getStyles = (isDarkTheme: boolean) =>
       paddingHorizontal: 24,
       borderRadius: 8,
       alignItems: 'center',
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+    primaryButtonFocused: {
+      borderColor: '#FFFFFF',
+      backgroundColor: '#FF1A1A',
     },
     primaryButtonText: {
       color: '#FFFFFF',
@@ -465,13 +526,17 @@ const getStyles = (isDarkTheme: boolean) =>
     },
     secondaryButton: {
       backgroundColor: 'transparent',
-      borderWidth: 1,
+      borderWidth: 2,
       borderColor: isDarkTheme ? '#666666' : '#CCCCCC',
       paddingVertical: 14,
       paddingHorizontal: 24,
       borderRadius: 8,
       alignItems: 'center',
       marginTop: 12,
+    },
+    secondaryButtonFocused: {
+      borderColor: '#E50914',
+      backgroundColor: 'rgba(229,9,20,0.12)',
     },
     secondaryButtonText: {
       color: isDarkTheme ? '#FFFFFF' : '#000000',
@@ -514,6 +579,13 @@ const getStyles = (isDarkTheme: boolean) =>
       paddingHorizontal: 24,
       alignItems: 'center',
       marginTop: 16,
+      borderRadius: 8,
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+    skipButtonFocused: {
+      borderColor: '#888888',
+      backgroundColor: 'rgba(136,136,136,0.12)',
     },
     skipButtonText: {
       color: isDarkTheme ? '#888888' : '#999999',
