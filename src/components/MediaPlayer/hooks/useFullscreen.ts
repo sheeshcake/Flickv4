@@ -26,9 +26,6 @@ export const useFullscreen = (
       StatusBar.setHidden(false, 'fade');
       InteractionManager.runAfterInteractions(() => {
         Orientation.lockToPortrait();
-        setTimeout(() => {
-          Orientation.unlockAllOrientations();
-        }, 300);
       });
     }
     
@@ -41,9 +38,6 @@ export const useFullscreen = (
       if (isFullscreen) {
         StatusBar.setHidden(false, 'fade');
         Orientation.lockToPortrait();
-        setTimeout(() => {
-          Orientation.unlockAllOrientations();
-        }, 300);
       }
     };
   }, [isFullscreen]);
