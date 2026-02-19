@@ -1,8 +1,10 @@
 import React from 'react';
+import {Platform} from 'react-native';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '../types/navigation';
 import {TabNavigator} from './TabNavigator';
+import {TVNavigator} from './TVNavigator';
 import {DetailScreen, SplashScreen} from '../screens';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -23,9 +25,12 @@ export const AppNavigator: React.FC = () => {
             animation: 'fade',
           }}
         />
-        <Stack.Screen name="Main" component={TabNavigator} />
-        <Stack.Screen 
-          name="Detail" 
+        <Stack.Screen
+          name="Main"
+          component={Platform.isTV ? TVNavigator : TabNavigator}
+        />
+        <Stack.Screen
+          name="Detail"
           component={DetailScreen}
           options={{
             presentation: 'modal',

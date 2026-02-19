@@ -6,3 +6,4 @@ export * from './accessibility';
 export * from './theme';
 export * from './imagePreloader';
 export * from './subtitleUtils';
+export * from './tv';
