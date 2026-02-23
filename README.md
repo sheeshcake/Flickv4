@@ -1,7 +1,7 @@
 <div align="center">
   <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png" alt="Flickv4 Logo" width="150" />
   
-  <h1>✨ Flickv4</h1>
+  <h1>Flickv4</h1>
   <p><strong>Your Personal Streaming Sanctuary</strong></p>
   <p>A premium, ad-free streaming experience that brings thousands of movies and TV shows to your fingertips—with offline downloads, intelligent subtitle controls, and a beautifully crafted Netflix-inspired interface.</p>
   
@@ -9,9 +9,33 @@
     <img src="https://img.shields.io/badge/React%20Native-0.82-61DAFB?style=flat-square&logo=react" alt="React Native" />
     <img src="https://img.shields.io/badge/TypeScript-5.0-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
     <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android-lightgrey?style=flat-square" alt="Platform" />
-    <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
+    <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License" />
   </p>
 </div>
+
+---
+
+## ⚠️ Important Notice: Web Scraper Migration
+
+> **The web scraping engine is being moved to a private repository.**
+
+I'll be honest—I built a powerful web scraping strategy for this app, and one of my first mistakes was making it fully public. Moving forward, **all updates to the web scraper will no longer be available in this public repository**.
+
+I know this might sound selfish, but here's why this decision is necessary:
+
+### 🔒 Why Private?
+
+| Reason | Explanation |
+|--------|-------------|
+| **Longevity & Sustainability** | Public scrapers have a short lifespan. Content providers actively monitor GitHub for scraping code and quickly patch against well-known techniques. Keeping it private ensures the scraper remains functional for longer. |
+| **Preventing Abuse** | When scraping logic is public, it can be weaponized by bad actors—overwhelming source servers, getting IPs banned, or being used for malicious purposes that ruin it for everyone. |
+| **Protecting the Community** | Ironically, keeping it private protects legitimate users. Once a scraper goes viral, it gets blocked, and suddenly *nobody* can use it. |
+| **Avoiding Arms Race** | Every time scraping code is public, it accelerates the cat-and-mouse game. Private development allows for more stable, long-term solutions without constantly firefighting patches. |
+| **Personal Investment** | I've spent countless hours building and maintaining this. It's not about gatekeeping knowledge—it's about protecting something I've worked hard on so it can continue to serve its purpose. |
+
+**The rest of the app—UI, features, architecture—remains fully open source.** This is purely about keeping the scraper alive and functional.
+
+I appreciate your understanding. 🙏
 
 ---
 
@@ -98,12 +122,18 @@ Your support helps maintain the project, add new features, and keep the scraper 
 
 ## 📄 License
 
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)** - see the [LICENSE](LICENSE) file for details.
 
-```
-MIT License - you're free to use, modify, and distribute this software.
-Commercial use is permitted. No warranty is provided.
-```
+### What This Means For You:
+
+| ✅ You Can | ⚠️ You Must | ❌ You Cannot |
+|-----------|-------------|---------------|
+| Use commercially | **Credit the original author** | Hold the author liable |
+| Modify the code | **Disclose your source code** | Sublicense |
+| Distribute copies | **State changes you made** | Use without attribution |
+| Use privately | **Use the same license (GPL-3.0)** | |
+
+**In short:** Fork it, modify it, build on it—but give credit where it's due and keep it open source.
 
 ---
 
