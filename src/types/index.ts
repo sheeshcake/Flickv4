@@ -59,6 +59,7 @@ export interface UserPreferences {
   defaultSubtitleLanguage?: string;
   autoSelectSubtitles: boolean;
   subtitleStyle: SubtitleStyle;
+  netflixStyle: boolean;
 }
 
 export interface WatchProgress {

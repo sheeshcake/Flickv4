@@ -12,6 +12,8 @@ import {
   BackHandler,
   ActivityIndicator,
   Platform,
+  PanResponder,
+  GestureResponderEvent,
 } from 'react-native';
 import Video, { BufferingStrategyType, TextTrackType, SelectedTrackType } from 'react-native-video';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -31,7 +33,7 @@ import { TVButton } from './TVButton';
 const TV_FOCUS_COLOR = '#E50914';
 const SEEK_AMOUNT = 10; // seconds
 const SEEK_AMOUNT_LARGE = 30; // seconds for fast forward/rewind
-const CONTROLS_HIDE_DELAY = 5000; // ms
+const CONTROLS_HIDE_DELAY = 5000; // 10 seconds
 
 interface TVMediaPlayerProps {
   videoUrl: string;
@@ -82,6 +84,8 @@ const formatTime = (seconds: number): string => {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
+const TV_SUBTITLE_STYLE = { fontSize: 16, paddingBottom: 20 };
+
 export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
   videoUrl,
   title,
@@ -109,6 +113,10 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
   const [subtitleVttPath, setSubtitleVttPath] = useState<string | null>(null);
   const [subtitleDelay] = useState(0);
   const [focusedButton, setFocusedButton] = useState<string>('play');
+  // Seekbar drag state
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [seekBarWidth, setSeekBarWidth] = useState(0);
+  const seekBarRef = useRef<View>(null);
 
   const videoRef = useRef<any>(null);
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -209,6 +217,51 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
     }
   }, [isPlaying]);
 
+  // Seekbar pan responder for TV scrolling
+  const tvSeekPanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (evt: GestureResponderEvent) => {
+      setIsSeeking(true);
+      resetControlsTimer();
+      if (seekBarRef.current) {
+        seekBarRef.current.measure((_x, _y, width, _height, pageX) => {
+          const relX = evt.nativeEvent.pageX - pageX;
+          const percent = Math.max(0, Math.min(relX / width, 1));
+          const newTime = percent * duration;
+          videoRef.current?.seek(newTime);
+          setCurrentTime(newTime);
+        });
+      }
+    },
+    onPanResponderMove: (evt: GestureResponderEvent) => {
+      if (seekBarRef.current) {
+        seekBarRef.current.measure((_x, _y, width, _height, pageX) => {
+          const relX = evt.nativeEvent.pageX - pageX;
+          const percent = Math.max(0, Math.min(relX / width, 1));
+          const newTime = percent * duration;
+          setCurrentTime(newTime);
+        });
+      }
+    },
+    onPanResponderRelease: (evt: GestureResponderEvent) => {
+      if (seekBarRef.current) {
+        seekBarRef.current.measure((_x, _y, width, _height, pageX) => {
+          const relX = evt.nativeEvent.pageX - pageX;
+          const percent = Math.max(0, Math.min(relX / width, 1));
+          const newTime = percent * duration;
+          videoRef.current?.seek(newTime);
+          setCurrentTime(newTime);
+        });
+      }
+      setIsSeeking(false);
+      resetControlsTimer();
+    },
+    onPanResponderTerminate: () => {
+      setIsSeeking(false);
+    },
+  }), [duration, resetControlsTimer]);
+
   // Initial progress seek
   useEffect(() => {
     if (duration > 0 && initialProgress > 0 && !hasStartedFromProgress && videoRef.current) {
@@ -258,9 +311,14 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
     // Auto-play once loaded
     setTimeout(() => {
       setIsPlaying(true);
+      resetControlsTimer();
     }, 100);
-    resetControlsTimer();
+
   }, [resetControlsTimer]);
+
+  useEffect(() => {
+    resetControlsTimer();
+  }, [isPlaying, resetControlsTimer]);
 
   const handleProgress = useCallback(({ currentTime: time }: { currentTime: number }) => {
     setCurrentTime(time);
@@ -502,11 +560,10 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
       {isPlayerReady && isValidUrl ? (
         <Video
           ref={videoRef}
-          source={{ 
-            uri: videoUrl,
-            // Android ExoPlayer specific settings
-            type: videoUrl.includes('.m3u8') ? 'm3u8' : undefined,
-          }}
+          source={videoUrl.includes('.m3u8')
+            ? { uri: videoUrl, type: 'm3u8' }
+            : { uri: videoUrl }
+          }
           style={styles.video}
           onLoad={handleLoad}
           onProgress={handleProgress}
@@ -525,11 +582,7 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
           allowsExternalPlayback={false}
           textTracks={textTracks}
           selectedTextTrack={selectedTextTrack}
-          subtitleStyle={{
-            fontSize: 16,
-            paddingBottom: 20,
-            opacity: 1,
-          }}
+          subtitleStyle={TV_SUBTITLE_STYLE}
         />
       ) : (
         <View style={styles.loadingContainer}>
@@ -567,8 +620,8 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
                 button.key === 'play' && styles.playButton,
                 button.key === 'play' && focusedButton === button.key && styles.playButtonFocused,
               ]}
-              onPress={button.onPress}
-              onFocus={() => setFocusedButton(button.key)}
+              onPress={() => { button.onPress(); resetControlsTimer(); }}
+              onFocus={() => { setFocusedButton(button.key); resetControlsTimer(); }}
               // @ts-ignore - TV prop
               hasTVPreferredFocus={button.key === 'play'}
             >
@@ -584,12 +637,31 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
         {/* Bottom bar - Progress */}
         <View style={styles.bottomBar}>
           {/* Time display */}
-          <Text style={styles.timeText}>{formatTime(currentTime)}</Text>
+          <Text style={styles.timeText}>{formatTime(isSeeking ? currentTime : currentTime)}</Text>
 
-          {/* Progress bar */}
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBackground}>
+          {/* Progress bar - draggable seekbar */}
+          <View
+            style={styles.progressContainer}
+            onLayout={(e) => setSeekBarWidth(e.nativeEvent.layout.width)}
+          >
+            <View
+              ref={seekBarRef}
+              style={styles.progressBackground}
+              {...tvSeekPanResponder.panHandlers}
+            >
               <Animated.View style={[styles.progressFill, progressAnimatedStyle]} />
+              {/* Seek thumb */}
+              {seekBarWidth > 0 && (
+                <View
+                  style={[
+                    styles.progressThumb,
+                    {
+                      left: Math.max(0, ((duration > 0 ? currentTime / duration : 0) * seekBarWidth) - 8),
+                    },
+                    isSeeking && styles.progressThumbActive,
+                  ]}
+                />
+              )}
             </View>
           </View>
 
@@ -715,17 +787,34 @@ const styles = StyleSheet.create({
   progressContainer: {
     flex: 1,
     height: 8,
+    justifyContent: 'center',
   },
   progressBackground: {
     flex: 1,
+    height: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 4,
-    overflow: 'hidden',
+    borderRadius: 3,
+    overflow: 'visible',
   },
   progressFill: {
     height: '100%',
     backgroundColor: TV_FOCUS_COLOR,
-    borderRadius: 4,
+    borderRadius: 3,
+  },
+  progressThumb: {
+    position: 'absolute',
+    top: -5,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: TV_FOCUS_COLOR,
+    elevation: 3,
+  },
+  progressThumbActive: {
+    transform: [{ scale: 1.4 }],
+    backgroundColor: TV_FOCUS_COLOR,
   },
   hintsContainer: {
     position: 'absolute',

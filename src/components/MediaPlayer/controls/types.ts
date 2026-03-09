@@ -29,6 +29,7 @@ export interface ControlsProps {
   onSubtitlePress?: () => void;
   hasSubtitles?: boolean;
   onSeekingStateChange?: (isSeeking: boolean) => void;
+  onResetTimer?: () => void;
   // Subtitle delay props
   subtitleDelay?: number;
   onSubtitleDelayChange?: (delta: number) => void;
@@ -79,6 +80,7 @@ export interface BottomBarProps {
   onSubtitlePress?: () => void;
   onResize: () => void;
   onFullscreen: () => void;
+  onResetTimer?: () => void;
   // Subtitle delay props
   subtitleDelay?: number;
   onSubtitleDelayChange?: (delta: number) => void;

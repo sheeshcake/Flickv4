@@ -1,6 +1,6 @@
 {
   "name": "Flickv4",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "scripts": {
     "clean:android": "cd android && ./gradlew clean",

@@ -26,6 +26,7 @@ import { getGenreNameById } from '../utils/genreMap';
 import LinearGradient from 'react-native-linear-gradient';
 import { colors, sizes } from '../constants/theme';
 import { styles } from './DetailScreen.styles';
+import NetflixDetailScreen from './NetflixDetailScreen';
 
 type DetailScreenProps = RootStackScreenProps<'Detail'>;
 
@@ -46,6 +47,16 @@ const getContentReleaseDate = (item: Movie | TVShow | null): string => {
 };
 
 const DetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
+  const { state } = useAppState();
+
+  // If Netflix style is enabled, render the Netflix Detail Screen
+  if (state.user.preferences.netflixStyle) {
+    return <NetflixDetailScreen route={route} navigation={navigation} />;
+  }
+  return <ClassicDetailScreen route={route} navigation={navigation} />;
+};
+
+const ClassicDetailScreen: React.FC<DetailScreenProps> = ({ route, navigation }) => {
   const { content, video: localVideoPath, isLocal, autoPlay } = route.params || {};
   const validContent = content && typeof content === 'object' ? content : null;
   

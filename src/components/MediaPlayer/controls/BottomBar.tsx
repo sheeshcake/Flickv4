@@ -23,6 +23,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   onSubtitlePress,
   onResize,
   onFullscreen,
+  onResetTimer,
   subtitleDelay = 0,
   onSubtitleDelayChange,
   onResetSubtitleDelay,
@@ -48,7 +49,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
         hidden ? styles.bottomBarHidden : styles.bottomBarVisible,
       ]}
     >
-      <TouchableOpacity onPress={onPlayPause} style={styles.bottomPlayButton}>
+      <TouchableOpacity onPress={() => { onPlayPause(); onResetTimer?.(); }} style={styles.bottomPlayButton}>
         <MaterialCommunityIcon
           name={playing ? 'pause' : 'play'}
           size={sizes.width * 0.05}
@@ -104,7 +105,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
 
       {onSubtitlePress && (
         <TouchableOpacity 
-          onPress={onSubtitlePress} 
+          onPress={() => { onSubtitlePress(); onResetTimer?.(); }} 
           onLongPress={handleSubtitleLongPress}
           delayLongPress={500}
           style={styles.subtitleButton}
@@ -118,7 +119,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
       )}
 
       {fullscreen && (
-        <TouchableOpacity onPress={onResize} style={styles.resizeButton}>
+        <TouchableOpacity onPress={() => { onResize(); onResetTimer?.(); }} style={styles.resizeButton}>
           <MaterialCommunityIcon
             name="magnify"
             size={sizes.width * 0.05}
@@ -127,7 +128,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
         </TouchableOpacity>
       )}
 
-      <TouchableOpacity onPress={onFullscreen} style={styles.fullscreenButton}>
+      <TouchableOpacity onPress={() => { onFullscreen(); onResetTimer?.(); }} style={styles.fullscreenButton}>
         <MaterialIcon
           name={fullscreen ? 'fullscreen-exit' : 'fullscreen'}
           size={sizes.width * 0.06}
