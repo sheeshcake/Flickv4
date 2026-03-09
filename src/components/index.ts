@@ -1,6 +1,7 @@
 // Component exports
 export {ContentCard} from './ContentCard';
 export {default as MediaPlayer} from './MediaPlayer';
+export {default as NetflixMediaPlayer} from './MediaPlayer/NetflixMediaPlayer';
 export {default as HorizontalScrollList} from './HorizontalScrollList';
 export {default as ContinueWatchingCard} from './ContinueWatchingCard';
 export {default as ContinueWatchingList} from './ContinueWatchingList';

@@ -442,6 +442,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         onSubtitlePress={handleSubtitlePress}
         hasSubtitles={!!selectedSubtitle}
         onSeekingStateChange={handleSeekingStateChange}
+        onResetTimer={showControls}
         subtitleDelay={subtitleDelay}
         onSubtitleDelayChange={handleSubtitleDelayChange}
         onResetSubtitleDelay={handleResetSubtitleDelay}

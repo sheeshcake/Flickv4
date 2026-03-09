@@ -92,7 +92,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     right: 0,
     alignItems: 'center',
     paddingHorizontal: 20,
-    ...(style.position === 'top' ? { top: 50 } : { bottom: isVideoFullscreen ? (Platform.isTV ? 100 : -70) : 20 }),
+    ...(style.position === 'top' ? { top: 50 } : { bottom: isVideoFullscreen ? (Platform.isTV ? 100 : 70) : 20 }),
   }), [style.position, isVideoFullscreen]);
 
   const textStyle: TextStyle = useMemo(() => ({

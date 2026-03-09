@@ -45,6 +45,7 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   onSubtitlePress,
   hasSubtitles,
   onSeekingStateChange,
+  onResetTimer,
   subtitleDelay = 0,
   onSubtitleDelayChange,
   onResetSubtitleDelay,
@@ -98,7 +99,8 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   const handleSeekOffset = useCallback((seconds: number) => {
     const newTime = Math.max(0, Math.min(currentPosition + seconds, duration));
     onSeek(newTime);
-  }, [currentPosition, duration, onSeek]);
+    onResetTimer?.();
+  }, [currentPosition, duration, onSeek, onResetTimer]);
 
   const handleBackPress = useCallback(() => {
     if (fullscreen) {
@@ -108,7 +110,8 @@ const ControlsComponent: React.FC<ControlsProps> = ({
       setTimeout(() => Orientation.unlockAllOrientations(), 300);
       navigation.goBack();
     }
-  }, [fullscreen, navigation, onFullscreen]);
+    onResetTimer?.();
+  }, [fullscreen, navigation, onFullscreen, onResetTimer]);
 
   const handlePlayPause = useCallback(() => {
     if (playing) {
@@ -116,7 +119,8 @@ const ControlsComponent: React.FC<ControlsProps> = ({
     } else {
       onPlay();
     }
-  }, [onPause, onPlay, playing]);
+    onResetTimer?.();
+  }, [onPause, onPlay, playing, onResetTimer]);
 
   const containerDimensions = useMemo(() => ({
     width: fullscreen ? sizes.height : sizes.width,
@@ -169,6 +173,7 @@ const ControlsComponent: React.FC<ControlsProps> = ({
         onSubtitlePress={onSubtitlePress}
         onResize={onResize}
         onFullscreen={onFullscreen}
+        onResetTimer={onResetTimer}
         subtitleDelay={subtitleDelay}
         onSubtitleDelayChange={onSubtitleDelayChange}
         onResetSubtitleDelay={onResetSubtitleDelay}

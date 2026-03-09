@@ -30,6 +30,7 @@ const initialState: AppState = {
       defaultSubtitleLanguage: undefined,
       autoSelectSubtitles: false,
       subtitleStyle: DEFAULT_SUBTITLE_STYLE,
+      netflixStyle: false,
     },
     likedContent: {
       movies: [],

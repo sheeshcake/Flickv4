@@ -108,6 +108,23 @@ export const SettingsScreen: React.FC<Props> = () => {
     }
   };
 
+  const handleNetflixStyleToggle = async (value: boolean) => {
+    try {
+      const updatedPreferences = {
+        ...state.user.preferences,
+        netflixStyle: value,
+      };
+
+      dispatch({
+        type: AppActionType.SET_USER_PREFERENCES,
+        payload: updatedPreferences,
+      });
+    } catch (error) {
+      console.error('Failed to update Netflix style preference:', error);
+      Alert.alert('Error', 'Failed to update Netflix style preference');
+    }
+  };
+
   const handleClearCache = () => {
     Alert.alert(
       'Clear Cache',
@@ -291,6 +308,22 @@ export const SettingsScreen: React.FC<Props> = () => {
                 trackColor={{false: '#767577', true: '#E50914'}}
                 thumbColor={
                   state.user.preferences.pictureInPicture ? '#FFFFFF' : '#f4f3f4'
+                }
+              />
+            </View>
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Netflix Style UI</Text>
+                <Text style={styles.settingDescription}>
+                  Use Netflix-style detail screen and media player
+                </Text>
+              </View>
+              <Switch
+                value={state.user.preferences.netflixStyle ?? false}
+                onValueChange={handleNetflixStyleToggle}
+                trackColor={{false: '#767577', true: '#E50914'}}
+                thumbColor={
+                  (state.user.preferences.netflixStyle ?? false) ? '#FFFFFF' : '#f4f3f4'
                 }
               />
             </View>
@@ -565,17 +598,17 @@ const LikedContentItem: React.FC<LikedContentItemProps> = ({
           const movieDetails = await tmdbService.getMovieDetails(contentId);
           contentData = {
             title: movieDetails.title,
-            poster_path: movieDetails.poster_path,
-            vote_average: movieDetails.vote_average,
-            release_date: movieDetails.release_date,
+            poster_path: movieDetails.poster_path ?? '',
+            vote_average: movieDetails.vote_average ?? 0,
+            release_date: movieDetails.release_date ?? '',
           };
         } else {
           const tvDetails = await tmdbService.getTVShowDetails(contentId);
           contentData = {
             title: tvDetails.name,
-            poster_path: tvDetails.poster_path,
-            vote_average: tvDetails.vote_average,
-            release_date: tvDetails.first_air_date,
+            poster_path: tvDetails.poster_path ?? '',
+            vote_average: tvDetails.vote_average ?? 0,
+            release_date: tvDetails.first_air_date ?? '',
           };
         }
 
