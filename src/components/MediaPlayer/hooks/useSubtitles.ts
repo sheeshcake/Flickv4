@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { searchSubtitles } from 'wyzie-lib';
+import { searchSubtitles } from '../../../services/SubtitleService';
 import { SubtitleTrack, WyzieSubtitleData } from '../../../types';
 
 interface UseSubtitlesProps {
@@ -88,6 +88,7 @@ export const useSubtitles = ({
         }
       }
     } catch (error) {
+      console.log('[useSubtitles] Failed to fetch subtitles:', error instanceof Error ? error.message : error);
     } finally {
       setIsLoadingSubtitles(false);
     }

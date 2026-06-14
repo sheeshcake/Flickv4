@@ -44,6 +44,30 @@ const mergeUniqueById = <T extends {id: number}>(
   return Array.from(merged.values());
 };
 
+const emptyTMDBResponse = {
+  page: 1,
+  results: [],
+  total_pages: 1,
+  total_results: 0,
+};
+
+const toAppError = (unknownError: unknown): AppError => {
+  if (
+    unknownError &&
+    typeof unknownError === 'object' &&
+    'type' in unknownError &&
+    'message' in unknownError
+  ) {
+    return unknownError as AppError;
+  }
+
+  return {
+    type: 'NETWORK_ERROR' as AppError['type'],
+    message: 'Something went wrong while loading this genre.',
+    code: 'UNKNOWN_ERROR',
+  };
+};
+
 export const useGenreContent = (): UseGenreContentReturn => {
   const [contentByGenre, setContentByGenre] = useState<Record<number, GenreContentState>>({});
   const contentByGenreRef = useRef(contentByGenre);
@@ -80,10 +104,33 @@ export const useGenreContent = (): UseGenreContentReturn => {
       }));
 
       try {
-        const [moviesResponse, tvShowsResponse] = await Promise.all([
+        const [moviesResult, tvShowsResult] = await Promise.allSettled([
           tmdbService.discoverMoviesByGenre(genreId, nextPage),
           tmdbService.discoverTVShowsByGenre(genreId, nextPage),
         ]);
+
+        if (
+          moviesResult.status === 'rejected' &&
+          tvShowsResult.status === 'rejected'
+        ) {
+          throw moviesResult.reason || tvShowsResult.reason;
+        }
+
+        const moviesResponse =
+          moviesResult.status === 'fulfilled'
+            ? moviesResult.value
+            : emptyTMDBResponse;
+        const tvShowsResponse =
+          tvShowsResult.status === 'fulfilled'
+            ? tvShowsResult.value
+            : emptyTMDBResponse;
+
+        const partialError =
+          moviesResult.status === 'rejected'
+            ? toAppError(moviesResult.reason)
+            : tvShowsResult.status === 'rejected'
+              ? toAppError(tvShowsResult.reason)
+              : null;
 
         const mergedMovies = mergeUniqueById(
           options.reset ? [] : currentState?.movies || [],
@@ -103,20 +150,21 @@ export const useGenreContent = (): UseGenreContentReturn => {
             movies: mergedMovies,
             tvShows: mergedTVShows,
             loading: false,
-            error: null,
+            error: partialError,
             page: nextPage,
             hasMoreMovies,
             hasMoreTVShows,
           },
         }));
-      } catch (error) {
-        console.error(`Failed to load content for genre ${genreName}:`, error);
+      } catch (caughtError) {
+        const appError = toAppError(caughtError);
+        console.warn(`Failed to load content for genre ${genreName}:`, appError);
         setContentByGenre(prev => ({
           ...prev,
           [genreId]: {
             ...(currentState || createInitialGenreState()),
             loading: false,
-            error: error as AppError,
+            error: appError,
           },
         }));
       }

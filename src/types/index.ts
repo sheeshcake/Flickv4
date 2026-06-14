@@ -332,7 +332,7 @@ export interface SubtitleSelection {
   availableTracks: SubtitleTrack[];
 }
 
-// Wyzie library types (from wyzie-lib)
+// Wyzie subtitle API types (https://sub.wyzie.io)
 export interface WyzieSubtitleData {
   id: string;
   url: string;

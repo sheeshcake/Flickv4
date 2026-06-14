@@ -6,6 +6,12 @@ export const TMDB_CONFIG = {
   API_KEY: '7070e2fe1f83238edc3ada49acb2cb25', // To be configured with actual API key
 };
 
+export const WYZIE_SUBS_CONFIG = {
+  BASE_URL: 'https://sub.wyzie.io',
+  API_KEY: 'wyzie-321c2sqfhhnu85fotb9qespjdv43vxa4', // Set your API key from https://store.wyzie.io/redeem
+  TIMEOUT: 10000,
+};
+
 export const COLORS = {
   NETFLIX_RED: '#E50914',
   NETFLIX_YELLOW: '#F5C518',

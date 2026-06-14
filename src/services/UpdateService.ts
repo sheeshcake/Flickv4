@@ -121,13 +121,19 @@ class UpdateService {
       console.log('Latest release fetched:', response.data.tag_name);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 404) {
-        // No releases found, try to get the latest tag
-        console.log('No releases found, checking tags...');
+      if (axios.isAxiosError(error)) {
+        if (error.response?.status === 404) {
+          // No releases published yet
+          console.log('No releases found, skipping update check.');
+          return null;
+        }
+        // Network error or timeout — non-fatal, skip silently
+        console.log('[UpdateService] Network unavailable, skipping update check.');
         return null;
       }
-      console.error('Failed to fetch latest release:', error);
-      throw error;
+      // Unexpected non-axios error — still return null to avoid crashing
+      console.log('[UpdateService] Unexpected error fetching release, skipping.');
+      return null;
     }
   }
 
@@ -221,8 +227,18 @@ class UpdateService {
         assetSize,
       };
     } catch (error) {
-      console.error('Error checking for updates:', error);
-      throw new Error('Failed to check for updates. Please try again later.');
+      console.log('[UpdateService] Could not check for updates:', error instanceof Error ? error.message : error);
+      return {
+        hasUpdate: false,
+        currentVersion: current,
+        latestVersion: current,
+        releaseNotes: '',
+        releaseName: '',
+        releaseDate: '',
+        downloadUrl: null,
+        releaseUrl: '',
+        assetSize: null,
+      };
     }
   }
 

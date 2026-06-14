@@ -21,7 +21,7 @@ interface MessageData {
 
 // Constants
 const LOAD_END_DELAY = 60000; // ms
-const VIDFAST_SERVER_URL = 'https://vidfast.pro';
+const VIDFAST_SERVER_URL = 'https://vidlink.pro';
 
 // Injected JavaScript - extracted as constant
 const INJECTED_JAVASCRIPT = `
@@ -116,7 +116,7 @@ const WebViewScrapper: React.FC<WebViewScrapperProps> = ({
         onLoading?.(false);
         
         console.log('[WebViewScrapper] Video URL extracted:', {
-          url: data.responseURL.substring(0, 50) + '...',
+          url: data.responseURL,
           isWebM: data.isWebM,
         });
       }
