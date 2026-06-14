@@ -85,6 +85,11 @@ const formatTime = (seconds: number): string => {
 };
 
 const TV_SUBTITLE_STYLE = { fontSize: 16, paddingBottom: 20 };
+const VIDEO_HEADER = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': 'https://vidlink.pro',
+        'Origin': 'https://vidlink.pro',
+      };
 
 export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
   videoUrl,
@@ -561,8 +566,8 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
         <Video
           ref={videoRef}
           source={videoUrl.includes('.m3u8')
-            ? { uri: videoUrl, type: 'm3u8' }
-            : { uri: videoUrl }
+            ? { uri: videoUrl, headers: VIDEO_HEADER, type: 'm3u8' }
+            : { uri: videoUrl, headers: VIDEO_HEADER }
           }
           style={styles.video}
           onLoad={handleLoad}

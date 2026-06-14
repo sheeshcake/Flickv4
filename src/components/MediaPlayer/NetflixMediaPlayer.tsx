@@ -26,6 +26,7 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
+  Platform,
 } from 'react-native';
 import Video, {
   BufferingStrategyType,
@@ -35,6 +36,7 @@ import Video, {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Orientation from 'react-native-orientation-locker';
 import RNFS from 'react-native-fs';
+import SystemNavigationBar from 'react-native-system-navigation-bar';
 import { SubtitleTrack, DEFAULT_SUBTITLE_STYLE } from '../../types';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import { useSubtitles } from './hooks';
@@ -46,6 +48,11 @@ const LANDSCAPE_W = Math.max(SCREEN_W, SCREEN_H);
 const LANDSCAPE_H = Math.min(SCREEN_W, SCREEN_H);
 const CONTROLS_HIDE_DELAY = 5000;
 const SEEK_AMOUNT = 10;
+const VIDEO_HEADER = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Referer': 'https://vidlink.pro',
+        'Origin': 'https://vidlink.pro',
+      };
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -153,15 +160,34 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controlsOpacity = useRef(new Animated.Value(1)).current;
 
+  const setAndroidNavigationBar = useCallback((hidden: boolean) => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    try {
+      if (hidden) {
+        SystemNavigationBar.navigationHide();
+        SystemNavigationBar.immersive();
+      } else {
+        SystemNavigationBar.navigationShow();
+      }
+    } catch {
+      // Ignore unsupported devices/errors.
+    }
+  }, []);
+
   // ── lock landscape on mount ────────────────────────────────────────────────
   useEffect(() => {
     StatusBar.setHidden(true);
     Orientation.lockToLandscape();
+    setAndroidNavigationBar(true);
     return () => {
       StatusBar.setHidden(false);
+      setAndroidNavigationBar(false);
       Orientation.lockToPortrait();
     };
-  }, []);
+  }, [setAndroidNavigationBar]);
 
   // ── controls auto-hide ─────────────────────────────────────────────────────
   const showControls = useCallback(() => {
@@ -206,12 +232,13 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
         return true;
       }
       setIsPlaying(false);
+      setAndroidNavigationBar(false);
       if (onBack) onBack();
       else navigation?.goBack();
       return true;
     });
     return () => handler.remove();
-  }, [onBack, navigation, showEpisodePanel]);
+  }, [onBack, navigation, showEpisodePanel, setAndroidNavigationBar]);
 
   // ── subtitles ──────────────────────────────────────────────────────────────
   const savedSubtitle = useMemo(() => {
@@ -426,7 +453,10 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
       {/* ── Video ── */}
       <Video
         ref={videoRef}
-        source={{ uri: videoUrl }}
+        source={{ 
+          uri: videoUrl,
+          headers: VIDEO_HEADER,
+         }}
         style={StyleSheet.absoluteFill}
         resizeMode="contain"
         paused={!isPlaying}

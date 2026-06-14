@@ -11,7 +11,7 @@ import {
   TextInput,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { searchSubtitles } from 'wyzie-lib';
+import { searchSubtitles } from '../services/SubtitleService';
 import { colors } from '../constants/theme';
 import { SubtitleTrack, WyzieSubtitleData } from '../types';
 
