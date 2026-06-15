@@ -1,13 +1,29 @@
-import groovy.json.JsonSlurper
-
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 // Read version from package.json
 def getVersionFromPackageJson() {
-    def packageJson = new JsonSlurper().parse(file("../../package.json"))
-    return packageJson.version
+    def packageJsonText = file("../../package.json").getText("UTF-8")
+    def versionMatcher = (packageJsonText =~ /"version"\s*:\s*"([^"]+)"/)
+    if (versionMatcher.find()) {
+        return versionMatcher.group(1)
+    }
+    return "1.0.0"
+}
+
+// Convert semver (major.minor.patch) to monotonic Android versionCode.
+// Example: 1.4.1 -> 10401
+def getVersionCodeFromPackageJson() {
+    def version = getVersionFromPackageJson()
+    def numericPart = version.tokenize('-')[0]
+    def parts = numericPart.tokenize('.')
+
+    int major = parts.size() > 0 ? parts[0].toInteger() : 1
+    int minor = parts.size() > 1 ? parts[1].toInteger() : 0
+    int patch = parts.size() > 2 ? parts[2].toInteger() : 0
+
+    return major * 10000 + minor * 100 + patch
 }
 
 /**
@@ -90,7 +106,7 @@ android {
         applicationId "com.flickv4"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode getVersionCodeFromPackageJson()
         versionName getVersionFromPackageJson()
     }
     signingConfigs {
