@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react';
-import { View, BackHandler, Dimensions, StyleSheet, Text } from 'react-native';
+import { View, BackHandler, Dimensions, StyleSheet, Text, ActivityIndicator } from 'react-native';
 import Video, { BufferingStrategyType, TextTrackType, SelectedTrackType } from 'react-native-video';
 import { CastButton } from 'react-native-google-cast';
 import RNFS from 'react-native-fs';
 import { COLORS } from '../../utils/constants';
 import { useAppState } from '../../hooks/useAppState';
+import { usePlaybackCache } from '../../hooks/usePlaybackCache';
 import { SubtitleTrack, DEFAULT_SUBTITLE_STYLE } from '../../types';
+import { VIDEO_STREAM_HEADERS } from '../../utils/streamHeaders';
 import { SubtitleSelector } from '../';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import Controls from './controls';
@@ -104,6 +106,19 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const videoUrlRef = useRef<string>(videoUrl);
   const prevFullscreenPropRef = useRef<boolean | undefined>(fullscreen);
   const { state, updateWatchProgress } = useAppState();
+
+  const isLocalFile = videoUrl.startsWith('file://') || videoUrl.startsWith('/');
+  const {
+    playbackUrl,
+    cacheStatus,
+    onPlaybackProgress,
+    onPlaybackEnd,
+    isCacheLoading,
+  } = usePlaybackCache({
+    videoUrl,
+    initialProgress,
+    enabled: !isLocalFile,
+  });
 
   useEffect(() => {
     videoUrlRef.current = videoUrl;
@@ -208,7 +223,13 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
   const handleProgress = useCallback(({ currentTime: time }: { currentTime: number }) => {
     setCurrentTime(time);
-  }, []);
+    onPlaybackProgress(time);
+  }, [onPlaybackProgress]);
+
+  const handleEnd = useCallback(() => {
+    onPlaybackEnd();
+    onNext?.();
+  }, [onPlaybackEnd, onNext]);
 
   const handleBuffer = useCallback(({ isBuffering: buffering }: { isBuffering: boolean }) => {
     setIsBuffering(buffering);
@@ -367,6 +388,16 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     setSubtitleDelay(0);
   }, []);
 
+  const videoSource = useMemo(() => {
+    const uri = playbackUrl;
+    const isCached = uri.startsWith('file://');
+    return {
+      uri,
+      textTracks,
+      ...(isCached ? {} : { headers: VIDEO_STREAM_HEADERS }),
+    };
+  }, [playbackUrl, textTracks]);
+
   if (!videoUrl) {
     return (
       <View style={[styles.container, videoContainerStyle]}>
@@ -379,23 +410,22 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
   return (
     <View style={[styles.container, videoContainerStyle]}>
-      {videoUrl && typeof videoUrl === 'string' && videoUrl.trim() !== '' ? (
+      {isCacheLoading && (
+        <View style={styles.cacheLoadingOverlay}>
+          <ActivityIndicator size="large" color={COLORS.NETFLIX_RED} />
+          <Text style={styles.cacheLoadingText}>Buffering ahead…</Text>
+        </View>
+      )}
+      {playbackUrl && typeof playbackUrl === 'string' && playbackUrl.trim() !== '' ? (
         <Video
           ref={videoRef}
-          source={{ 
-            uri: videoUrl,
-            textTracks: textTracks, // Include in source for Android
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-              'Referer': 'https://vidfast.pro',
-              'Origin': 'https://vidfast.pro',
-            },
-          }}
+          source={videoSource}
           style={videoStyle}
           onLoad={handleLoad}
           onProgress={handleProgress}
           onBuffer={handleBuffer}
           onError={handleError}
+          onEnd={handleEnd}
           onPictureInPictureStatusChanged={handlePictureInPictureStatusChanged}
           resizeMode={RESIZE_MODES[resizeMode]}
           poster={imageUrl}
@@ -451,6 +481,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         subtitleDelay={subtitleDelay}
         onSubtitleDelayChange={handleSubtitleDelayChange}
         onResetSubtitleDelay={handleResetSubtitleDelay}
+        cacheAheadSeconds={cacheStatus.isActive ? Math.round(cacheStatus.cachedSecondsAhead) : undefined}
         upperRightComponent={
           <View style={styles.castButtonContainer}>
             <CastButton style={styles.castButton} />
@@ -511,6 +542,18 @@ const styles = StyleSheet.create({
     color: COLORS.NETFLIX_WHITE,
     fontSize: 16,
     textAlign: 'center',
+  },
+  cacheLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  cacheLoadingText: {
+    color: COLORS.NETFLIX_WHITE,
+    marginTop: 12,
+    fontSize: 14,
   },
 });
 

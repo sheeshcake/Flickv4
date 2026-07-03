@@ -34,6 +34,7 @@ export interface ControlsProps {
   subtitleDelay?: number;
   onSubtitleDelayChange?: (delta: number) => void;
   onResetSubtitleDelay?: () => void;
+  cacheAheadSeconds?: number;
 }
 
 export interface DoubleTapSeekAreaProps {

@@ -12,7 +12,9 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import { 
   DownloadItem, 
   DownloadStatus,
-  DownloadNotification 
+  DownloadNotification,
+  Movie,
+  TVShow,
 } from '../types';
 import { downloadService } from '../services';
 import { DownloadsList } from '../components/DownloadComponents';
@@ -89,11 +91,27 @@ const DownloadsScreen: React.FC<DownloadsScreenProps> = ({ navigation }) => {
   // Handle download item press (play downloaded content)
   const handleDownloadPress = useCallback((download: DownloadItem) => {
     if (download.status === DownloadStatus.COMPLETED && download.filePath) {
+      const playbackContent: Movie | TVShow =
+        download.contentType === 'tv'
+          ? {
+              id: download.contentId,
+              name: download.title,
+              overview: download.overview,
+              poster_path: download.posterPath,
+              backdrop_path: download.backdropPath,
+              first_air_date: download.releaseDate,
+            }
+          : {
+              id: download.contentId,
+              title: download.title,
+              overview: download.overview,
+              poster_path: download.posterPath,
+              backdrop_path: download.backdropPath,
+              release_date: download.releaseDate,
+            };
+
       navigation.navigate('Detail', {
-        content: {
-          id: download.contentId,
-          title: download.title,
-        },
+        content: playbackContent,
         video: download.filePath,
         isLocal: true,
         autoPlay: true,
@@ -280,10 +298,10 @@ const DownloadsScreen: React.FC<DownloadsScreenProps> = ({ navigation }) => {
         downloads={downloads}
         onItemPress={handleDownloadPress}
         onDeletePress={handleDeleteDownload}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#fff" />
+        }
       />
-
-      {/* Refresh Control */}
-      <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
     </SafeAreaView>
   );
 };

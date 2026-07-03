@@ -6,3 +6,4 @@ export * from './DownloadService';
 export * from './NotificationService';
 export * from './BackgroundDownloadTask';
 export * from './UpdateService';
+export * from './PlaybackCacheService';

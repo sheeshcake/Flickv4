@@ -23,6 +23,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useAppState } from '../../hooks/useAppState';
+import { usePlaybackCache } from '../../hooks/usePlaybackCache';
+import { VIDEO_STREAM_HEADERS } from '../../utils/streamHeaders';
 import { SubtitleTrack, DEFAULT_SUBTITLE_STYLE } from '../../types';
 import { SubtitleOverlay } from '../MediaPlayer/SubtitleOverlay';
 import { TVSubtitleSelector } from './TVSubtitleSelector';
@@ -85,11 +87,6 @@ const formatTime = (seconds: number): string => {
 };
 
 const TV_SUBTITLE_STYLE = { fontSize: 16, paddingBottom: 20 };
-const VIDEO_HEADER = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://vidfast.pro',
-        'Origin': 'https://vidfast.pro',
-      };
 
 export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
   videoUrl,
@@ -127,6 +124,19 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { state, updateWatchProgress } = useAppState();
+
+  const isLocalFile = videoUrl.startsWith('file://') || videoUrl.startsWith('/');
+  const {
+    playbackUrl,
+    cacheStatus,
+    onPlaybackProgress,
+    onPlaybackEnd,
+    isCacheLoading,
+  } = usePlaybackCache({
+    videoUrl,
+    initialProgress,
+    enabled: !isLocalFile,
+  });
 
   // Progress bar animation
   const progressWidth = useSharedValue(0);
@@ -327,7 +337,8 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
 
   const handleProgress = useCallback(({ currentTime: time }: { currentTime: number }) => {
     setCurrentTime(time);
-  }, []);
+    onPlaybackProgress(time);
+  }, [onPlaybackProgress]);
 
   const handleBuffer = useCallback(({ isBuffering: buffering }: { isBuffering: boolean }) => {
     setIsBuffering(buffering);
@@ -335,10 +346,11 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
 
   const handleEnd = useCallback(() => {
     setIsPlaying(false);
+    onPlaybackEnd();
     if (onEnd) {
       onEnd();
     }
-  }, [onEnd]);
+  }, [onEnd, onPlaybackEnd]);
 
   const handleError = useCallback((error: any) => {
     // Don't log errors for empty URLs
@@ -565,9 +577,9 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
       {isPlayerReady && isValidUrl ? (
         <Video
           ref={videoRef}
-          source={videoUrl.includes('.m3u8')
-            ? { uri: videoUrl, headers: VIDEO_HEADER, type: 'm3u8' }
-            : { uri: videoUrl, headers: VIDEO_HEADER }
+          source={playbackUrl.includes('.m3u8')
+            ? { uri: playbackUrl, headers: playbackUrl.startsWith('file://') ? undefined : VIDEO_STREAM_HEADERS, type: 'm3u8' }
+            : { uri: playbackUrl, headers: playbackUrl.startsWith('file://') ? undefined : VIDEO_STREAM_HEADERS }
           }
           style={styles.video}
           onLoad={handleLoad}
@@ -600,10 +612,20 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
       <Pressable style={styles.touchArea} onPress={resetControlsTimer} />
 
       {/* Buffering indicator */}
-      {isBuffering && (
+      {(isBuffering || isCacheLoading) && (
         <View style={styles.bufferingContainer}>
           <ActivityIndicator size="large" color={TV_FOCUS_COLOR} />
-          <Text style={styles.bufferingText}>Loading...</Text>
+          <Text style={styles.bufferingText}>
+            {isCacheLoading ? 'Buffering ahead…' : 'Loading...'}
+          </Text>
+        </View>
+      )}
+
+      {cacheStatus.isActive && cacheStatus.cachedSecondsAhead > 0 && (
+        <View style={styles.cacheBadge}>
+          <Text style={styles.cacheBadgeText}>
+            {Math.round(cacheStatus.cachedSecondsAhead)}s cached
+          </Text>
         </View>
       )}
 
@@ -728,9 +750,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   bufferingText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    marginTop: 16,
+    color: '#fff',
+    marginTop: 12,
+    fontSize: 16,
+  },
+  cacheBadge: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 4,
+  },
+  cacheBadgeText: {
+    color: '#fff',
+    fontSize: 12,
   },
   controlsOverlay: {
     ...StyleSheet.absoluteFillObject,
