@@ -27,6 +27,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   subtitleDelay = 0,
   onSubtitleDelayChange,
   onResetSubtitleDelay,
+  cachedAheadSeconds = 0,
 }) => {
   const [showDelayControls, setShowDelayControls] = useState(false);
 
@@ -61,6 +62,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
         currentPosition={currentPosition}
         duration={duration}
         bufferedPosition={bufferedPosition}
+        cachedAheadSeconds={cachedAheadSeconds}
         hidden={hidden}
         onSeek={onSeek}
         onTimePreview={onTimePreview}

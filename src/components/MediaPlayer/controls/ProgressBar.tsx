@@ -9,6 +9,7 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
   currentPosition,
   duration,
   bufferedPosition = 0,
+  cachedAheadSeconds = 0,
   hidden,
   onSeek,
   onTimePreview,
@@ -29,6 +30,17 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
     if (!duration || duration === 0) return 0;
     return clamp(bufferedPosition / duration, 0, 1);
   }, [bufferedPosition, duration]);
+
+  const cachedPercentage = useMemo(() => {
+    if (!duration || duration === 0 || cachedAheadSeconds <= 0) return 0;
+    const cachedEnd = currentPosition + cachedAheadSeconds;
+    return clamp(cachedEnd / duration, 0, 1);
+  }, [cachedAheadSeconds, currentPosition, duration]);
+
+  const bufferLinePercentage = useMemo(
+    () => Math.max(bufferedPercentage, cachedPercentage),
+    [bufferedPercentage, cachedPercentage],
+  );
 
   useEffect(() => {
     if (!isDragging) {
@@ -91,8 +103,8 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
   const displayPercentage = isDragging ? dragPercentage : progressPercentage;
 
   const bufferedStyle = useMemo(() => ({
-    width: bufferedPercentage * trackWidth,
-  }), [bufferedPercentage, trackWidth]);
+    width: bufferLinePercentage * trackWidth,
+  }), [bufferLinePercentage, trackWidth]);
 
   const progressStyle = useMemo(() => ({
     width: displayPercentage * trackWidth,
@@ -113,7 +125,7 @@ const ProgressBarComponent: React.FC<ProgressBarProps> = ({
       <View style={styles.progressTouchArea} {...panResponder.panHandlers}>
         <View ref={trackRef} style={styles.progressTrack}>
           <View style={styles.progressBackground} />
-          {bufferedPercentage > 0 && <View style={[styles.progressBuffered, bufferedStyle]} />}
+          {bufferLinePercentage > 0 && <View style={[styles.progressBuffered, bufferedStyle]} />}
           <View style={[styles.progressForeground, progressStyle]} />
           <Animated.View style={[styles.progressThumb, thumbStyle]} />
         </View>

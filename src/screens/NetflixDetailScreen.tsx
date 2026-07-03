@@ -424,6 +424,7 @@ const NetflixDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   if (showFullPlayer && currentVideoUrl) {
     return (
       <NetflixMediaPlayer
+        key={`${validContent?.id}-${tvState.selectedSeason}-${tvState.selectedEpisode}`}
         videoUrl={currentVideoUrl}
         title={contentTitle}
         contentId={validContent?.id ?? 0}

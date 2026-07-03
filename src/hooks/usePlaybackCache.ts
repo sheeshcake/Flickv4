@@ -30,7 +30,7 @@ export function usePlaybackCache({
   const preferences = state.user.preferences.playbackCache ?? DEFAULT_PLAYBACK_CACHE;
   const cacheEnabled = enabled && preferences.enabled && isM3U8Url(videoUrl);
 
-  const [playbackUrl, setPlaybackUrl] = useState(videoUrl);
+  const [playbackUrl, setPlaybackUrl] = useState(() => (cacheEnabled ? '' : videoUrl));
   const [isCacheLoading, setIsCacheLoading] = useState(cacheEnabled);
   const [cacheStatus, setCacheStatus] = useState<PlaybackCacheStatus>(
     playbackCacheService.getCacheStatus(),
@@ -52,6 +52,7 @@ export function usePlaybackCache({
       }
 
       sessionVideoUrlRef.current = videoUrl;
+      setPlaybackUrl('');
       setIsCacheLoading(true);
 
       try {
