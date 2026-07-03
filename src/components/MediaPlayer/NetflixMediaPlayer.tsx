@@ -50,8 +50,8 @@ const CONTROLS_HIDE_DELAY = 5000;
 const SEEK_AMOUNT = 10;
 const VIDEO_HEADER = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://vidlink.pro',
-        'Origin': 'https://vidlink.pro',
+        'Referer': 'https://vidfast.pro',
+        'Origin': 'https://vidfast.pro',
       };
 
 // ── helpers ────────────────────────────────────────────────────────────────────
