@@ -21,7 +21,7 @@ interface MessageData {
 
 // Constants
 const LOAD_END_DELAY = 60000; // ms
-const VIDFAST_SERVER_URL = 'https://vidlink.pro';
+const VIDFAST_SERVER_URL = 'https://vidfast.pro';
 
 // Injected JavaScript - extracted as constant
 const INJECTED_JAVASCRIPT = `
