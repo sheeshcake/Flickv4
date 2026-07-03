@@ -25,6 +25,7 @@ import Animated, {
 import { useAppState } from '../../hooks/useAppState';
 import { usePlaybackCache } from '../../hooks/usePlaybackCache';
 import { VIDEO_STREAM_HEADERS } from '../../utils/streamHeaders';
+import { convertSrtToVtt } from '../../utils/subtitleUtils';
 import { SubtitleTrack, DEFAULT_SUBTITLE_STYLE } from '../../types';
 import { SubtitleOverlay } from '../MediaPlayer/SubtitleOverlay';
 import { TVSubtitleSelector } from './TVSubtitleSelector';
@@ -49,29 +50,6 @@ interface TVMediaPlayerProps {
   onBack?: () => void;
   navigation?: any;
 }
-
-// Convert SRT to VTT format
-const convertSrtToVtt = (srtContent: string): string => {
-  let vttContent = 'WEBVTT\n\n';
-  const blocks = srtContent.trim().split(/\r?\n\r?\n/);
-  
-  for (const block of blocks) {
-    const lines = block.trim().split(/\r?\n/);
-    if (lines.length < 2) continue;
-    
-    const timestampIndex = lines.findIndex(line => line.includes('-->'));
-    if (timestampIndex === -1) continue;
-    
-    const timestampLine = lines[timestampIndex].replace(/,/g, '.');
-    const textLines = lines.slice(timestampIndex + 1);
-    
-    if (textLines.length > 0) {
-      vttContent += `${timestampLine}\n${textLines.join('\n')}\n\n`;
-    }
-  }
-  
-  return vttContent;
-};
 
 // Format time helper
 const formatTime = (seconds: number): string => {
@@ -118,6 +96,7 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
   // Seekbar drag state
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekBarWidth, setSeekBarWidth] = useState(0);
+  const [bufferedPosition, setBufferedPosition] = useState(0);
   const seekBarRef = useRef<View>(null);
 
   const videoRef = useRef<any>(null);
@@ -246,6 +225,7 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
           const newTime = percent * duration;
           videoRef.current?.seek(newTime);
           setCurrentTime(newTime);
+          onPlaybackProgress(newTime);
         });
       }
     },
@@ -267,6 +247,7 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
           const newTime = percent * duration;
           videoRef.current?.seek(newTime);
           setCurrentTime(newTime);
+          onPlaybackProgress(newTime);
         });
       }
       setIsSeeking(false);
@@ -275,7 +256,7 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
     onPanResponderTerminate: () => {
       setIsSeeking(false);
     },
-  }), [duration, resetControlsTimer]);
+  }), [duration, onPlaybackProgress, resetControlsTimer]);
 
   // Initial progress seek
   useEffect(() => {
@@ -335,8 +316,11 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
     resetControlsTimer();
   }, [isPlaying, resetControlsTimer]);
 
-  const handleProgress = useCallback(({ currentTime: time }: { currentTime: number }) => {
+  const handleProgress = useCallback(({ currentTime: time, playableDuration }: { currentTime: number; playableDuration?: number }) => {
     setCurrentTime(time);
+    if (typeof playableDuration === 'number' && Number.isFinite(playableDuration)) {
+      setBufferedPosition(playableDuration);
+    }
     onPlaybackProgress(time);
   }, [onPlaybackProgress]);
 
@@ -374,9 +358,10 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
       const newTime = Math.max(0, Math.min(currentTime + offset, duration));
       videoRef.current.seek(newTime);
       setCurrentTime(newTime);
+      onPlaybackProgress(newTime);
       resetControlsTimer();
     }
-  }, [currentTime, duration, resetControlsTimer]);
+  }, [currentTime, duration, onPlaybackProgress, resetControlsTimer]);
 
   // TV Remote Control Support
   useTVRemote(
@@ -394,33 +379,37 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
           const newTime = Math.max(0, currentTime - SEEK_AMOUNT);
           videoRef.current.seek(newTime);
           setCurrentTime(newTime);
+          onPlaybackProgress(newTime);
           resetControlsTimer();
         }
-      }, [currentTime, duration, resetControlsTimer]),
+      }, [currentTime, duration, onPlaybackProgress, resetControlsTimer]),
       onRight: useCallback(() => {
         if (videoRef.current && duration > 0) {
           const newTime = Math.min(duration, currentTime + SEEK_AMOUNT);
           videoRef.current.seek(newTime);
           setCurrentTime(newTime);
+          onPlaybackProgress(newTime);
           resetControlsTimer();
         }
-      }, [currentTime, duration, resetControlsTimer]),
+      }, [currentTime, duration, onPlaybackProgress, resetControlsTimer]),
       onRewind: useCallback(() => {
         if (videoRef.current && duration > 0) {
           const newTime = Math.max(0, currentTime - SEEK_AMOUNT_LARGE);
           videoRef.current.seek(newTime);
           setCurrentTime(newTime);
+          onPlaybackProgress(newTime);
           resetControlsTimer();
         }
-      }, [currentTime, duration, resetControlsTimer]),
+      }, [currentTime, duration, onPlaybackProgress, resetControlsTimer]),
       onFastForward: useCallback(() => {
         if (videoRef.current && duration > 0) {
           const newTime = Math.min(duration, currentTime + SEEK_AMOUNT_LARGE);
           videoRef.current.seek(newTime);
           setCurrentTime(newTime);
+          onPlaybackProgress(newTime);
           resetControlsTimer();
         }
-      }, [currentTime, duration, resetControlsTimer]),
+      }, [currentTime, duration, onPlaybackProgress, resetControlsTimer]),
       onBack: useCallback(() => {
         setIsPlaying(false);
         if (onBack) {
@@ -542,6 +531,15 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
     width: `${progressWidth.value}%`,
   }));
 
+  const bufferLinePct = useMemo(() => {
+    if (duration <= 0) return 0;
+    const bufferedPct = bufferedPosition / duration;
+    const cachedPct = cacheStatus.isActive
+      ? Math.min((currentTime + cacheStatus.cachedSecondsAhead) / duration, 1)
+      : 0;
+    return Math.max(bufferedPct, cachedPct);
+  }, [bufferedPosition, cacheStatus.cachedSecondsAhead, cacheStatus.isActive, currentTime, duration]);
+
   // Control buttons for TV
   const controlButtons = [
     { key: 'back', icon: 'arrow-left', label: 'Back', onPress: handleGoBack },
@@ -574,12 +572,21 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
   return (
     <View style={styles.container}>
       {/* Video Player - only render when URL is valid and player is ready */}
-      {isPlayerReady && isValidUrl ? (
+      {isPlayerReady && isValidUrl && !isCacheLoading && playbackUrl ? (
         <Video
           ref={videoRef}
           source={playbackUrl.includes('.m3u8')
-            ? { uri: playbackUrl, headers: playbackUrl.startsWith('file://') ? undefined : VIDEO_STREAM_HEADERS, type: 'm3u8' }
-            : { uri: playbackUrl, headers: playbackUrl.startsWith('file://') ? undefined : VIDEO_STREAM_HEADERS }
+            ? {
+                uri: playbackUrl,
+                headers: VIDEO_STREAM_HEADERS,
+                type: 'm3u8',
+              }
+            : {
+                uri: playbackUrl,
+                headers: playbackUrl.startsWith('file://') || playbackUrl.startsWith('/')
+                  ? undefined
+                  : VIDEO_STREAM_HEADERS,
+              }
           }
           style={styles.video}
           onLoad={handleLoad}
@@ -617,14 +624,6 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
           <ActivityIndicator size="large" color={TV_FOCUS_COLOR} />
           <Text style={styles.bufferingText}>
             {isCacheLoading ? 'Buffering ahead…' : 'Loading...'}
-          </Text>
-        </View>
-      )}
-
-      {cacheStatus.isActive && cacheStatus.cachedSecondsAhead > 0 && (
-        <View style={styles.cacheBadge}>
-          <Text style={styles.cacheBadgeText}>
-            {Math.round(cacheStatus.cachedSecondsAhead)}s cached
           </Text>
         </View>
       )}
@@ -676,6 +675,9 @@ export const TVMediaPlayer: React.FC<TVMediaPlayerProps> = ({
               style={styles.progressBackground}
               {...tvSeekPanResponder.panHandlers}
             >
+              {bufferLinePct > 0 && (
+                <View style={[styles.progressBuffered, { width: `${bufferLinePct * 100}%` }]} />
+              )}
               <Animated.View style={[styles.progressFill, progressAnimatedStyle]} />
               {/* Seek thumb */}
               {seekBarWidth > 0 && (
@@ -754,19 +756,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
   },
-  cacheBadge: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 4,
-  },
-  cacheBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-  },
   controlsOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
@@ -836,10 +825,19 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     overflow: 'visible',
   },
+  progressBuffered: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
+    borderRadius: 3,
+  },
   progressFill: {
     height: '100%',
     backgroundColor: TV_FOCUS_COLOR,
     borderRadius: 3,
+    zIndex: 1,
   },
   progressThumb: {
     position: 'absolute',

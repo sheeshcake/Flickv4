@@ -34,7 +34,7 @@ export interface ControlsProps {
   subtitleDelay?: number;
   onSubtitleDelayChange?: (delta: number) => void;
   onResetSubtitleDelay?: () => void;
-  cacheAheadSeconds?: number;
+  cachedAheadSeconds?: number;
 }
 
 export interface DoubleTapSeekAreaProps {
@@ -86,12 +86,14 @@ export interface BottomBarProps {
   subtitleDelay?: number;
   onSubtitleDelayChange?: (delta: number) => void;
   onResetSubtitleDelay?: () => void;
+  cachedAheadSeconds?: number;
 }
 
 export interface ProgressBarProps {
   currentPosition: number;
   duration: number;
   bufferedPosition?: number;
+  cachedAheadSeconds?: number;
   hidden: boolean;
   onSeek: (time: number) => void;
   onTimePreview: (time: number) => void;

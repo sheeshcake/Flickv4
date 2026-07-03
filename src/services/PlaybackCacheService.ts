@@ -123,7 +123,7 @@ class PlaybackCacheService {
   updatePlayhead(timeSec: number): void {
     if (!this.sessionId) return;
     this.playheadSec = timeSec;
-    this.evictBehindPlayhead();
+    void this.evictBehindPlayhead();
     this.notifyStatus();
   }
 
@@ -264,10 +264,16 @@ class PlaybackCacheService {
     if (cutoffTime < 0) cutoffTime = 0;
     const cutoffIndex = findSegmentIndexAtTime(this.playlist.segments, cutoffTime);
 
+    let evicted = false;
     for (const index of [...this.downloadedIndices]) {
       if (index < cutoffIndex && index < currentIndex - 1) {
         await this.removeSegment(index);
+        evicted = true;
       }
+    }
+
+    if (evicted) {
+      await this.writePlaylist(false);
     }
   }
 
@@ -316,14 +322,16 @@ class PlaybackCacheService {
       `#EXT-X-MEDIA-SEQUENCE:${this.playlist.mediaSequence}`,
     ];
 
-    const sortedIndices = [...this.downloadedIndices].sort((a, b) => a - b);
-    for (const index of sortedIndices) {
+    // Full timeline: cached segments use local files, the rest keep remote URIs so
+    // the player can continue past the pre-buffer window without reloading the playlist.
+    for (let index = 0; index < this.playlist.segments.length; index++) {
       const segment = this.playlist.segments[index];
-      if (!segment) continue;
-
-      const segmentPath = getSegmentPath(this.sessionDir, index);
       lines.push(`#EXTINF:${segment.duration.toFixed(3)},`);
-      lines.push(`file://${segmentPath}`);
+      if (this.downloadedIndices.has(index)) {
+        lines.push(`file://${getSegmentPath(this.sessionDir, index)}`);
+      } else {
+        lines.push(segment.uri);
+      }
     }
 
     if (finalize || this.playlist.endList) {

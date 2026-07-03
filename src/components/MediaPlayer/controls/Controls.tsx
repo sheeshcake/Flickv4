@@ -49,7 +49,7 @@ const ControlsComponent: React.FC<ControlsProps> = ({
   subtitleDelay = 0,
   onSubtitleDelayChange,
   onResetSubtitleDelay,
-  cacheAheadSeconds,
+  cachedAheadSeconds = 0,
 }) => {
   const navigation = useNavigation();
   const [timeLabel, setTimeLabel] = useState<string>(formatTime(0));
@@ -178,13 +178,8 @@ const ControlsComponent: React.FC<ControlsProps> = ({
         subtitleDelay={subtitleDelay}
         onSubtitleDelayChange={onSubtitleDelayChange}
         onResetSubtitleDelay={onResetSubtitleDelay}
+        cachedAheadSeconds={cachedAheadSeconds}
       />
-
-      {cacheAheadSeconds !== undefined && cacheAheadSeconds > 0 && !isControlsHidden && (
-        <View style={styles.cacheBadge}>
-          <Text style={styles.cacheBadgeText}>{cacheAheadSeconds}s cached ahead</Text>
-        </View>
-      )}
 
       {readyNext && fullscreen && onNext && (
         <View

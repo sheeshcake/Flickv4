@@ -8,6 +8,7 @@ import { useAppState } from '../../hooks/useAppState';
 import { usePlaybackCache } from '../../hooks/usePlaybackCache';
 import { SubtitleTrack, DEFAULT_SUBTITLE_STYLE } from '../../types';
 import { VIDEO_STREAM_HEADERS } from '../../utils/streamHeaders';
+import { convertSrtToVtt } from '../../utils/subtitleUtils';
 import { SubtitleSelector } from '../';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import Controls from './controls';
@@ -22,33 +23,6 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 const RESIZE_MODES = ['contain', 'cover', 'stretch', 'none'] as const;
 const NEXT_EPISODE_THRESHOLD = 150;
-
-const convertSrtToVtt = (srtContent: string): string => {
-  // Add VTT header
-  let vttContent = 'WEBVTT\n\n';
-  
-  // Split by double newline to get subtitle blocks
-  const blocks = srtContent.trim().split(/\r?\n\r?\n/);
-  
-  for (const block of blocks) {
-    const lines = block.trim().split(/\r?\n/);
-    if (lines.length < 2) continue;
-    
-    // Find the timestamp line (contains -->)
-    const timestampIndex = lines.findIndex(line => line.includes('-->'));
-    if (timestampIndex === -1) continue;
-    
-    // Convert SRT timestamps (00:00:01,000) to VTT format (00:00:01.000)
-    const timestampLine = lines[timestampIndex].replace(/,/g, '.');
-    const textLines = lines.slice(timestampIndex + 1);
-    
-    if (textLines.length > 0) {
-      vttContent += `${timestampLine}\n${textLines.join('\n')}\n\n`;
-    }
-  }
-  
-  return vttContent;
-};
 
 interface MediaPlayerProps {
   videoUrl: string;
@@ -96,6 +70,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
   const [hasStartedFromProgress, setHasStartedFromProgress] = useState(false);
   const [showSubtitleSelector, setShowSubtitleSelector] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
+  const [bufferedPosition, setBufferedPosition] = useState(0);
 
   const [subtitleContent, setSubtitleContent] = useState<string | null>(null);
   const [subtitleVttPath, setSubtitleVttPath] = useState<string | null>(null);
@@ -221,8 +196,11 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     }
   }, [currentTime, hasStartedFromProgress]);
 
-  const handleProgress = useCallback(({ currentTime: time }: { currentTime: number }) => {
+  const handleProgress = useCallback(({ currentTime: time, playableDuration }: { currentTime: number; playableDuration?: number }) => {
     setCurrentTime(time);
+    if (typeof playableDuration === 'number' && Number.isFinite(playableDuration)) {
+      setBufferedPosition(playableDuration);
+    }
     onPlaybackProgress(time);
   }, [onPlaybackProgress]);
 
@@ -250,9 +228,10 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
       const clampedTime = Math.max(0, Math.min(time, duration));
       videoRef.current.seek(clampedTime);
       setCurrentTime(clampedTime);
+      onPlaybackProgress(clampedTime);
       showControls();
     }
-  }, [duration, showControls]);
+  }, [duration, onPlaybackProgress, showControls]);
 
   const handleResizeModeToggle = useCallback(() => {
     setResizeMode(prev => (prev + 1) % RESIZE_MODES.length);
@@ -295,7 +274,8 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
         const sanitizedTitle = selectedSubtitle.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() + `_${contentId}` + (season && episode ? `_s${season}e${episode}` : '');
         const srtFilename = `${sanitizedTitle}_${selectedSubtitle.language}.srt`;
-        const vttFilename = `${sanitizedTitle}_${selectedSubtitle.language}.vtt`;
+        const delayKey = subtitleDelay.toFixed(1).replace('.', 'p');
+        const vttFilename = `${sanitizedTitle}_${selectedSubtitle.language}_d${delayKey}.vtt`;
         const srtPath = `${subtitlesDir}/${srtFilename}`;
         const vttPath = `${subtitlesDir}/${vttFilename}`;
 
@@ -316,13 +296,9 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         }
         
         setSubtitleContent(srtContent);
-        
-        const vttExists = await RNFS.exists(vttPath);
-        if (!vttExists) {
-          const vttContent = convertSrtToVtt(srtContent);
-          await RNFS.writeFile(vttPath, vttContent, 'utf8');
-        }
-        
+
+        const vttContent = convertSrtToVtt(srtContent, subtitleDelay);
+        await RNFS.writeFile(vttPath, vttContent, 'utf8');
         setSubtitleVttPath(`file://${vttPath}`);
         
       } catch {
@@ -332,7 +308,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
     };
 
     downloadAndSaveSubtitle();
-  }, [selectedSubtitle, contentId, season, episode]);
+  }, [selectedSubtitle, contentId, season, episode, subtitleDelay]);
 
 
   const videoContainerStyle = useMemo(() => ({
@@ -390,12 +366,15 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
   const videoSource = useMemo(() => {
     const uri = playbackUrl;
-    const isCached = uri.startsWith('file://');
-    return {
+    const useStreamHeaders =
+      uri.includes('.m3u8') ||
+      (!uri.startsWith('file://') && !uri.startsWith('/'));
+    const base = {
       uri,
       textTracks,
-      ...(isCached ? {} : { headers: VIDEO_STREAM_HEADERS }),
+      ...(useStreamHeaders ? { headers: VIDEO_STREAM_HEADERS } : {}),
     };
+    return uri.includes('.m3u8') ? { ...base, type: 'm3u8' as const } : base;
   }, [playbackUrl, textTracks]);
 
   if (!videoUrl) {
@@ -416,7 +395,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
           <Text style={styles.cacheLoadingText}>Buffering ahead…</Text>
         </View>
       )}
-      {playbackUrl && typeof playbackUrl === 'string' && playbackUrl.trim() !== '' ? (
+      {!isCacheLoading && playbackUrl && typeof playbackUrl === 'string' && playbackUrl.trim() !== '' ? (
         <Video
           ref={videoRef}
           source={videoSource}
@@ -447,11 +426,11 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
             opacity: 1,
           }}
         />
-      ) : (
+      ) : !isCacheLoading ? (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>No valid video URL provided.</Text>
         </View>
-      )}
+      ) : null}
 
       <Controls
         title={title}
@@ -462,6 +441,8 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         playing={isPlaying}
         currentPosition={currentTime}
         duration={duration}
+        bufferedPosition={bufferedPosition}
+        cachedAheadSeconds={cacheStatus.isActive ? cacheStatus.cachedSecondsAhead : 0}
         onSeek={handleSeek}
         fullscreen={isFullscreen}
         onFullscreen={toggleFullscreen}
@@ -481,7 +462,6 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
         subtitleDelay={subtitleDelay}
         onSubtitleDelayChange={handleSubtitleDelayChange}
         onResetSubtitleDelay={handleResetSubtitleDelay}
-        cacheAheadSeconds={cacheStatus.isActive ? Math.round(cacheStatus.cachedSecondsAhead) : undefined}
         upperRightComponent={
           <View style={styles.castButtonContainer}>
             <CastButton style={styles.castButton} />
@@ -501,6 +481,7 @@ const MediaPlayer: React.FC<MediaPlayerProps> = ({
 
       <SubtitleSelector
         visible={showSubtitleSelector}
+        variant={isFullscreen ? 'landscape' : 'portrait'}
         onClose={handleCloseSubtitleSelector}
         onSelectSubtitle={handleSubtitleSelect}
         selectedSubtitle={selectedSubtitle}

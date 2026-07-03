@@ -145,6 +145,7 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
   const [showSeasonDropdown, setShowSeasonDropdown] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekBarWidth, setSeekBarWidth] = useState(0);
+  const [bufferedPosition, setBufferedPosition] = useState(0);
 
   const videoRef = useRef<any>(null);
   const seekBarRef = useRef<View>(null);
@@ -305,8 +306,11 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
     showControls();
   }, [showControls]);
 
-  const handleProgress = useCallback(({ currentTime: t }: { currentTime: number }) => {
+  const handleProgress = useCallback(({ currentTime: t, playableDuration }: { currentTime: number; playableDuration?: number }) => {
     if (!isSeeking) setCurrentTime(t);
+    if (typeof playableDuration === 'number' && Number.isFinite(playableDuration)) {
+      setBufferedPosition(playableDuration);
+    }
     onPlaybackProgress(t);
   }, [isSeeking, onPlaybackProgress]);
 
@@ -321,11 +325,14 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
   }, [onEnd, onPlaybackEnd]);
 
   const videoSource = useMemo(() => {
-    const isCached = playbackUrl.startsWith('file://');
-    return {
+    const useStreamHeaders =
+      playbackUrl.includes('.m3u8') ||
+      (!playbackUrl.startsWith('file://') && !playbackUrl.startsWith('/'));
+    const base = {
       uri: playbackUrl,
-      ...(isCached ? {} : { headers: VIDEO_STREAM_HEADERS }),
+      ...(useStreamHeaders ? { headers: VIDEO_STREAM_HEADERS } : {}),
     };
+    return playbackUrl.includes('.m3u8') ? { ...base, type: 'm3u8' as const } : base;
   }, [playbackUrl]);
 
   const handleError = useCallback(() => {
@@ -346,8 +353,9 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
     const next = Math.max(0, Math.min(currentTime + offset, duration));
     videoRef.current.seek(next);
     setCurrentTime(next);
+    onPlaybackProgress(next);
     showControls();
-  }, [currentTime, duration, showControls]);
+  }, [currentTime, duration, onPlaybackProgress, showControls]);
 
   // ── seekbar pan responder ──────────────────────────────────────────────────
   const seekPanResponder = useMemo(() =>
@@ -374,16 +382,25 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
           const t = pct * duration;
           videoRef.current?.seek(t);
           setCurrentTime(t);
+          onPlaybackProgress(t);
         });
         setIsSeeking(false);
         showControls();
       },
       onPanResponderTerminate: () => setIsSeeking(false),
     }),
-  [duration, showControls]);
+  [duration, onPlaybackProgress, showControls]);
 
   // ── computed ───────────────────────────────────────────────────────────────
   const progressPct = duration > 0 ? currentTime / duration : 0;
+  const bufferLinePct = useMemo(() => {
+    if (duration <= 0) return 0;
+    const bufferedPct = bufferedPosition / duration;
+    const cachedPct = cacheStatus.isActive
+      ? Math.min((currentTime + cacheStatus.cachedSecondsAhead) / duration, 1)
+      : 0;
+    return Math.max(bufferedPct, cachedPct);
+  }, [bufferedPosition, cacheStatus.cachedSecondsAhead, cacheStatus.isActive, currentTime, duration]);
   const thumbLeft = Math.max(0, progressPct * seekBarWidth - 8);
   const hasTV = contentType === 'tv' && seasons.length > 0 && episodes.length > 0;
   const currentEpisodeInfo = episodes.find(e => e.episode_number === selectedEpisode);
@@ -434,24 +451,26 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
   return (
     <View style={styles.root}>
       {/* ── Video ── */}
-      <Video
-        ref={videoRef}
-        source={videoSource}
-        style={StyleSheet.absoluteFill}
-        resizeMode="contain"
-        paused={!isPlaying}
-        controls={false}
-        bufferingStrategy={BufferingStrategyType.DEPENDING_ON_MEMORY}
-        onLoad={handleLoad}
-        onProgress={handleProgress}
-        onBuffer={handleBuffer}
-        onEnd={handleEnd}
-        onError={handleError}
-        progressUpdateInterval={250}
-        repeat={false}
-        muted={false}
-        hideShutterView
-      />
+      {!isCacheLoading && playbackUrl ? (
+        <Video
+          ref={videoRef}
+          source={videoSource}
+          style={StyleSheet.absoluteFill}
+          resizeMode="contain"
+          paused={!isPlaying}
+          controls={false}
+          bufferingStrategy={BufferingStrategyType.DEPENDING_ON_MEMORY}
+          onLoad={handleLoad}
+          onProgress={handleProgress}
+          onBuffer={handleBuffer}
+          onEnd={handleEnd}
+          onError={handleError}
+          progressUpdateInterval={250}
+          repeat={false}
+          muted={false}
+          hideShutterView
+        />
+      ) : null}
 
       {/* ── Buffering ── */}
       {(isBuffering || isCacheLoading) && (
@@ -460,14 +479,6 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
           {isCacheLoading && (
             <Text style={styles.cacheLoadingText}>Buffering ahead…</Text>
           )}
-        </View>
-      )}
-
-      {cacheStatus.isActive && cacheStatus.cachedSecondsAhead > 0 && (
-        <View style={styles.cacheBadge}>
-          <Text style={styles.cacheBadgeText}>
-            {Math.round(cacheStatus.cachedSecondsAhead)}s cached ahead
-          </Text>
         </View>
       )}
 
@@ -555,6 +566,9 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
               {...seekPanResponder.panHandlers}
             >
               <View style={styles.seekBackground} />
+              {bufferLinePct > 0 && (
+                <View style={[styles.seekBuffered, { width: bufferLinePct * seekBarWidth }]} />
+              )}
               <View style={[styles.seekFill, { width: progressPct * seekBarWidth }]} />
               {seekBarWidth > 0 && (
                 <View
@@ -706,24 +720,9 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 14,
   },
-  cacheBadge: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    zIndex: 5,
-  },
   subtitleLayer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 3,
-  },
-  cacheBadgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '600',
   },
   controlsOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -842,6 +841,13 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  seekBuffered: {
+    position: 'absolute',
+    left: 0,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.55)',
   },
   seekFill: {
     position: 'absolute',

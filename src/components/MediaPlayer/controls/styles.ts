@@ -227,7 +227,7 @@ export const styles = StyleSheet.create({
     top: 0,
     left: 0,
     bottom: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+    backgroundColor: 'rgba(255, 255, 255, 0.55)',
     borderRadius: 2,
   },
   progressForeground: {
@@ -280,20 +280,6 @@ export const styles = StyleSheet.create({
     minWidth: 50,
   },
   delayText: {
-    color: colors.white,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  cacheBadge: {
-    position: 'absolute',
-    top: 48,
-    right: 12,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  cacheBadgeText: {
     color: colors.white,
     fontSize: 11,
     fontWeight: '600',

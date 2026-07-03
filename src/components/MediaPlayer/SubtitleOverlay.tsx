@@ -1,12 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, ViewStyle, TextStyle, Platform } from 'react-native';
 import { SubtitleStyle, DEFAULT_SUBTITLE_STYLE } from '../../types';
-
-interface SubtitleCue {
-  start: number;
-  end: number;
-  text: string;
-}
+import { findActiveCue, parseSrtCues } from '../../utils/subtitleUtils';
 
 interface SubtitleOverlayProps {
   subtitleContent: string | null;
@@ -17,47 +12,6 @@ interface SubtitleOverlayProps {
   style?: SubtitleStyle;
 }
 
-const parseSRT = (srtContent: string): SubtitleCue[] => {
-  const cues: SubtitleCue[] = [];
-  
-  const blocks = srtContent.trim().split(/\r?\n\r?\n/);
-  
-  for (const block of blocks) {
-    const lines = block.trim().split(/\r?\n/);
-    if (lines.length < 3) continue;
-    
-    const timestampIndex = lines.findIndex(line => line.includes('-->'));
-    if (timestampIndex === -1) continue;
-    
-    const timestampLine = lines[timestampIndex];
-    const textLines = lines.slice(timestampIndex + 1);
-    
-    const match = timestampLine.match(/(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/);
-    if (!match) continue;
-    
-    const startHours = parseInt(match[1], 10);
-    const startMinutes = parseInt(match[2], 10);
-    const startSeconds = parseFloat(`${match[3]}.${match[4]}`);
-    const endHours = parseInt(match[5], 10);
-    const endMinutes = parseInt(match[6], 10);
-    const endSeconds = parseFloat(`${match[7]}.${match[8]}`);
-    
-    const start = startHours * 3600 + startMinutes * 60 + startSeconds;
-    const end = endHours * 3600 + endMinutes * 60 + endSeconds;
-    
-    const text = textLines
-      .join('\n')
-      .replace(/<[^>]*>/g, '')
-      .trim();
-    
-    if (text) {
-      cues.push({ start, end, text });
-    }
-  }
-  
-  return cues;
-};
-
 export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   subtitleContent,
   currentTime,
@@ -66,8 +20,9 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   delay = 0,
   style = DEFAULT_SUBTITLE_STYLE,
 }) => {
-  const [cues, setCues] = useState<SubtitleCue[]>([]);
-  const [currentCue, setCurrentCue] = useState<string | null>(null);
+  const [cues, setCues] = useState(() =>
+    subtitleContent ? parseSrtCues(subtitleContent) : [],
+  );
 
   const computedFontSize = useMemo(() => {
     const baseSizes = {
@@ -124,28 +79,19 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   useEffect(() => {
     if (subtitleContent) {
       try {
-        const parsedCues = parseSRT(subtitleContent);
-        setCues(parsedCues);
+        setCues(parseSrtCues(subtitleContent));
       } catch {
+        setCues([]);
       }
     } else {
       setCues([]);
-      setCurrentCue(null);
     }
   }, [subtitleContent]);
 
-  useEffect(() => {
-    if (cues.length === 0) {
-      setCurrentCue(null);
-      return;
-    }
-
-    const adjustedTime = currentTime - delay + 0.5;
-    const activeCue = cues.find(
-      cue => adjustedTime >= cue.start && adjustedTime <= cue.end
-    );
-
-    setCurrentCue(activeCue ? activeCue.text : null);
+  const currentCue = useMemo(() => {
+    if (cues.length === 0) return null;
+    const adjustedTime = currentTime - delay;
+    return findActiveCue(cues, adjustedTime)?.text ?? null;
   }, [currentTime, cues, delay]);
 
   if (!currentCue) {
