@@ -13,6 +13,7 @@ import {
   WatchProgress,
   NetworkState,
   DEFAULT_SUBTITLE_STYLE,
+  DEFAULT_PLAYBACK_CACHE,
 } from '../types';
 import {StorageService} from '../services/StorageService';
 import {NetworkUtils} from '../utils/networkUtils';
@@ -31,6 +32,7 @@ const initialState: AppState = {
       autoSelectSubtitles: false,
       subtitleStyle: DEFAULT_SUBTITLE_STYLE,
       netflixStyle: false,
+      playbackCache: { ...DEFAULT_PLAYBACK_CACHE },
     },
     likedContent: {
       movies: [],
@@ -75,6 +77,10 @@ const appReducer = (state: AppState, action: AppAction): AppState => {
       const sanitizedPreferences = {
         ...mergedPreferences,
         continueWatching,
+        playbackCache: {
+          ...DEFAULT_PLAYBACK_CACHE,
+          ...mergedPreferences.playbackCache,
+        },
       };
 
       const likedMovies = sanitizedPreferences.likedMovies || [];

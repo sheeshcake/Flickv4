@@ -10,6 +10,7 @@ import {
   Modal,
   ActivityIndicator,
   FlatList,
+  RefreshControlProps,
 } from 'react-native';
 import RNFS from 'react-native-fs';
 import { TMDBService } from '../services/TMDBService';
@@ -174,6 +175,7 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
   // Track last progress to avoid unnecessary state updates
   const lastProgressRef = useRef<number>(0);
   const lastStatusRef = useRef<DownloadStatus | null>(null);
+  const pendingAutoStartRef = useRef(false);
   
   // Resolution selection state
   const [showResolutionModal, setShowResolutionModal] = useState(false);
@@ -335,6 +337,13 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
     }
   }, [videoUrl]);
 
+  useEffect(() => {
+    if (videoUrl && pendingAutoStartRef.current) {
+      pendingAutoStartRef.current = false;
+      fetchResolutions();
+    }
+  }, [videoUrl, fetchResolutions]);
+
   // Start download with selected resolution
   const startDownloadWithResolution = useCallback(async (selectedStream?: M3U8StreamInfo) => {
     setShowResolutionModal(false);
@@ -385,15 +394,9 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
   const handleDownload = useCallback(async () => {
     if (!videoUrl) {
       if (onVideoNeeded) {
-        // If callback is provided, trigger video scraping
+        pendingAutoStartRef.current = true;
         onVideoNeeded();
-        Alert.alert(
-          'Getting Video Ready', 
-          'Starting video preparation for download. Once the video loads, the download will begin automatically.',
-          [{ text: 'OK' }]
-        );
       } else {
-        // Fallback to original behavior
         Alert.alert(
           'Video URL Required', 
           'Please start playing the video first, then try downloading. This ensures we get the correct video stream for download.',
@@ -403,7 +406,6 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({
       return;
     }
 
-    // Fetch available resolutions and show selection modal
     await fetchResolutions();
   }, [videoUrl, onVideoNeeded, fetchResolutions]);
 
@@ -690,12 +692,14 @@ interface DownloadsListProps {
   downloads: DownloadItem[];
   onItemPress?: (download: DownloadItem) => void;
   onDeletePress?: (download: DownloadItem) => void;
+  refreshControl?: React.ReactElement<RefreshControlProps>;
 }
 
 export const DownloadsList: React.FC<DownloadsListProps> = ({
   downloads,
   onItemPress,
   onDeletePress,
+  refreshControl,
 }) => {
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
@@ -748,7 +752,7 @@ export const DownloadsList: React.FC<DownloadsListProps> = ({
   }
 
   return (
-    <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false}>
+    <ScrollView style={styles.listContainer} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
       {downloads.map((download) => (
         <TouchableOpacity
           key={download.id}

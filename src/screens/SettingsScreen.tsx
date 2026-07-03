@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import type {MainTabScreenProps, MainTabParamList} from '../types/navigation';
 import {useAppContext} from '../context/AppContext';
-import {AppActionType} from '../types';
+import {AppActionType, DEFAULT_PLAYBACK_CACHE, PlaybackCachePreferences} from '../types';
 import {StorageService} from '../services/StorageService';
 import {TMDBService} from '../services/TMDBService';
 import {downloadService} from '../services/DownloadService';
@@ -123,6 +123,61 @@ export const SettingsScreen: React.FC<Props> = () => {
       console.error('Failed to update Netflix style preference:', error);
       Alert.alert('Error', 'Failed to update Netflix style preference');
     }
+  };
+
+  const updatePlaybackCache = (patch: Partial<PlaybackCachePreferences>) => {
+    const current = state.user.preferences.playbackCache ?? DEFAULT_PLAYBACK_CACHE;
+    dispatch({
+      type: AppActionType.SET_USER_PREFERENCES,
+      payload: {
+        ...state.user.preferences,
+        playbackCache: { ...current, ...patch },
+      },
+    });
+  };
+
+  const handlePlaybackCacheToggle = (value: boolean) => {
+    updatePlaybackCache({ enabled: value });
+  };
+
+  const handlePlaybackCacheStorage = () => {
+    const current = state.user.preferences.playbackCache?.storage ?? 'disk';
+    Alert.alert('Playback Cache Storage', 'Choose where to store temporary playback cache', [
+      { text: 'Disk (larger)', onPress: () => updatePlaybackCache({ storage: 'disk', maxSizeMB: 256 }) },
+      { text: 'Memory (smaller)', onPress: () => updatePlaybackCache({ storage: 'memory', maxSizeMB: 64 }) },
+      { text: 'Cancel', style: 'cancel' },
+      ...(current === 'disk' ? [] : []),
+    ]);
+  };
+
+  const handlePlaybackCacheSize = () => {
+    Alert.alert('Cache Size', 'Maximum temporary cache size', [
+      { text: '64 MB', onPress: () => updatePlaybackCache({ maxSizeMB: 64 }) },
+      { text: '128 MB', onPress: () => updatePlaybackCache({ maxSizeMB: 128 }) },
+      { text: '256 MB', onPress: () => updatePlaybackCache({ maxSizeMB: 256 }) },
+      { text: '512 MB', onPress: () => updatePlaybackCache({ maxSizeMB: 512 }) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleReadAhead = () => {
+    Alert.alert('Read-ahead', 'How far ahead to pre-buffer while playing', [
+      { text: '30 seconds', onPress: () => updatePlaybackCache({ readAheadSeconds: 30 }) },
+      { text: '60 seconds', onPress: () => updatePlaybackCache({ readAheadSeconds: 60 }) },
+      { text: '2 minutes', onPress: () => updatePlaybackCache({ readAheadSeconds: 120 }) },
+      { text: '5 minutes', onPress: () => updatePlaybackCache({ readAheadSeconds: 300 }) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handlePreBuffer = () => {
+    Alert.alert('Pre-buffer before play', 'Wait before starting playback to cache initial segments', [
+      { text: 'Play immediately', onPress: () => updatePlaybackCache({ preBufferSeconds: 0 }) },
+      { text: '15 seconds', onPress: () => updatePlaybackCache({ preBufferSeconds: 15 }) },
+      { text: '30 seconds', onPress: () => updatePlaybackCache({ preBufferSeconds: 30 }) },
+      { text: '60 seconds', onPress: () => updatePlaybackCache({ preBufferSeconds: 60 }) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const handleClearCache = () => {
@@ -327,6 +382,69 @@ export const SettingsScreen: React.FC<Props> = () => {
                 }
               />
             </View>
+          </View>
+
+          {/* Playback Cache */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Playback</Text>
+            <View style={styles.settingItem}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Playback Cache</Text>
+                <Text style={styles.settingDescription}>
+                  Pre-buffer video while watching for unstable connections. Cleared after playback ends.
+                </Text>
+              </View>
+              <Switch
+                value={state.user.preferences.playbackCache?.enabled ?? false}
+                onValueChange={handlePlaybackCacheToggle}
+                trackColor={{false: '#767577', true: '#E50914'}}
+                thumbColor={
+                  (state.user.preferences.playbackCache?.enabled ?? false) ? '#FFFFFF' : '#f4f3f4'
+                }
+              />
+            </View>
+            {(state.user.preferences.playbackCache?.enabled ?? false) && (
+              <>
+                <TouchableOpacity style={styles.settingItem} onPress={handlePlaybackCacheStorage}>
+                  <View style={styles.settingInfo}>
+                    <Text style={styles.settingLabel}>Cache Storage</Text>
+                    <Text style={styles.settingDescription}>
+                      {state.user.preferences.playbackCache?.storage === 'memory' ? 'Memory (smaller)' : 'Disk (larger)'}
+                    </Text>
+                  </View>
+                  <Text style={styles.linkText}>Change</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.settingItem} onPress={handlePlaybackCacheSize}>
+                  <View style={styles.settingInfo}>
+                    <Text style={styles.settingLabel}>Cache Size</Text>
+                    <Text style={styles.settingDescription}>
+                      {state.user.preferences.playbackCache?.maxSizeMB ?? 256} MB max
+                    </Text>
+                  </View>
+                  <Text style={styles.linkText}>Change</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.settingItem} onPress={handleReadAhead}>
+                  <View style={styles.settingInfo}>
+                    <Text style={styles.settingLabel}>Read-ahead</Text>
+                    <Text style={styles.settingDescription}>
+                      {state.user.preferences.playbackCache?.readAheadSeconds ?? 120} seconds ahead
+                    </Text>
+                  </View>
+                  <Text style={styles.linkText}>Change</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.settingItem} onPress={handlePreBuffer}>
+                  <View style={styles.settingInfo}>
+                    <Text style={styles.settingLabel}>Pre-buffer before play</Text>
+                    <Text style={styles.settingDescription}>
+                      {(state.user.preferences.playbackCache?.preBufferSeconds ?? 0) === 0
+                        ? 'Play immediately while caching'
+                        : `${state.user.preferences.playbackCache?.preBufferSeconds}s before play`}
+                    </Text>
+                  </View>
+                  <Text style={styles.linkText}>Change</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
 
           {/* Subtitle Section */}
@@ -825,6 +943,11 @@ const getStyles = (isDarkTheme: boolean) =>
     settingDescription: {
       fontSize: 14,
       color: isDarkTheme ? '#CCCCCC' : '#666666',
+    },
+    linkText: {
+      fontSize: 14,
+      color: '#E50914',
+      fontWeight: '600',
     },
     infoItem: {
       flexDirection: 'row',

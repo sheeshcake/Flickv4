@@ -354,7 +354,6 @@ const ClassicDetailScreen: React.FC<DetailScreenProps> = ({ route, navigation })
 
       if (pendingDownload) {
         setPendingDownload(false);
-        Alert.alert('Video Ready', 'The video is now ready. You can now tap the download button to start downloading.', [{ text: 'OK' }]);
       }
     },
     [pendingDownload, isMovie, tvState, watchProgress],
@@ -365,6 +364,7 @@ const ClassicDetailScreen: React.FC<DetailScreenProps> = ({ route, navigation })
   }, []);
 
   const handleScrapingError = useCallback((error: string) => {
+    setPendingDownload(false);
     setScraping({ active: false, error, show: false });
     Alert.alert('Video Error', `Failed to load video: ${error}`, [{ text: 'OK', onPress: () => setScraping(prev => ({ ...prev, error: null })) }]);
   }, []);
@@ -412,7 +412,7 @@ const ClassicDetailScreen: React.FC<DetailScreenProps> = ({ route, navigation })
                 videoUrl={currentVideoUrl}
                 title={contentTitle}
                 imageUrl={imageUrl}
-                contentType="movie"
+                contentType={isMovie ? 'movie' : 'tv'}
                 contentId={content?.id}
                 autoplay={autoPlay ?? true}
                 initialProgress={0}
@@ -509,7 +509,13 @@ const ClassicDetailScreen: React.FC<DetailScreenProps> = ({ route, navigation })
                     episodeTitle={!isMovie && tvState.episodes.length > 0 ? tvState.episodes.find(ep => ep.episode_number === tvState.selectedEpisode)?.name : undefined}
                     size="medium"
                     style={styles.downloadButton}
-                    onVideoNeeded={() => { setPendingDownload(true); setScraping({ show: true, active: true, error: null }); }}
+                    onVideoNeeded={() => {
+                      if (!isMovie && tvState.selectedEpisode === null && tvState.episodes.length > 0) {
+                        setTvState(prev => ({ ...prev, selectedEpisode: tvState.episodes[0].episode_number }));
+                      }
+                      setPendingDownload(true);
+                      setScraping({ show: true, active: true, error: null });
+                    }}
                     isPreparingVideo={scraping.active && pendingDownload}
                   />
                 )}

@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
+  Dimensions,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { searchSubtitles } from '../services/SubtitleService';
@@ -26,7 +28,11 @@ interface SubtitleSelectorProps {
   episode?: number;
   title?: string;
   prefetchedSubtitles?: SubtitleTrack[];
+  variant?: 'portrait' | 'landscape';
 }
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const LANDSCAPE_PANEL_WIDTH = Math.min(400, SCREEN_WIDTH * 0.42);
 
 const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
   visible,
@@ -39,7 +45,9 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
   episode,
   title,
   prefetchedSubtitles,
+  variant = 'portrait',
 }) => {
+  const isLandscape = variant === 'landscape';
   const [subtitles, setSubtitles] = useState<SubtitleTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -212,6 +220,7 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
       <TouchableOpacity
         style={[
           styles.subtitleItem,
+          isLandscape && styles.subtitleItemLandscape,
           selectedSubtitle?.id === item.id && styles.selectedItem,
         ]}
         onPress={() => handleSelectSubtitle(item)}
@@ -243,6 +252,139 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
     );
   };
 
+  const header = (
+    <View style={[styles.header, isLandscape && styles.headerLandscape]}>
+      <Text style={[styles.title, isLandscape && styles.titleLandscape]} numberOfLines={1}>
+        Select Subtitles
+        {title && ` - ${title}`}
+      </Text>
+      <TouchableOpacity onPress={onClose}>
+        <Icon name="close" size={24} color={colors.white} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const body = loading ? (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color={colors.red} />
+      <Text style={styles.loadingText}>Fetching subtitles...</Text>
+    </View>
+  ) : error ? (
+    <View style={[styles.errorContainer, isLandscape && styles.errorContainerLandscape]}>
+      <Icon name="subtitle-off" size={isLandscape ? 36 : 48} color={colors.light} />
+      <Text style={styles.errorText}>{error}</Text>
+      <TouchableOpacity
+        style={styles.retryButton}
+        onPress={fetchWyzieSubtitles}
+      >
+        <Text style={styles.retryButtonText}>Retry</Text>
+      </TouchableOpacity>
+      <View style={styles.errorDivider}>
+        <Text style={styles.errorDividerText}>or</Text>
+      </View>
+      <TouchableOpacity
+        style={styles.addCustomButton}
+        onPress={() => setShowCustomInput(true)}
+      >
+        <Icon name="plus" size={20} color={colors.red} />
+        <Text style={styles.addCustomButtonText}>Add Custom Subtitle</Text>
+      </TouchableOpacity>
+    </View>
+  ) : (
+    <View style={[styles.content, isLandscape && styles.contentLandscape]}>
+      <TouchableOpacity
+        style={[
+          styles.subtitleItem,
+          isLandscape && styles.subtitleItemLandscape,
+          !selectedSubtitle && styles.selectedItem,
+        ]}
+        onPress={handleDisableSubtitles}
+      >
+        <View style={styles.subtitleInfo}>
+          <Text style={styles.subtitleTitle}>Disable Subtitles</Text>
+          <Text style={styles.subtitleDescription}>No subtitles will be shown</Text>
+        </View>
+        {!selectedSubtitle && (
+          <Icon name="check" size={20} color={colors.red} />
+        )}
+      </TouchableOpacity>
+
+      <FlatList
+        data={subtitles}
+        renderItem={renderSubtitleItem}
+        keyExtractor={(item) => item.id}
+        style={styles.subtitleList}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          subtitles.length > 0 ? (
+            <View style={[styles.listHeader, isLandscape && styles.listHeaderLandscape]}>
+              <Text style={styles.listHeaderText}>
+                {subtitles.length} subtitle(s) available
+              </Text>
+            </View>
+          ) : null
+        }
+      />
+
+      {showCustomInput ? (
+        <View style={styles.customInputContainer}>
+          <TextInput
+            style={styles.customInput}
+            placeholder="Enter subtitle URL (http://...)"
+            placeholderTextColor={colors.light}
+            value={customUrl}
+            onChangeText={setCustomUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={styles.customInputButtons}>
+            <TouchableOpacity
+              style={styles.customInputButton}
+              onPress={() => setShowCustomInput(false)}
+            >
+              <Text style={styles.customInputButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.customInputButton, styles.addButton]}
+              onPress={handleAddCustomSubtitle}
+            >
+              <Text style={styles.addButtonText}>Add</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={[styles.addCustomButton, isLandscape && styles.addCustomButtonLandscape]}
+          onPress={() => setShowCustomInput(true)}
+        >
+          <Icon name="plus" size={20} color={colors.red} />
+          <Text style={styles.addCustomButtonText}>Add Custom Subtitle</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  if (isLandscape) {
+    return (
+      <Modal
+        visible={visible}
+        transparent
+        animationType="fade"
+        onRequestClose={onClose}
+      >
+        <View style={styles.landscapeBackdrop}>
+          <TouchableWithoutFeedback onPress={onClose}>
+            <View style={styles.landscapeDismissArea} />
+          </TouchableWithoutFeedback>
+          <View style={[styles.landscapePanel, { width: LANDSCAPE_PANEL_WIDTH }]}>
+            {header}
+            {body}
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       visible={visible}
@@ -251,117 +393,8 @@ const SubtitleSelector: React.FC<SubtitleSelectorProps> = ({
       onRequestClose={onClose}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>
-            Select Subtitles
-            {title && ` - ${title}`}
-          </Text>
-          <TouchableOpacity onPress={onClose}>
-            <Icon name="close" size={24} color={colors.white} />
-          </TouchableOpacity>
-        </View>
-
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.red} />
-            <Text style={styles.loadingText}>Fetching subtitles...</Text>
-          </View>
-        ) : error ? (
-          <View style={styles.errorContainer}>
-            <Icon name="subtitle-off" size={48} color={colors.light} />
-            <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity
-              style={styles.retryButton}
-              onPress={fetchWyzieSubtitles}
-            >
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-            <View style={styles.errorDivider}>
-              <Text style={styles.errorDividerText}>or</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.addCustomButton}
-              onPress={() => setShowCustomInput(true)}
-            >
-              <Icon name="plus" size={20} color={colors.red} />
-              <Text style={styles.addCustomButtonText}>Add Custom Subtitle</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.content}>
-            {/* Disable subtitles option */}
-            <TouchableOpacity
-              style={[
-                styles.subtitleItem,
-                !selectedSubtitle && styles.selectedItem,
-              ]}
-              onPress={handleDisableSubtitles}
-            >
-              <View style={styles.subtitleInfo}>
-                <Text style={styles.subtitleTitle}>Disable Subtitles</Text>
-                <Text style={styles.subtitleDescription}>No subtitles will be shown</Text>
-              </View>
-              {!selectedSubtitle && (
-                <Icon name="check" size={20} color={colors.red} />
-              )}
-            </TouchableOpacity>
-
-            {/* Subtitle list */}
-            <FlatList
-              data={subtitles}
-              renderItem={renderSubtitleItem}
-              keyExtractor={(item) => item.id}
-              style={styles.subtitleList}
-              showsVerticalScrollIndicator={false}
-              ListHeaderComponent={
-                subtitles.length > 0 ? (
-                  <View style={styles.listHeader}>
-                    <Text style={styles.listHeaderText}>
-                      {subtitles.length} subtitle(s) available
-                    </Text>
-                  </View>
-                ) : null
-              }
-            />
-
-            {/* Custom subtitle input */}
-            {showCustomInput ? (
-              <View style={styles.customInputContainer}>
-                <TextInput
-                  style={styles.customInput}
-                  placeholder="Enter subtitle URL (http://...)"
-                  placeholderTextColor={colors.light}
-                  value={customUrl}
-                  onChangeText={setCustomUrl}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <View style={styles.customInputButtons}>
-                  <TouchableOpacity
-                    style={styles.customInputButton}
-                    onPress={() => setShowCustomInput(false)}
-                  >
-                    <Text style={styles.customInputButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.customInputButton, styles.addButton]}
-                    onPress={handleAddCustomSubtitle}
-                  >
-                    <Text style={styles.addButtonText}>Add</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={styles.addCustomButton}
-                onPress={() => setShowCustomInput(true)}
-              >
-                <Icon name="plus" size={20} color={colors.red} />
-                <Text style={styles.addCustomButtonText}>Add Custom Subtitle</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
+        {header}
+        {body}
       </View>
     </Modal>
   );
@@ -569,6 +602,49 @@ const styles = StyleSheet.create({
     color: colors.white,
     textAlign: 'center',
     fontWeight: 'bold',
+  },
+  landscapeBackdrop: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  landscapeDismissArea: {
+    flex: 1,
+  },
+  landscapePanel: {
+    height: '100%',
+    backgroundColor: colors.black,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.light,
+  },
+  headerLandscape: {
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  titleLandscape: {
+    fontSize: 16,
+    flex: 1,
+    marginRight: 12,
+  },
+  contentLandscape: {
+    padding: 12,
+  },
+  subtitleItemLandscape: {
+    padding: 12,
+    height: 64,
+    marginBottom: 6,
+  },
+  listHeaderLandscape: {
+    padding: 10,
+    marginBottom: 8,
+  },
+  errorContainerLandscape: {
+    padding: 12,
+  },
+  addCustomButtonLandscape: {
+    padding: 12,
+    marginTop: 8,
   },
 });
 

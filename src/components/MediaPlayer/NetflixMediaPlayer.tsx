@@ -30,8 +30,6 @@ import {
 } from 'react-native';
 import Video, {
   BufferingStrategyType,
-  SelectedTrackType,
-  TextTrackType,
 } from 'react-native-video';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Orientation from 'react-native-orientation-locker';
@@ -41,6 +39,8 @@ import { SubtitleTrack, DEFAULT_SUBTITLE_STYLE } from '../../types';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import { useSubtitles } from './hooks';
 import { useAppState } from '../../hooks/useAppState';
+import { usePlaybackCache } from '../../hooks/usePlaybackCache';
+import { VIDEO_STREAM_HEADERS } from '../../utils/streamHeaders';
 import { SubtitleSelector } from '../';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -48,11 +48,6 @@ const LANDSCAPE_W = Math.max(SCREEN_W, SCREEN_H);
 const LANDSCAPE_H = Math.min(SCREEN_W, SCREEN_H);
 const CONTROLS_HIDE_DELAY = 5000;
 const SEEK_AMOUNT = 10;
-const VIDEO_HEADER = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Referer': 'https://vidfast.pro',
-        'Origin': 'https://vidfast.pro',
-      };
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -63,20 +58,6 @@ const formatTime = (s: number): string => {
   const sec = Math.floor(s % 60);
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   return `${m}:${String(sec).padStart(2, '0')}`;
-};
-
-const convertSrtToVtt = (srt: string): string => {
-  let vtt = 'WEBVTT\n\n';
-  for (const block of srt.trim().split(/\r?\n\r?\n/)) {
-    const lines = block.trim().split(/\r?\n/);
-    if (lines.length < 2) continue;
-    const tsIdx = lines.findIndex(l => l.includes('-->'));
-    if (tsIdx === -1) continue;
-    const ts = lines[tsIdx].replace(/,/g, '.');
-    const text = lines.slice(tsIdx + 1);
-    if (text.length > 0) vtt += `${ts}\n${text.join('\n')}\n\n`;
-  }
-  return vtt;
 };
 
 // ── types ──────────────────────────────────────────────────────────────────────
@@ -115,8 +96,6 @@ export interface NetflixMediaPlayerProps {
 
 // ── component ──────────────────────────────────────────────────────────────────
 
-const VIDEO_SUBTITLE_STYLE = { fontSize: 16, paddingBottom: 20 };
-
 const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
   videoUrl,
   title,
@@ -137,6 +116,19 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
 }) => {
   const { state, updateWatchProgress } = useAppState();
 
+  const isLocalFile = videoUrl.startsWith('file://') || videoUrl.startsWith('/');
+  const {
+    playbackUrl,
+    cacheStatus,
+    onPlaybackProgress,
+    onPlaybackEnd,
+    isCacheLoading,
+  } = usePlaybackCache({
+    videoUrl,
+    initialProgress,
+    enabled: !isLocalFile,
+  });
+
   // ── video state ────────────────────────────────────────────────────────────
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -144,7 +136,6 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
   const [isBuffering, setIsBuffering] = useState(true);
   const [hasStartedFromProgress, setHasStartedFromProgress] = useState(false);
   const [subtitleContent, setSubtitleContent] = useState<string | null>(null);
-  const [subtitleVttPath, setSubtitleVttPath] = useState<string | null>(null);
   const [subtitleDelay] = useState(0);
 
   // ── UI state ───────────────────────────────────────────────────────────────
@@ -264,7 +255,6 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
   useEffect(() => {
     if (!selectedSubtitle) {
       setSubtitleContent(null);
-      setSubtitleVttPath(null);
       return;
     }
     const load = async () => {
@@ -274,7 +264,6 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
         const safe = selectedSubtitle.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
         const key = `${safe}_${contentId}${season && episode ? `_s${season}e${episode}` : ''}_${selectedSubtitle.language}`;
         const srtPath = `${dir}/${key}.srt`;
-        const vttPath = `${dir}/${key}.vtt`;
         let srtContent: string;
         if (await RNFS.exists(srtPath)) {
           srtContent = await RNFS.readFile(srtPath, 'utf8');
@@ -285,13 +274,8 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
           await RNFS.writeFile(srtPath, srtContent, 'utf8');
         }
         setSubtitleContent(srtContent);
-        if (!(await RNFS.exists(vttPath))) {
-          await RNFS.writeFile(vttPath, convertSrtToVtt(srtContent), 'utf8');
-        }
-        setSubtitleVttPath(`file://${vttPath}`);
       } catch {
         setSubtitleContent(null);
-        setSubtitleVttPath(null);
       }
     };
     load();
@@ -323,7 +307,8 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
 
   const handleProgress = useCallback(({ currentTime: t }: { currentTime: number }) => {
     if (!isSeeking) setCurrentTime(t);
-  }, [isSeeking]);
+    onPlaybackProgress(t);
+  }, [isSeeking, onPlaybackProgress]);
 
   const handleBuffer = useCallback(({ isBuffering: b }: { isBuffering: boolean }) => {
     setIsBuffering(b);
@@ -331,8 +316,17 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
 
   const handleEnd = useCallback(() => {
     setIsPlaying(false);
+    onPlaybackEnd();
     onEnd?.();
-  }, [onEnd]);
+  }, [onEnd, onPlaybackEnd]);
+
+  const videoSource = useMemo(() => {
+    const isCached = playbackUrl.startsWith('file://');
+    return {
+      uri: playbackUrl,
+      ...(isCached ? {} : { headers: VIDEO_STREAM_HEADERS }),
+    };
+  }, [playbackUrl]);
 
   const handleError = useCallback(() => {
     setIsBuffering(false);
@@ -388,17 +382,6 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
     }),
   [duration, showControls]);
 
-  // ── text tracks ────────────────────────────────────────────────────────────
-  const textTracks = useMemo(() => {
-    if (!subtitleVttPath || !selectedSubtitle) return undefined;
-    return [{ title: selectedSubtitle.title || 'Subtitles', language: (selectedSubtitle.language || 'en') as any, type: TextTrackType.VTT, uri: subtitleVttPath }];
-  }, [subtitleVttPath, selectedSubtitle]);
-
-  const selectedTextTrack = useMemo(() => {
-    if (!subtitleVttPath || !selectedSubtitle) return { type: SelectedTrackType.DISABLED };
-    return { type: SelectedTrackType.LANGUAGE, value: selectedSubtitle.language || 'en' };
-  }, [subtitleVttPath, selectedSubtitle]);
-
   // ── computed ───────────────────────────────────────────────────────────────
   const progressPct = duration > 0 ? currentTime / duration : 0;
   const thumbLeft = Math.max(0, progressPct * seekBarWidth - 8);
@@ -453,10 +436,7 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
       {/* ── Video ── */}
       <Video
         ref={videoRef}
-        source={{ 
-          uri: videoUrl,
-          headers: VIDEO_HEADER,
-         }}
+        source={videoSource}
         style={StyleSheet.absoluteFill}
         resizeMode="contain"
         paused={!isPlaying}
@@ -471,15 +451,23 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
         repeat={false}
         muted={false}
         hideShutterView
-        textTracks={textTracks}
-        selectedTextTrack={selectedTextTrack}
-        subtitleStyle={VIDEO_SUBTITLE_STYLE}
       />
 
       {/* ── Buffering ── */}
-      {isBuffering && (
+      {(isBuffering || isCacheLoading) && (
         <View style={styles.bufferingLayer}>
           <ActivityIndicator size="large" color="#E50914" />
+          {isCacheLoading && (
+            <Text style={styles.cacheLoadingText}>Buffering ahead…</Text>
+          )}
+        </View>
+      )}
+
+      {cacheStatus.isActive && cacheStatus.cachedSecondsAhead > 0 && (
+        <View style={styles.cacheBadge}>
+          <Text style={styles.cacheBadgeText}>
+            {Math.round(cacheStatus.cachedSecondsAhead)}s cached ahead
+          </Text>
         </View>
       )}
 
@@ -585,13 +573,16 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
       </Animated.View>
 
       {/* ── Subtitle overlay ── */}
-      <SubtitleOverlay
-        subtitleContent={subtitleContent}
-        currentTime={currentTime}
-        isVideoFullscreen={true}
-        delay={subtitleDelay}
-        style={state.user.preferences.subtitleStyle || DEFAULT_SUBTITLE_STYLE}
-      />
+      <View style={styles.subtitleLayer} pointerEvents="none">
+        <SubtitleOverlay
+          subtitleContent={subtitleContent}
+          currentTime={currentTime}
+          isVideoFullscreen={true}
+          isNetflixStyle={true}
+          delay={subtitleDelay}
+          style={state.user.preferences.subtitleStyle || DEFAULT_SUBTITLE_STYLE}
+        />
+      </View>
 
       {/* ── Episode Panel Modal ── */}
       <Modal
@@ -676,6 +667,7 @@ const NetflixMediaPlayer: React.FC<NetflixMediaPlayerProps> = ({
       {/* ── Subtitle Selector ── */}
       <SubtitleSelector
         visible={showSubtitleSelector}
+        variant="landscape"
         onClose={() => setShowSubtitleSelector(false)}
         onSelectSubtitle={(sub: SubtitleTrack | null) => {
           setSelectedSubtitle(sub);
@@ -708,6 +700,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  cacheLoadingText: {
+    color: '#fff',
+    marginTop: 12,
+    fontSize: 14,
+  },
+  cacheBadge: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    zIndex: 5,
+  },
+  subtitleLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3,
+  },
+  cacheBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
   },
   controlsOverlay: {
     ...StyleSheet.absoluteFillObject,

@@ -27,6 +27,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
 import WebView from 'react-native-webview';
+import RNFS from 'react-native-fs';
 import { Movie, TVShow, VideoData, AppError } from '../types';
 import { TMDBService } from '../services';
 import WebViewScrapper from '../components/WebViewScrapper';
@@ -38,7 +39,7 @@ import { getGenreNameById } from '../utils/genreMap';
 import NetflixMediaPlayer from '../components/MediaPlayer/NetflixMediaPlayer';
 
 const { width: SW, height: SH } = Dimensions.get('window');
-const HERO_HEIGHT = SH * 0.52;
+const HERO_HEIGHT = SH * 0.3;
 const TMDB_IMG = (path: string | null | undefined, size = 'w500') =>
   path ? `https://image.tmdb.org/t/p/${size}${path}` : '';
 
@@ -80,7 +81,7 @@ const dividerStyles = StyleSheet.create({
 const EpisodeDivider = () => <View style={dividerStyles.line} />;
 
 const NetflixDetailScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { content } = route.params || {};
+  const { content, video: localVideoPath, isLocal, autoPlay } = route.params || {};
   const validContent = content && typeof content === 'object' ? content : null;
 
   const { addLikedContent, removeLikedContent, isContentLiked } = useAppState();
@@ -102,6 +103,25 @@ const NetflixDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const watchProgress = useContentWatchProgress(validContent?.id ?? 0, contentType);
   const isLiked = validContent ? isContentLiked(validContent.id, contentType) : false;
 
+  useEffect(() => {
+    if (!isLocal || !localVideoPath) return;
+
+    const checkFile = async () => {
+      try {
+        const exists = await RNFS.exists(localVideoPath);
+        setLocalFileExists(!!exists);
+        if (exists) {
+          setCurrentVideoUrl(localVideoPath);
+          setShowFullPlayer(true);
+        }
+      } catch {
+        setLocalFileExists(false);
+      }
+    };
+
+    checkFile();
+  }, [isLocal, localVideoPath]);
+
   // ── tabs ────────────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<TabKey>(contentIsMovie ? 'moreLikeThis' : 'episodes');
 
@@ -113,6 +133,7 @@ const NetflixDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     active: false, error: null, show: false,
   });
   const [pendingDownload, setPendingDownload] = useState(false);
+  const [localFileExists, setLocalFileExists] = useState(false);
   const pendingFullscreenRef = useRef(false);
   const hasAppliedWatchProgressRef = useRef(false);
 
@@ -264,11 +285,11 @@ const NetflixDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
     if (pendingDownload) {
       setPendingDownload(false);
-      Alert.alert('Video Ready', 'The video is ready to download.', [{ text: 'OK' }]);
     }
   }, [pendingDownload, contentIsMovie, tvState, watchProgress]);
 
   const handleScrapingError = useCallback((err: string) => {
+    setPendingDownload(false);
     setScraping({ active: false, error: err, show: false });
     Alert.alert('Video Error', `Failed to load video: ${err}`, [{ text: 'OK', onPress: () => setScraping(p => ({ ...p, error: null })) }]);
   }, []);
@@ -388,6 +409,16 @@ const NetflixDetailScreen: React.FC<Props> = ({ route, navigation }) => {
       </TouchableOpacity>
     );
   }, [activeTrailer, trailerPlaying]);
+
+  if (isLocal && localVideoPath && !localFileExists) {
+    return (
+      <SafeAreaView style={s.root}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ color: '#fff' }}>Downloaded file not found or cannot be played.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // ── If full player is active ────────────────────────────────────────────────
   if (showFullPlayer && currentVideoUrl) {
@@ -538,6 +569,7 @@ const NetflixDetailScreen: React.FC<Props> = ({ route, navigation }) => {
                 <><Icon name="play" size={20} color="#000" style={s.mr6} /><Text style={s.playBtnText}>Play</Text></>
                 )}
             </TouchableOpacity>
+            {!isLocal && (
             <DownloadButton
               content={content}
               videoUrl={currentVideoUrl}
@@ -546,9 +578,16 @@ const NetflixDetailScreen: React.FC<Props> = ({ route, navigation }) => {
               episodeTitle={!contentIsMovie && tvState.episodes.length > 0 ? tvState.episodes.find((ep: any) => ep.episode_number === tvState.selectedEpisode)?.name : undefined}
               size="medium"
               style={s.downloadBtn}
-              onVideoNeeded={() => { setPendingDownload(true); setScraping({ show: true, active: true, error: null }); }}
+              onVideoNeeded={() => {
+                if (!contentIsMovie && tvState.selectedEpisode === null && tvState.episodes.length > 0) {
+                  setTvState(prev => ({ ...prev, selectedEpisode: tvState.episodes[0].episode_number }));
+                }
+                setPendingDownload(true);
+                setScraping({ show: true, active: true, error: null });
+              }}
               isPreparingVideo={scraping.active && pendingDownload}
             />
+            )}
           </View>
 
           {/* TV current episode info */}

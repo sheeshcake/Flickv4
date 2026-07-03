@@ -22,6 +22,14 @@ import {
   isBackgroundDownloadRunning,
   BackgroundDownloadParams,
 } from './BackgroundDownloadTask';
+import { VIDEO_STREAM_HEADERS } from '../utils/streamHeaders';
+import {
+  isM3U8Url,
+  fetchM3U8Playlist,
+  getAvailableResolutions as getM3U8Resolutions,
+  downloadSegmentToFile,
+  getSegmentPath,
+} from '../utils/m3u8';
 
 export interface DownloadOptions {
   quality: DownloadQuality;
@@ -290,20 +298,6 @@ export class DownloadService {
   }
 
   /**
-   * Check if a URL is an M3U8 playlist
-   */
-  private isM3U8Url(url: string): boolean {
-    const lowerUrl = url.toLowerCase();
-    return lowerUrl.includes('.m3u8') || 
-           lowerUrl.includes('.m3u') ||
-           lowerUrl.includes('application/x-mpegurl') ||
-           lowerUrl.includes('application/vnd.apple.mpegurl') ||
-           lowerUrl.includes('playlist.m3u8') ||
-           lowerUrl.includes('index.m3u8') ||
-           lowerUrl.includes('master.m3u8');
-  }
-
-  /**
    * Start downloading content
    */
   async startDownload(
@@ -405,7 +399,7 @@ export class DownloadService {
       await this.saveDownloadsToStorage();
 
       // Check if this is an M3U8 playlist
-      if (this.isM3U8Url(downloadItem.videoUrl)) {
+      if (isM3U8Url(downloadItem.videoUrl)) {
         // Use background task for M3U8 downloads to keep JS thread free
         if (options.useBackgroundTask !== false) {
           // Background task uses react-native-background-actions which has its own notification
@@ -641,11 +635,10 @@ export class DownloadService {
       timestamp: new Date(),
     });
     
-    await notificationService.showDownloadComplete({
+    await notificationService.showDownloadCompleted({
       downloadId: downloadItem.id,
       title: downloadItem.title,
       status: 'completed',
-      filePath: downloadItem.filePath,
     });
     
     await notificationService.stopForegroundService(downloadItem.id);
@@ -658,8 +651,8 @@ export class DownloadService {
         progress: 100,
         downloadedSize: downloadItem.totalSize || 0,
         totalSize: downloadItem.totalSize || 0,
-        speed: 0,
-        status: DownloadStatus.COMPLETED,
+        downloadSpeed: 0,
+        estimatedTimeRemaining: 0,
       });
     }
     
@@ -669,258 +662,8 @@ export class DownloadService {
     this.lastProgressListener.delete(downloadItem.id);
   }
 
-  /**
-   * Fetch and parse M3U8 playlist
-   */
-  private async fetchM3U8Playlist(url: string, selectedStreamUrl?: string): Promise<M3U8Playlist> {
-    console.log(`[M3U8] Fetching playlist from: ${url}`);
-    
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch M3U8 playlist: ${response.status}`);
-    }
-
-    const playlistText = await response.text();
-    const lines = playlistText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    
-    // Check if this is a master playlist
-    const isMasterPlaylist = lines.some(line => line.includes('#EXT-X-STREAM-INF'));
-    
-    if (isMasterPlaylist) {
-      return await this.parseMasterPlaylist(lines, url, selectedStreamUrl);
-    }
-    
-    return this.parseMediaPlaylist(lines, url);
-  }
-
-  /**
-   * Get available resolutions from M3U8 master playlist
-   * Call this before starting download to let user select quality
-   */
   async getAvailableResolutions(videoUrl: string): Promise<M3U8StreamInfo[]> {
-    try {
-      if (!this.isM3U8Url(videoUrl)) {
-        // Not an M3U8, return empty array (direct file download)
-        return [];
-      }
-
-      console.log(`[M3U8] Fetching available resolutions from: ${videoUrl}`);
-      
-      const response = await fetch(videoUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch M3U8 playlist: ${response.status}`);
-      }
-
-      const playlistText = await response.text();
-      const lines = playlistText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-      
-      // Check if this is a master playlist
-      const isMasterPlaylist = lines.some(line => line.includes('#EXT-X-STREAM-INF'));
-      
-      if (!isMasterPlaylist) {
-        // Single quality stream, no selection needed
-        return [];
-      }
-
-      const streams: M3U8StreamInfo[] = [];
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        
-        if (line.startsWith('#EXT-X-STREAM-INF:')) {
-          const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
-          const resolutionMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
-          const codecsMatch = line.match(/CODECS="([^"]+)"/);
-          const frameRateMatch = line.match(/FRAME-RATE=([\d.]+)/);
-          
-          if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
-            const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0;
-            const width = resolutionMatch ? parseInt(resolutionMatch[1], 10) : 0;
-            const height = resolutionMatch ? parseInt(resolutionMatch[2], 10) : 0;
-            const codecs = codecsMatch ? codecsMatch[1] : undefined;
-            const frameRate = frameRateMatch ? parseFloat(frameRateMatch[1]) : undefined;
-            
-            // Generate user-friendly label
-            const label = this.generateResolutionLabel(height, bandwidth, frameRate);
-            
-            streams.push({
-              bandwidth,
-              resolution: resolutionMatch ? `${width}x${height}` : 'unknown',
-              width,
-              height,
-              url: this.resolveUrl(lines[i + 1], videoUrl),
-              codecs,
-              frameRate,
-              label,
-            });
-          }
-        }
-      }
-      
-      // Sort by height (resolution) descending
-      streams.sort((a, b) => b.height - a.height);
-      
-      console.log(`[M3U8] Found ${streams.length} available resolutions`);
-      return streams;
-    } catch (error) {
-      console.error('Failed to get available resolutions:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Generate user-friendly resolution label
-   */
-  private generateResolutionLabel(height: number, bandwidth: number, frameRate?: number): string {
-    let qualityLabel = '';
-    
-    if (height >= 2160) {
-      qualityLabel = '4K Ultra HD';
-    } else if (height >= 1440) {
-      qualityLabel = '1440p QHD';
-    } else if (height >= 1080) {
-      qualityLabel = '1080p Full HD';
-    } else if (height >= 720) {
-      qualityLabel = '720p HD';
-    } else if (height >= 480) {
-      qualityLabel = '480p SD';
-    } else if (height >= 360) {
-      qualityLabel = '360p';
-    } else if (height > 0) {
-      qualityLabel = `${height}p`;
-    } else {
-      // Estimate from bandwidth
-      const mbps = bandwidth / 1000000;
-      if (mbps >= 15) {
-        qualityLabel = '4K (estimated)';
-      } else if (mbps >= 8) {
-        qualityLabel = '1080p (estimated)';
-      } else if (mbps >= 4) {
-        qualityLabel = '720p (estimated)';
-      } else {
-        qualityLabel = 'SD (estimated)';
-      }
-    }
-    
-    // Add frame rate if high
-    if (frameRate && frameRate >= 50) {
-      qualityLabel += ` ${Math.round(frameRate)}fps`;
-    }
-    
-    // Add bandwidth info
-    const mbps = (bandwidth / 1000000).toFixed(1);
-    qualityLabel += ` • ${mbps} Mbps`;
-    
-    return qualityLabel;
-  }
-
-  /**
-   * Parse master playlist and select best quality (or use selected stream)
-   */
-  private async parseMasterPlaylist(lines: string[], baseUrl: string, selectedStreamUrl?: string): Promise<M3U8Playlist> {
-    // If a specific stream URL is selected, use it directly
-    if (selectedStreamUrl) {
-      console.log(`[M3U8] Using selected stream URL: ${selectedStreamUrl}`);
-      return await this.fetchM3U8Playlist(selectedStreamUrl);
-    }
-
-    const streams: { bandwidth: number; resolution: string; url: string }[] = [];
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      if (line.startsWith('#EXT-X-STREAM-INF:')) {
-        const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
-        const resolutionMatch = line.match(/RESOLUTION=([^\s,]+)/);
-        
-        if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
-          streams.push({
-            bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0,
-            resolution: resolutionMatch ? resolutionMatch[1] : 'unknown',
-            url: lines[i + 1],
-          });
-        }
-      }
-    }
-    
-    if (streams.length === 0) {
-      throw new Error('No streams found in master playlist');
-    }
-    
-    // Select highest bandwidth by default
-    const bestStream = streams.reduce((best, current) => 
-      current.bandwidth > best.bandwidth ? current : best
-    );
-    
-    console.log(`[M3U8] Auto-selected stream: ${bestStream.resolution} at ${bestStream.bandwidth} bps`);
-    
-    const resolvedUrl = this.resolveUrl(bestStream.url, baseUrl);
-    return await this.fetchM3U8Playlist(resolvedUrl);
-  }
-
-  /**
-   * Parse media playlist
-   */
-  private parseMediaPlaylist(lines: string[], baseUrl: string): M3U8Playlist {
-    const segments: M3U8Segment[] = [];
-    let targetDuration = 10;
-    let mediaSequence = 0;
-    let version = 3;
-    let endList = false;
-    let currentDuration = 10;
-    let segmentIndex = 0;
-    let totalDuration = 0;
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      if (line.startsWith('#EXT-X-TARGETDURATION:')) {
-        targetDuration = parseInt(line.split(':')[1], 10) || 10;
-      } else if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
-        mediaSequence = parseInt(line.split(':')[1], 10) || 0;
-      } else if (line.startsWith('#EXT-X-VERSION:')) {
-        version = parseInt(line.split(':')[1], 10) || 3;
-      } else if (line === '#EXT-X-ENDLIST') {
-        endList = true;
-      } else if (line.startsWith('#EXTINF:')) {
-        const durationMatch = line.match(/#EXTINF:([\d.]+)/);
-        if (durationMatch) {
-          currentDuration = parseFloat(durationMatch[1]);
-        }
-      } else if (!line.startsWith('#') && line.length > 0) {
-        const resolvedUri = this.resolveUrl(line, baseUrl);
-        segments.push({
-          uri: resolvedUri,
-          duration: currentDuration,
-          timeline: 0,
-          index: segmentIndex++,
-        });
-        totalDuration += currentDuration;
-        currentDuration = targetDuration;
-      }
-    }
-    
-    console.log(`[M3U8] Parsed ${segments.length} segments, total duration: ${Math.round(totalDuration)}s`);
-    
-    if (segments.length === 0) {
-      throw new Error('No segments found in M3U8 playlist');
-    }
-    
-    return { segments, targetDuration, mediaSequence, endList, version, totalDuration };
-  }
-
-  /**
-   * Resolve relative URL
-   */
-  private resolveUrl(url: string, baseUrl: string): string {
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return url;
-    }
-    if (url.startsWith('/')) {
-      const urlParts = baseUrl.match(/^(https?:\/\/[^/]+)/);
-      return urlParts ? urlParts[1] + url : baseUrl.substring(0, baseUrl.lastIndexOf('/')) + url;
-    }
-    return baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1) + url;
+    return getM3U8Resolutions(videoUrl);
   }
 
   /**
@@ -928,7 +671,7 @@ export class DownloadService {
    */
   private async downloadM3U8Concurrent(downloadItem: DownloadItem, options: DownloadOptions): Promise<void> {
     // Pass selected stream URL if user chose a specific resolution
-    const playlist = await this.fetchM3U8Playlist(downloadItem.videoUrl, options.selectedStreamUrl);
+    const playlist = await fetchM3U8Playlist(downloadItem.videoUrl, options.selectedStreamUrl);
     const filePaths = this.generateFilePaths(downloadItem.id, downloadItem.quality);
     
     // Create or restore M3U8 state
@@ -1102,7 +845,7 @@ export class DownloadService {
     downloadItem: DownloadItem,
     abortSignal?: AbortSignal
   ): Promise<void> {
-    const segmentPath = `${state.segmentsDir}/segment_${segment.index.toString().padStart(5, '0')}.ts`;
+    const segmentPath = getSegmentPath(state.segmentsDir, segment.index);
     
     try {
       // Skip if already downloaded
@@ -1115,36 +858,20 @@ export class DownloadService {
         return;
       }
 
-      // Download using fetch and write to file
-      const response = await fetch(segment.uri, { signal: abortSignal });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      // Check again after fetch (might have been paused/cancelled during download)
-      if (state.isPaused || state.isCancelled || abortSignal?.aborted) {
-        return;
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      
-      // Check again before writing
-      if (state.isPaused || state.isCancelled || abortSignal?.aborted) {
-        return;
-      }
-
-      // Verify segments directory still exists (might have been deleted if cancelled)
       const dirExists = await RNFS.exists(state.segmentsDir);
       if (!dirExists) {
-        return; // Directory deleted, likely cancelled
+        return;
       }
 
-      const base64Data = this.arrayBufferToBase64(arrayBuffer);
-      await RNFS.writeFile(segmentPath, base64Data, 'base64');
+      const bytesWritten = await downloadSegmentToFile(segment.uri, segmentPath, abortSignal);
+
+      if (state.isPaused || state.isCancelled || abortSignal?.aborted) {
+        return;
+      }
 
       // Update state
       state.downloadedSegments.add(segment.index);
-      state.downloadedBytes += arrayBuffer.byteLength;
+      state.downloadedBytes += bytesWritten;
       state.failedSegments.delete(segment.index);
 
       // Update progress
@@ -1336,6 +1063,7 @@ export class DownloadService {
         id: downloadItem.id,
         url: downloadItem.videoUrl,
         destination: downloadItem.filePath!,
+        headers: { ...VIDEO_STREAM_HEADERS },
       });
 
       task
@@ -1517,6 +1245,21 @@ export class DownloadService {
         activeDownload.task.pause();
       }
 
+      if (isBackgroundDownloadRunning()) {
+        const stateKey = `@flick:background_download_state:${downloadId}`;
+        try {
+          const stateJson = await StorageService.getItem(stateKey);
+          if (stateJson) {
+            const bgState = JSON.parse(stateJson);
+            bgState.status = 'paused';
+            await StorageService.setItem(stateKey, JSON.stringify(bgState));
+          }
+          await stopBackgroundDownload();
+        } catch (bgError) {
+          console.warn('[Pause] Failed to pause background download:', bgError);
+        }
+      }
+
       downloadItem.status = DownloadStatus.PAUSED;
       downloadItem.updatedAt = new Date();
       this.downloads.set(downloadId, downloadItem);
@@ -1566,7 +1309,7 @@ export class DownloadService {
       await notificationService.startForegroundService(downloadId, downloadItem.title);
 
       // Check if this is an M3U8 download
-      const isM3U8 = this.isM3U8Url(downloadItem.videoUrl);
+      const isM3U8 = isM3U8Url(downloadItem.videoUrl);
       
       if (isM3U8) {
         // Try to load M3U8 state from memory or disk

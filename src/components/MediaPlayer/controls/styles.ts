@@ -284,4 +284,18 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+  cacheBadge: {
+    position: 'absolute',
+    top: 48,
+    right: 12,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  cacheBadgeText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '600',
+  },
 });

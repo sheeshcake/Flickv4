@@ -12,6 +12,7 @@ interface SubtitleOverlayProps {
   subtitleContent: string | null;
   currentTime: number;
   isVideoFullscreen: boolean;
+  isNetflixStyle?: boolean;
   delay?: number;
   style?: SubtitleStyle;
 }
@@ -61,6 +62,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   subtitleContent,
   currentTime,
   isVideoFullscreen,
+  isNetflixStyle = false,
   delay = 0,
   style = DEFAULT_SUBTITLE_STYLE,
 }) => {
@@ -86,14 +88,20 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     return `rgba(${r}, ${g}, ${b}, ${style.backgroundOpacity})`;
   }, [style.backgroundColor, style.backgroundOpacity]);
 
+  const bottomOffset = useMemo(() => {
+    if (isNetflixStyle) return 20;
+    if (isVideoFullscreen) return Platform.isTV ? 100 : -65;
+    return 20;
+  }, [isNetflixStyle, isVideoFullscreen]);
+
   const containerStyle: ViewStyle = useMemo(() => ({
     position: 'absolute',
     left: 0,
     right: 0,
     alignItems: 'center',
     paddingHorizontal: 20,
-    ...(style.position === 'top' ? { top: 50 } : { bottom: isVideoFullscreen ? (Platform.isTV ? 100 : -65) : 20 }),
-  }), [style.position, isVideoFullscreen]);
+    ...(style.position === 'top' ? { top: 50 } : { bottom: bottomOffset }),
+  }), [style.position, bottomOffset]);
 
   const textStyle: TextStyle = useMemo(() => ({
     color: style.fontColor,

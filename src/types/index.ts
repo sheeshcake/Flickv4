@@ -49,6 +49,24 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   position: 'bottom',
 };
 
+export type PlaybackCacheStorage = 'disk' | 'memory';
+
+export interface PlaybackCachePreferences {
+  enabled: boolean;
+  storage: PlaybackCacheStorage;
+  maxSizeMB: number;
+  readAheadSeconds: number;
+  preBufferSeconds: number;
+}
+
+export const DEFAULT_PLAYBACK_CACHE: PlaybackCachePreferences = {
+  enabled: false,
+  storage: 'disk',
+  maxSizeMB: 256,
+  readAheadSeconds: 120,
+  preBufferSeconds: 0,
+};
+
 export interface UserPreferences {
   likedMovies: number[];
   likedTVShows: number[];
@@ -60,6 +78,7 @@ export interface UserPreferences {
   autoSelectSubtitles: boolean;
   subtitleStyle: SubtitleStyle;
   netflixStyle: boolean;
+  playbackCache: PlaybackCachePreferences;
 }
 
 export interface WatchProgress {

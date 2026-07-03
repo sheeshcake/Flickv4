@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {UserPreferences, WatchProgress, ErrorType, AppError, DEFAULT_SUBTITLE_STYLE} from '../types';
+import {UserPreferences, WatchProgress, ErrorType, AppError, DEFAULT_SUBTITLE_STYLE, DEFAULT_PLAYBACK_CACHE} from '../types';
 
 /**
  * StorageService handles all local storage operations for user preferences,
@@ -26,6 +26,8 @@ export class StorageService {
     defaultSubtitleLanguage: undefined,
     autoSelectSubtitles: false,
     subtitleStyle: DEFAULT_SUBTITLE_STYLE,
+    netflixStyle: false,
+    playbackCache: { ...DEFAULT_PLAYBACK_CACHE },
   };
 
   /**
