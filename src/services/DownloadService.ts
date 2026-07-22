@@ -272,8 +272,12 @@ class DownloadServiceImpl {
   }
 
   snapshot(): DownloadJob[] {
+    // Order by `createdAt` (set once at enqueue, never mutated) so the
+    // Downloads list stays stable while jobs progress. `updatedAt` was
+    // bumped on every progress delta, which made rows jump around as
+    // bytes landed.
     return Array.from(this.jobs.values()).sort(
-      (a, b) => b.updatedAt - a.updatedAt,
+      (a, b) => b.createdAt - a.createdAt,
     );
   }
 

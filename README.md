@@ -3,116 +3,85 @@
   
   <h1>Flickv4</h1>
   <p><strong>Your Personal Streaming Sanctuary</strong></p>
-  <p>A premium, ad-free streaming experience that brings thousands of movies and TV shows to your fingertips—with offline downloads, intelligent subtitle controls, and a beautifully crafted Netflix-inspired interface.</p>
+  <p>Version <strong>2.0</strong> — a full overhaul. Rebuilt UI, Expo-native playback, background downloads, and first-class Android TV &amp; large-screen layouts.</p>
   
   <p>
-    <img src="https://img.shields.io/badge/React%20Native-0.82-61DAFB?style=flat-square&logo=react" alt="React Native" />
-    <img src="https://img.shields.io/badge/TypeScript-5.0-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
-    <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android-lightgrey?style=flat-square" alt="Platform" />
+    <img src="https://img.shields.io/badge/version-2.0-E50914?style=flat-square" alt="Version 2.0" />
+    <img src="https://img.shields.io/badge/Expo-57-000020?style=flat-square&logo=expo" alt="Expo" />
+    <img src="https://img.shields.io/badge/React%20Native-0.86-61DAFB?style=flat-square&logo=react" alt="React Native" />
+    <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
+    <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android%20%7C%20TV-lightgrey?style=flat-square" alt="Platform" />
     <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License" />
   </p>
 </div>
 
 ---
 
-## ⚠️ Important Notice: Web Scraper Migration
+## What's New in 2.0
 
-> **The web scraping engine is being moved to a private repository.**
+Flickv4 2.0 is a ground-up revamp—not a polish pass. The app was rebuilt on **Expo SDK 57**, **React Native 0.86**, and a modern UI stack so phone, tablet, and TV feel like one product.
 
-I'll be honest—I built a powerful web scraping strategy for this app, and one of my first mistakes was making it fully public. Moving forward, **all updates to the web scraper will no longer be available in this public repository**.
+### Overhaul highlights
 
-I know this might sound selfish, but here's why this decision is necessary:
+| Area | What changed |
+|------|----------------|
+| **UI system** | New dark-first interface on **gluestack-ui v5** + **NativeWind v5** / Tailwind CSS v4—shared components, consistent spacing, and responsive layouts |
+| **Player** | Custom player on **expo-video** with quality & aspect controls, subtitle tracks/overlay, episode drawer, PiP, and TV remote support |
+| **Downloads** | Background downloads (direct + HLS), pause/resume, progress notifications via Notifee, and a redesigned Downloads screen |
+| **TV & large screens** | Android TV / Leanback shell, side navigation, focusable UI, and Mac Catalyst layouts that share the TV grid |
+| **Architecture** | Cleaner `src/` layout—hooks, services, navigators, and providers instead of a monolithic App |
+| **Extras** | In-app update checks, Coming Soon handling, server settings, and smarter continue-watching |
 
-### 🔒 Why Private?
+### Still the same idea
 
-| Reason | Explanation |
-|--------|-------------|
-| **Longevity & Sustainability** | Public scrapers have a short lifespan. Content providers actively monitor GitHub for scraping code and quickly patch against well-known techniques. Keeping it private ensures the scraper remains functional for longer. |
-| **Preventing Abuse** | When scraping logic is public, it can be weaponized by bad actors—overwhelming source servers, getting IPs banned, or being used for malicious purposes that ruin it for everyone. |
-| **Protecting the Community** | Ironically, keeping it private protects legitimate users. Once a scraper goes viral, it gets blocked, and suddenly *nobody* can use it. |
-| **Avoiding Arms Race** | Every time scraping code is public, it accelerates the cat-and-mouse game. Private development allows for more stable, long-term solutions without constantly firefighting patches. |
-| **Personal Investment** | I've spent countless hours building and maintaining this. It's not about gatekeeping knowledge—it's about protecting something I've worked hard on so it can continue to serve its purpose. |
-
-**The rest of the app—UI, features, architecture—remains fully open source.** This is purely about keeping the scraper alive and functional.
-
-I appreciate your understanding. 🙏
+No ads. No subscriptions. Movies and TV via TMDB metadata, offline watching when you need it, and a Netflix-inspired dark UI—just rebuilt to last.
 
 ---
 
-## 🎬 Why Flickv4?
+## Features
 
-**No Ads. No Subscriptions, No Bullshits. Just Pure Entertainment.**
-
-In a world cluttered with subscription services and intrusive advertising, Flickv4 offers a refreshingly simple alternative. Built with React Native and powered by TMDB's comprehensive media database, this app delivers a premium streaming experience that respects your time and attention.
-
-### 🚀 What Makes It Special
-
-- **🎯 Zero Friction Streaming** — Instant playback with intelligent caching that adapts to your network conditions
-- **📱 True Offline Mode** — Download your favorites and watch anywhere, even on a plane at 30,000 feet
-- **🎨 Stunning Interface** — Meticulously crafted dark-first UI that rivals Netflix's polish
-- **🌍 Accessibility First** — Comprehensive subtitle support with customizable styling and positioning
-- **⚡ Lightning Fast** — Optimized image loading and data persistence for instant app launches
-- **🔄 Smart Resume** — Pick up exactly where you left off.
-
-### 💎 Premium Features
-
-| Feature | Description |
-|---------|-------------|
-| **Continue Watching** | Smart playback history that remembers your progress across every show and movie |
-| **Google Cast Ready** | Stream seamlessly to your TV with built-in Chromecast support |
-| **Advanced Subtitles** | Choose from multiple languages, adjust size, color, and position |
-| **Download Manager** | Pause, resume, and manage offline content with progress tracking |
-| **TMDB Integration** | Rich metadata including cast, crew, trailers, ratings, and recommendations |
-| **Responsive Design** | Gorgeous layouts that adapt perfectly to phones and tablets |
+- **Continue Watching** — Resume movies and episodes where you left off
+- **Offline downloads** — Queue, pause, resume; grouped TV episodes; live progress
+- **Subtitles** — Multi-language tracks with size, color, and position controls
+- **Search & browse** — TMDB-backed home rows, detail pages, cast, trailers, recommendations
+- **Adaptive layouts** — Phone, tablet, and TV shells from one codebase
+- **Picture-in-Picture** — Background-friendly playback where the platform supports it
 
 ---
 
-## 📸 See It In Action
+## Stack
 
-<div align="center">
-
-### Home Experience
-<img src="screenshots/screenshot-01.png" width="270" alt="Home screen with trending content" />
-
-*Personalized rows featuring trending content, your watchlist, and genre collections*
-
-### Rich Detail Pages
-<img src="screenshots/screenshot-02.png" width="270" alt="Movie detail screen" />
-
-*Complete metadata, cast info, trailers, and instant playback*
-
-### Smart Downloads
-<img src="screenshots/screenshot-03.png" width="270" alt="Downloads management" />
-
-*Background downloads with progress tracking and offline playback*
-
-### Powerful Search
-<img src="screenshots/screenshot-04.png" width="270" alt="Search functionality" />
-
-*Find anything instantly with real-time TMDB search*
-
-### Your Settings
-<img src="screenshots/screenshot-05.png" width="270" alt="Settings panel" />
-
-*Customize subtitles, downloads, and app preferences*
-
-</div>
+| Layer | Choice |
+|-------|--------|
+| Runtime | Expo ~57 · React Native 0.86 · React 19 |
+| Language | TypeScript |
+| UI | gluestack-ui v5 · NativeWind v5 · Tailwind CSS v4 |
+| Playback | expo-video |
+| Downloads | `@kesha-antonov/react-native-background-downloader` · Notifee |
+| Navigation | React Navigation 7 |
+| Data | TMDB · Wyzie (subtitles) |
 
 ---
 
-## 🤝 Contributing
+## Important Notice: Web Scraper
 
-If Flickv4 has enhanced your streaming experience, consider supporting continued development:
+> **The web scraping engine lives in a private repository.**
+
+Public scrapers get patched fast and abused just as fast. Keeping the resolver private helps the app stay usable longer. **The rest of Flickv4—UI, player, downloads, TV shell—remains open source under GPL-3.0.**
+
+---
+
+## Contributing
+
+If Flickv4 has been useful, you can support continued development:
 
 <a href="https://www.paypal.com/paypalme/wfrdee" target="_blank">
   <img src="https://www.buymeacoffee.com/assets/img/custom_images/purple_img.png" alt="Buy Me A Coffee" height="41" width="174">
 </a>
 
-Your support helps maintain the project, add new features, and keep the scraper infrastructure running.
-
 ---
 
-## 👨‍💻 Author
+## Author
 
 **Wendale Franz Dy**
 - GitHub: [@sheeshcake](https://github.com/sheeshcake)
@@ -120,42 +89,34 @@ Your support helps maintain the project, add new features, and keep the scraper 
 
 ---
 
-## 📄 License
+## License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)** — see the [LICENSE](LICENSE) file for details.
 
-### What This Means For You:
-
-| ✅ You Can | ⚠️ You Must | ❌ You Cannot |
-|-----------|-------------|---------------|
-| Use commercially | **Credit the original author** | Hold the author liable |
-| Modify the code | **Disclose your source code** | Sublicense |
-| Distribute copies | **State changes you made** | Use without attribution |
-| Use privately | **Use the same license (GPL-3.0)** | |
-
-**In short:** Fork it, modify it, build on it—but give credit where it's due and keep it open source.
+| You can | You must | You cannot |
+|---------|----------|------------|
+| Use, modify, and distribute | Credit the author · disclose source · keep GPL-3.0 | Hold the author liable · strip attribution |
 
 ---
 
-## ⚖️ Legal Disclaimer
+## Legal Disclaimer
 
-Any legal issues regarding the content on this application should be taken up with the actual file hosts and providers themselves as we are not affiliated with them. In case of copyright infringement, please directly contact the responsible parties or the streaming websites. The app is purely for educational and personal use. Flick(v4) does not host any content on the app, and has no control over what media is put up or taken down. Flick(v4) functions like any other search engine, such as Google. Flick(v4) does not host, upload or manage any videos, films or content. It simply crawls, aggregates and displayes links in a convenient, user-friendly interface. It merely scrapes 3rd-party websites that are publicly accessable via any regular web browser. It is the responsibility of user to avoid any actions that might violate the laws governing his/her locality. Use Flick(v4) at your own risk.
+Any legal issues regarding content should be taken up with the actual file hosts and providers. Flick(v4) does not host, upload, or manage videos—it aggregates publicly accessible links for educational and personal use, similar to a search engine. Users are responsible for complying with local law. Use at your own risk.
 
 ---
 
-## 🌟 Acknowledgments
+## Acknowledgments
 
-- **TMDB** for providing a comprehensive and free movie database API
-- **React Native Community** for excellent libraries and tooling
-- **Open Source Contributors** whose work makes projects like this possible
+- **TMDB** for the movie/TV database API
+- **React Native & Expo** communities for the tooling this rebuild stands on
+- Open source contributors whose libraries power playback, downloads, and UI
 
 ---
 
 <div align="center">
   
-**Built with ❤️ and React Native**
+**Built with care on Expo & React Native — Flickv4 2.0**
 
 ⭐ Star this repo if you find it useful!
 
 </div>
-

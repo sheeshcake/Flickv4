@@ -1,6 +1,6 @@
 {
   "name": "flick",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "main": "index.ts",
   "dependencies": {
     "@expo/html-elements": "^0.12.5",

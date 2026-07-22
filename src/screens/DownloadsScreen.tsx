@@ -76,13 +76,13 @@ const sizeLabel = (job: DownloadJob): string => {
 // Grouping: TV episodes collapse into one card per show; movies stand alone.
 // ---------------------------------------------------------------------------
 
-type MovieEntry = { kind: 'movie'; job: DownloadJob; updatedAt: number };
+type MovieEntry = { kind: 'movie'; job: DownloadJob; createdAt: number };
 type ShowEntry = {
   kind: 'show';
   showId: string;
   item: MediaItem;
   episodes: DownloadJob[];
-  updatedAt: number;
+  createdAt: number;
 };
 type Entry = MovieEntry | ShowEntry;
 
@@ -97,8 +97,11 @@ const groupJobs = (jobs: DownloadJob[]): Entry[] => {
       const existing = shows.get(key);
       if (existing) {
         existing.episodes.push(job);
-        if (job.updatedAt > existing.updatedAt) {
-          existing.updatedAt = job.updatedAt;
+        // Float a show up when a *new* episode is enqueued (createdAt is
+        // set once and never mutated). We deliberately ignore updatedAt
+        // here so progress ticks don't reshuffle the list.
+        if (job.createdAt > existing.createdAt) {
+          existing.createdAt = job.createdAt;
         }
       } else {
         shows.set(key, {
@@ -106,11 +109,11 @@ const groupJobs = (jobs: DownloadJob[]): Entry[] => {
           showId: key,
           item: job.item,
           episodes: [job],
-          updatedAt: job.updatedAt,
+          createdAt: job.createdAt,
         });
       }
     } else {
-      movies.push({ kind: 'movie', job, updatedAt: job.updatedAt });
+      movies.push({ kind: 'movie', job, createdAt: job.createdAt });
     }
   }
 
@@ -125,7 +128,9 @@ const groupJobs = (jobs: DownloadJob[]): Entry[] => {
   }
 
   const all: Entry[] = [...movies, ...shows.values()];
-  all.sort((a, b) => b.updatedAt - a.updatedAt);
+  // Newest download first. Stable across progress ticks because createdAt
+  // is stamped once at enqueue.
+  all.sort((a, b) => b.createdAt - a.createdAt);
   return all;
 };
 
