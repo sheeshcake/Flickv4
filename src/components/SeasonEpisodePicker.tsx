@@ -17,8 +17,10 @@ import { Icon } from '@/components/ui/icon';
 import { Center } from '@/components/ui/center';
 import { Spinner } from '@/components/ui/spinner';
 import { Pressable } from '@/components/ui/pressable';
+import { ScrollView } from '@/components/ui/scroll-view';
 import { Focusable } from '@/src/components/Focusable';
 import { TMDBService } from '@/src/services/TMDBService';
+import { getComingSoon } from '@/src/utils/comingSoon';
 import type { Episode, Season } from '@/src/types';
 
 export type EpisodeDownloadState = {
@@ -73,33 +75,46 @@ export const SeasonEpisodePicker = ({
 
         {open && (
           <Box className="absolute left-0 right-0 top-14 z-30 max-h-64 overflow-hidden rounded-md border border-border bg-card">
-            {seasons.map((season) => {
-              const active = season.season_number === selectedSeason;
-              return (
-                <Focusable
-                  key={season.id}
-                  onPress={() => {
-                    onSelectSeason(season.season_number);
-                    setOpen(false);
-                  }}
-                  className={`px-4 py-3 ${active ? 'bg-primary/20' : ''}`}
-                  focusedClassName="bg-primary"
-                >
-                  <Text
-                    className={
-                      active
-                        ? 'font-semibold text-foreground'
-                        : 'text-muted-foreground'
-                    }
+            {/*
+              Wrap the season list in a ScrollView so shows with many seasons
+              can be scrolled instead of clipping. `nestedScrollEnabled` is
+              required because the picker lives inside DetailScreen's parent
+              ScrollView (Android would otherwise refuse to route the touch
+              gesture to this inner scroller).
+            */}
+            <ScrollView
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+            >
+              {seasons.map((season) => {
+                const active = season.season_number === selectedSeason;
+                return (
+                  <Focusable
+                    key={season.id}
+                    onPress={() => {
+                      onSelectSeason(season.season_number);
+                      setOpen(false);
+                    }}
+                    className={`px-4 py-3 ${active ? 'bg-primary/20' : ''}`}
+                    focusedClassName="bg-primary"
                   >
-                    {season.name}
-                    {season.episode_count != null
-                      ? ` (${season.episode_count} episodes)`
-                      : ''}
-                  </Text>
-                </Focusable>
-              );
-            })}
+                    <Text
+                      className={
+                        active
+                          ? 'font-semibold text-foreground'
+                          : 'text-muted-foreground'
+                      }
+                    >
+                      {season.name}
+                      {season.episode_count != null
+                        ? ` (${season.episode_count} episodes)`
+                        : ''}
+                    </Text>
+                  </Focusable>
+                );
+              })}
+            </ScrollView>
           </Box>
         )}
       </Box>
@@ -113,50 +128,68 @@ export const SeasonEpisodePicker = ({
           {episodes.map((ep) => {
             const still = TMDBService.getImageUrl(ep.still_path, 'w300');
             const dl = downloadStatusFor?.(ep);
+            // Unreleased episodes get a non-interactive row + "Coming {date}"
+            // caption and no download button — there's no stream to fetch.
+            const coming = getComingSoon({ releaseDate: ep.air_date });
+
+            const info = (
+              <HStack space="md" className="items-center">
+                <Box className="h-20 w-32 overflow-hidden rounded-md bg-card">
+                  {still ? (
+                    <Image
+                      source={{ uri: still }}
+                      alt={ep.name}
+                      resizeMode="cover"
+                      className="h-full w-full"
+                    />
+                  ) : (
+                    <Center className="h-full w-full">
+                      <Icon as={Play} className="text-muted-foreground" />
+                    </Center>
+                  )}
+                </Box>
+                <VStack className="flex-1">
+                  <Heading size="sm" className="text-foreground" numberOfLines={1}>
+                    {ep.episode_number}. {ep.name}
+                  </Heading>
+                  {coming.comingSoon ? (
+                    <Text size="xs" className="text-muted-foreground">
+                      {coming.label}
+                    </Text>
+                  ) : (
+                    !!ep.runtime && (
+                      <Text size="xs" className="text-muted-foreground">
+                        {ep.runtime} min
+                      </Text>
+                    )
+                  )}
+                  {!!ep.overview && (
+                    <Text
+                      size="xs"
+                      className="mt-1 text-muted-foreground"
+                      numberOfLines={2}
+                    >
+                      {ep.overview}
+                    </Text>
+                  )}
+                </VStack>
+              </HStack>
+            );
+
             return (
               <HStack key={ep.id} space="md" className="items-center">
-                <Focusable
-                  onPress={() => onPlayEpisode(ep)}
-                  className="flex-1 rounded-lg"
-                  focusedClassName="scale-[1.02] border border-primary"
-                >
-                  <HStack space="md" className="items-center">
-                    <Box className="h-20 w-32 overflow-hidden rounded-md bg-card">
-                      {still ? (
-                        <Image
-                          source={{ uri: still }}
-                          alt={ep.name}
-                          resizeMode="cover"
-                          className="h-full w-full"
-                        />
-                      ) : (
-                        <Center className="h-full w-full">
-                          <Icon as={Play} className="text-muted-foreground" />
-                        </Center>
-                      )}
-                    </Box>
-                    <VStack className="flex-1">
-                      <Heading size="sm" className="text-foreground" numberOfLines={1}>
-                        {ep.episode_number}. {ep.name}
-                      </Heading>
-                      {!!ep.runtime && (
-                        <Text size="xs" className="text-muted-foreground">
-                          {ep.runtime} min
-                        </Text>
-                      )}
-                      {!!ep.overview && (
-                        <Text
-                          size="xs"
-                          className="mt-1 text-muted-foreground"
-                          numberOfLines={2}
-                        >
-                          {ep.overview}
-                        </Text>
-                      )}
-                    </VStack>
-                  </HStack>
-                </Focusable>
-                {onDownloadEpisode && (
+                {coming.comingSoon ? (
+                  <Box className="flex-1 rounded-lg opacity-70">{info}</Box>
+                ) : (
+                  <Focusable
+                    onPress={() => onPlayEpisode(ep)}
+                    className="flex-1 rounded-lg"
+                    focusedClassName="scale-[1.02] border border-primary"
+                  >
+                    {info}
+                  </Focusable>
+                )}
+                {onDownloadEpisode && !coming.comingSoon && (
                   <EpisodeDownloadButton
                     state={dl}
                     onPress={() => onDownloadEpisode(ep)}

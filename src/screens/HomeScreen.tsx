@@ -17,7 +17,8 @@ import { useHomeData } from '@/src/hooks/useHomeData';
 import { useMyList } from '@/src/hooks/useMyList';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
 import { useDeviceKind } from '@/src/hooks/useDeviceKind';
-import { getTitle, type MediaItem } from '@/src/types';
+import { getReleaseDate, getTitle, type MediaItem } from '@/src/types';
+import { getComingSoon } from '@/src/utils/comingSoon';
 import type { RootStackParamList } from '@/src/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -53,7 +54,20 @@ export const HomeScreen = () => {
         e.item.id === item.id &&
         (e.item.media_type ?? 'movie') === (item.media_type ?? 'movie'),
     );
-    play(item, entry?.position);
+    // For TV, hand the Player the latest watched season/episode so it resumes
+    // that exact episode. For movies, `entry.season`/`entry.episode` are
+    // undefined and Player treats it as a movie source.
+    navigation.navigate('Player', {
+      item,
+      title: getTitle(item),
+      season: entry?.season,
+      episode: entry?.episode,
+      subtitle:
+        entry?.season != null && entry?.episode != null
+          ? `S${entry.season} E${entry.episode}`
+          : undefined,
+      resumeFrom: entry?.position,
+    });
   };
 
   if (loading) {
@@ -97,6 +111,14 @@ export const HomeScreen = () => {
     return `S${entry.season} E${entry.episode}`;
   };
 
+  // Trending / Popular endpoints only return `MediaItem` (no TMDB `status`)
+  // so we detect "coming soon" purely from the release/first-air date here.
+  // The Detail screen re-checks with `status` once details are fetched.
+  const getHeroComingSoonLabel = (item: MediaItem): string | undefined => {
+    const c = getComingSoon({ releaseDate: getReleaseDate(item) });
+    return c.comingSoon ? c.label : undefined;
+  };
+
   return (
     <Box className="flex-1 bg-background">
       <ScrollView
@@ -119,6 +141,7 @@ export const HomeScreen = () => {
             onPlay={(item) => play(item)}
             onToggleList={toggle}
             onPress={openDetail}
+            getComingSoonLabel={getHeroComingSoonLabel}
           />
           <Box
             className="absolute left-0 right-0"

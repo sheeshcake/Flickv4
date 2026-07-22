@@ -20,6 +20,12 @@ interface HeroCarouselProps {
   onPlay: (item: MediaItem) => void;
   onToggleList: (item: MediaItem) => void;
   onPress: (item: MediaItem) => void;
+  /**
+   * When set, returning a non-empty string for an item switches its hero
+   * Play button to a "Coming {date}" stand-in. Home passes this in based
+   * on `getReleaseDate(item)`.
+   */
+  getComingSoonLabel?: (item: MediaItem) => string | undefined;
 }
 
 const AUTO_ADVANCE_MS = 6000;
@@ -33,6 +39,7 @@ export const HeroCarousel = ({
   onPlay,
   onToggleList,
   onPress,
+  getComingSoonLabel,
 }: HeroCarouselProps) => {
   const listRef = useRef<FlatList<MediaItem>>(null);
   const [index, setIndex] = useState(0);
@@ -100,6 +107,7 @@ export const HeroCarousel = ({
               onPlay={onPlay}
               onToggleList={onToggleList}
               onPress={onPress}
+              comingSoonLabel={getComingSoonLabel?.(item)}
             />
           </Box>
         )}

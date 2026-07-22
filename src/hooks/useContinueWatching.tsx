@@ -21,14 +21,21 @@ export interface ContinueWatchingEntry {
   updatedAt: number;
 }
 
+/**
+ * Dedupe key for Continue Watching.
+ *
+ * Movies get a per-title key. TV shows deliberately IGNORE season/episode so
+ * only ONE entry per show is ever stored — always the most-recently-watched
+ * episode. This keeps the row clean (one card per show) and lets resume land
+ * on the latest episode you actually watched.
+ */
 const keyFor = (
   item: Pick<MediaItem, 'id' | 'media_type'>,
-  season?: number,
-  episode?: number,
+  _season?: number,
+  _episode?: number,
 ) => {
-  const base = `${item.media_type ?? 'movie'}-${item.id}`;
-  if (season != null && episode != null) return `${base}-s${season}e${episode}`;
-  return base;
+  const media = item.media_type ?? 'movie';
+  return media === 'tv' ? `tv-${item.id}` : `movie-${item.id}`;
 };
 
 interface ContinueWatchingContextValue {
@@ -68,9 +75,30 @@ export const ContinueWatchingProvider = ({
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((raw) => {
-        if (raw) {
-          const parsed = JSON.parse(raw) as ContinueWatchingEntry[];
-          setEntries(parsed.sort((a, b) => b.updatedAt - a.updatedAt));
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as ContinueWatchingEntry[];
+        // Collapse any pre-existing per-episode duplicates from older schemas
+        // where multiple `tv-<id>-sXeY` rows existed for the same show. Keep
+        // the newest `updatedAt` for each dedupe key.
+        const bucket = new Map<string, ContinueWatchingEntry>();
+        for (const entry of parsed) {
+          const k = keyFor(entry.item, entry.season, entry.episode);
+          const prev = bucket.get(k);
+          if (!prev || entry.updatedAt > prev.updatedAt) {
+            bucket.set(k, entry);
+          }
+        }
+        const collapsed = Array.from(bucket.values()).sort(
+          (a, b) => b.updatedAt - a.updatedAt,
+        );
+        setEntries(collapsed);
+        // Persist the collapsed list so subsequent reads are cheap and we
+        // don't repeat the migration on every launch.
+        if (collapsed.length !== parsed.length) {
+          AsyncStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify(collapsed),
+          ).catch(() => {});
         }
       })
       .catch(() => {})

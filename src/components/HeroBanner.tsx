@@ -1,6 +1,6 @@
 import { ImageBackground } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Play, Plus, Check } from 'lucide-react-native';
+import { CalendarClock, Play, Plus, Check } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { VStack } from '@/components/ui/vstack';
 import { HStack } from '@/components/ui/hstack';
@@ -22,6 +22,12 @@ interface HeroBannerProps {
   onPlay: (item: MediaItem) => void;
   onToggleList: (item: MediaItem) => void;
   onPress: (item: MediaItem) => void;
+  /**
+   * When set, replaces the Play focusable with a non-interactive
+   * "Coming {date}" stand-in. Used for unreleased titles that TMDB
+   * still surfaces in Trending / Popular rows.
+   */
+  comingSoonLabel?: string;
 }
 
 export const HeroBanner = ({
@@ -32,6 +38,7 @@ export const HeroBanner = ({
   onPlay,
   onToggleList,
   onPress,
+  comingSoonLabel,
 }: HeroBannerProps) => {
   const backdrop = TMDBService.getImageUrl(
     item.backdrop_path ?? item.poster_path,
@@ -79,17 +86,33 @@ export const HeroBanner = ({
             {item.overview}
           </Text>
           <HStack space="md" className="mt-2 items-center">
-            <Focusable
-              onPress={() => onPlay(item)}
-              hasTVPreferredFocus
-              className="w-50 items-center justify-center rounded-md bg-foreground px-6 py-3"
-              focusedClassName="scale-[1.05] border-2 border-primary"
-            >
-              <HStack space="sm" className="items-center justify-center">
-                <Icon as={Play} className="text-black" />
-                <Text className="font-semibold text-black">Play</Text>
-              </HStack>
-            </Focusable>
+            {comingSoonLabel ? (
+              // Non-interactive stand-in: nothing to play yet. Keeps the row
+              // visually balanced with the Play button it replaces.
+              <Box className="w-50 items-center justify-center rounded-md bg-secondary/60 px-6 py-3">
+                <HStack space="sm" className="items-center justify-center">
+                  <Icon
+                    as={CalendarClock}
+                    className="text-secondary-foreground"
+                  />
+                  <Text className="font-semibold text-secondary-foreground">
+                    {comingSoonLabel}
+                  </Text>
+                </HStack>
+              </Box>
+            ) : (
+              <Focusable
+                onPress={() => onPlay(item)}
+                hasTVPreferredFocus
+                className="w-50 items-center justify-center rounded-md bg-foreground px-6 py-3"
+                focusedClassName="scale-[1.05] border-2 border-primary"
+              >
+                <HStack space="sm" className="items-center justify-center">
+                  <Icon as={Play} className="text-black" />
+                  <Text className="font-semibold text-black">Play</Text>
+                </HStack>
+              </Focusable>
+            )}
             <Focusable
               onPress={() => onToggleList(item)}
               className="w-15 items-center justify-center rounded-md bg-secondary px-6 py-3"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StatusBar, StyleSheet } from 'react-native';
 import { ArrowLeft, VideoOff } from 'lucide-react-native';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -9,6 +9,12 @@ import { Center } from '@/components/ui/center';
 import { Icon } from '@/components/ui/icon';
 import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
+import {
+  Toast,
+  ToastDescription,
+  ToastTitle,
+  useToast,
+} from '@/components/ui/toast';
 import { PlayerCore } from '@/src/components/player/PlayerCore';
 import {
   WebViewScraper,
@@ -47,7 +53,8 @@ export const PlayerScreen = ({
   useKeepAwake('flick-player');
 
   const { activeServer } = useServers();
-  const { getLocalSource } = useDownloads();
+  const { getLocalSource, getJobFor } = useDownloads();
+  const toast = useToast();
   const type: 'movie' | 'tv' = item.media_type === 'tv' ? 'tv' : 'movie';
 
   // Episode-switching state: lifted here so the drawer can drive re-scraping
@@ -90,15 +97,50 @@ export const PlayerScreen = ({
     setSource(s);
   }, []);
 
+  // Resolve a downloaded local copy for whatever we're currently trying to
+  // play. Priority: explicit `localSourceId` from the caller (e.g. the
+  // Downloads screen), otherwise best-effort lookup by the current item +
+  // season/episode. This lets Home "Continue Watching", Detail Play, and
+  // Downloads all seamlessly reuse a completed download.
+  const localForCurrent = useMemo<VideoSource | null>(() => {
+    const id = localSourceId ?? getJobFor(item, season, episode)?.id;
+    if (!id) return null;
+    return getLocalSource(id) ?? null;
+  }, [localSourceId, getJobFor, getLocalSource, item, season, episode]);
+
+  // Track which episode key we've already toasted about, so switching
+  // between episodes shows the "data saving" toast at most once each.
+  const toastedKeyRef = useRef<string | null>(null);
+
   // Playing back a downloaded copy: short-circuit the scraper entirely and
-  // feed the local file:// URI straight into expo-video. When no such source
-  // exists (e.g. the file was deleted while the screen was pushed), we let
-  // the WebViewScraper fall back to the normal flow.
+  // feed the local URI straight into expo-video. We also surface a lightweight
+  // "playing offline copy" toast the first time this happens per episode so
+  // the user knows we're saving data.
+  //
+  // The `resolvedRef` guard matters: if the user was ALREADY streaming and a
+  // background download for this same episode finished mid-playback, we
+  // don't want to restart or spam a toast — we just leave the stream alone.
   useEffect(() => {
-    if (!localSourceId) return;
-    const local = getLocalSource(localSourceId);
-    if (local) finish(local);
-  }, [localSourceId, getLocalSource, finish]);
+    if (!localForCurrent) return;
+    if (resolvedRef.current) return;
+    finish(localForCurrent);
+
+    const key = `${item.id}-${season ?? 'm'}-${episode ?? 'm'}`;
+    if (toastedKeyRef.current === key) return;
+    toastedKeyRef.current = key;
+    toast.show({
+      placement: 'top',
+      duration: 3500,
+      render: ({ id }) => (
+        <Toast nativeID={id} action="info" variant="solid">
+          <ToastTitle>Playing downloaded copy</ToastTitle>
+          <ToastDescription>
+            Using your offline download to save data.
+          </ToastDescription>
+        </Toast>
+      ),
+    });
+  }, [localForCurrent, finish, item.id, season, episode, toast]);
 
   const onExtracted = useCallback(
     ({ videoUrl: url }: ExtractedStream) => {
@@ -197,7 +239,7 @@ export const PlayerScreen = ({
   return (
     <Box className="flex-1 bg-black">
       <StatusBar hidden />
-      {!localSourceId && (
+      {!localForCurrent && (
         <WebViewScraper
           baseUrl={activeServer.url}
           tmdbId={item.id}

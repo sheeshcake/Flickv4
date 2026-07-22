@@ -12,15 +12,16 @@ import { DisclaimerScreen } from '@/src/screens/DisclaimerScreen';
 import { CreditsScreen } from '@/src/screens/CreditsScreen';
 import { TabNavigator } from './TabNavigator';
 import { TVNavigator } from './TVNavigator';
-import { isTV } from '@/src/utils/tv';
+import { isTVLayout } from '@/src/utils/tv';
 import { isTablet } from '@/src/utils/responsive';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 // Phones are locked to portrait everywhere; only the Player screen may rotate
-// to landscape. Tablets and TVs are free to rotate (`default`).
-const flexibleDevice = isTV || isTablet();
+// to landscape. Tablets, TVs, and Mac Catalyst windows are free to rotate
+// (`default`) since they can be resized/oriented arbitrarily.
+const flexibleDevice = isTVLayout || isTablet();
 const appOrientation = flexibleDevice ? 'default' : 'portrait';
 // The player is always landscape, on every form factor.
 const playerOrientation = 'landscape';
@@ -55,7 +56,7 @@ export const AppNavigator = () => {
         />
         <Stack.Screen
           name="Main"
-          component={isTV ? TVNavigator : TabNavigator}
+          component={isTVLayout ? TVNavigator : TabNavigator}
         />
         <Stack.Screen
           name="Detail"

@@ -46,7 +46,8 @@
       "@kesha-antonov/react-native-background-downloader",
       "expo-screen-orientation",
       "./plugins/withLeanbackTv",
-      "./plugins/withNotifeeAndroidMaven"
+      "./plugins/withNotifeeAndroidMaven",
+      "./plugins/withMacCatalyst"
     ]
   }
 }

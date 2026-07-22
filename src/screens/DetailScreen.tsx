@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import {
   AlertCircle,
   ArrowLeft,
+  CalendarClock,
   Check,
   Download,
   Play,
@@ -33,6 +34,7 @@ import { DownloadService } from '@/src/services/DownloadService';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
 import { originOf } from '@/src/utils/streamUrl';
 import { ensureDownloadPermissions } from '@/src/utils/downloadPermissions';
+import { getComingSoon } from '@/src/utils/comingSoon';
 import type { EpisodeDownloadState } from '@/src/components/SeasonEpisodePicker';
 import { Box } from '@/components/ui/box';
 import { Center } from '@/components/ui/center';
@@ -134,6 +136,21 @@ export const DetailScreen = ({
     const d = getReleaseDate(item);
     return d ? new Date(d).getFullYear() : '';
   })();
+
+  /**
+   * Detect whether this title is still upcoming (future release date or a
+   * TMDB status like "Planned" / "In Production" / etc). When true, the main
+   * Play button is replaced with a disabled "Coming {date}" state and the
+   * download affordance is hidden — there's nothing playable yet.
+   */
+  const coming = useMemo(
+    () =>
+      getComingSoon({
+        releaseDate: getReleaseDate(item),
+        status: (details as { status?: string } | null)?.status,
+      }),
+    [item, details],
+  );
 
   const typeLabel = useMemo(() => {
     if (movie) return 'Movie';
@@ -542,26 +559,38 @@ export const DetailScreen = ({
             </Text>
           </HStack> */}
 
-          <Button
-            size="lg"
-            className="w-full bg-foreground"
-            onPress={() =>
-              play(
-                !movie && selectedSeason != null && firstEpisode
-                  ? {
-                      season: selectedSeason,
-                      episode: firstEpisode.episode_number,
-                      label: `${getTitle(item)} — ${firstEpisode.name}`,
-                    }
-                  : undefined,
-              )
-            }
-          >
-            <ButtonIcon as={Play} className="text-background" />
-            <ButtonText className="text-background">Play</ButtonText>
-          </Button>
+          {coming.comingSoon ? (
+            <Button size="lg" className="w-full bg-secondary" isDisabled>
+              <ButtonIcon
+                as={CalendarClock}
+                className="text-secondary-foreground"
+              />
+              <ButtonText className="text-secondary-foreground">
+                {coming.label}
+              </ButtonText>
+            </Button>
+          ) : (
+            <Button
+              size="lg"
+              className="w-full bg-foreground"
+              onPress={() =>
+                play(
+                  !movie && selectedSeason != null && firstEpisode
+                    ? {
+                        season: selectedSeason,
+                        episode: firstEpisode.episode_number,
+                        label: `${getTitle(item)} — ${firstEpisode.name}`,
+                      }
+                    : undefined,
+                )
+              }
+            >
+              <ButtonIcon as={Play} className="text-background" />
+              <ButtonText className="text-background">Play</ButtonText>
+            </Button>
+          )}
 
-          {movie && (
+          {movie && !coming.comingSoon && (
             <MovieDownloadButton
               status={movieJob?.status}
               progress={moviePct}
