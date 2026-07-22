@@ -1,7 +1,5 @@
 <div align="center">
-  <img src="android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png" alt="Flickv4 Logo" width="150" />
-  
-  <h1>Flickv4</h1>
+  <img src="https://github.com/sheeshcake/Flickv4/blob/v2.x.x/assets/images/logo-full.png" alt="Flickv4 Logo" width="150" />
   <p><strong>Your Personal Streaming Sanctuary</strong></p>
   <p>Version <strong>2.0</strong> — a full overhaul. Rebuilt UI, Expo-native playback, background downloads, and first-class Android TV &amp; large-screen layouts.</p>
   
