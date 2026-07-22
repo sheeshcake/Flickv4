@@ -1,25 +1,52 @@
 {
   "expo": {
-    "name": "flick-tmp",
-    "slug": "flick-tmp",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "name": "Flick",
+    "slug": "flick",
+    "version": "2.0.0",
+    "orientation": "default",
+    "icon": "./assets/applogo/ic_launcher.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#000000",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "icon": "./assets/applogo/ic_launcher.png",
+      "bundleIdentifier": "com.wfrdee.flick"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/applogo/ic_launcher_foreground.png",
+        "backgroundImage": "./assets/applogo/ic_launcher_background.png",
+        "monochromeImage": "./assets/applogo/ic_launcher_monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "cleartextTrafficPermitted": true,
+      "permissions": [
+        "android.permission.INTERNET"
+      ],
+      "predictiveBackGestureEnabled": true,
+      "package": "com.flickv4"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true,
+          "supportsPictureInPicture": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#E50914"
+        }
+      ],
+      "@kesha-antonov/react-native-background-downloader",
+      "expo-screen-orientation",
+      "./plugins/withLeanbackTv",
+      "./plugins/withNotifeeAndroidMaven"
+    ]
   }
 }
