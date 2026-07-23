@@ -12,9 +12,9 @@ interface SubtitleOverlayProps {
    *
    * NOTE: On iOS, AVKit's PiP window shows only the native video surface, so
    * this React Native overlay cannot render inside the PiP mini window. On
-   * Android, expo-video enters activity-level PiP and this overlay is drawn
-   * scaled down inside the mini window (readability depends on the user's
-   * fontSize setting).
+   * Android, react-native-video enters activity-level PiP and this overlay
+   * is drawn scaled down inside the mini window (readability depends on the
+   * user's fontSize setting).
    */
   pipActive?: boolean;
 }

@@ -1,10 +1,11 @@
 /**
  * HLS master-playlist parsing utilities.
  *
- * `expo-video` exposes `videoTrack` as read-only, so we drive the "select
- * a resolution" feature by parsing the master `.m3u8`, listing its variants,
- * and swapping `VideoSource.uri` to a variant's child playlist via
- * `player.replaceAsync(...)`.
+ * react-native-video exposes `selectedVideoTrack` for ABR-managed
+ * resolution hints on Android only, so — for cross-platform parity — we
+ * still drive the "select a resolution" feature ourselves by parsing the
+ * master `.m3u8`, listing its variants, and swapping the source to a
+ * variant's child playlist via `VideoRef.setSource(...)`.
  *
  * A master playlist looks like:
  *

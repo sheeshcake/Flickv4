@@ -16,13 +16,15 @@ const STORAGE_KEY = 'flick.subtitleSettings';
  * parsed, and drawn by our own `SubtitleOverlay` — this works the same way
  * regardless of what a given scraped stream actually contains.
  *
- * `'native'`: subtitles are handled entirely by `expo-video` via
- * `player.subtitleTrack` / `player.availableSubtitleTracks` (see the
- * `SubtitleTrack` type). This only shows anything when the stream itself
- * embeds subtitle tracks (for example an HLS rendition with
- * `TYPE=SUBTITLES`) — most scraped movie/TV embeds don't include any, so
- * this is best thought of as "prefer the device/stream's own captions when
- * present" rather than a guaranteed alternative.
+ * `'native'`: the same Wyzie-searched subtitle tracks are handed to
+ * `react-native-video` as a sidecar `source.textTracks` entry (Wyzie serves
+ * `.srt` directly, so no extra parsing is needed) and rendered by the OS's
+ * own caption renderer via `selectedTextTrack`, instead of our
+ * `SubtitleOverlay`. This works on Android for any stream, but NOT on iOS
+ * when the source is HLS (AVFoundation only supports sidecar text tracks
+ * for individual files, not `.m3u8` playlists) — since scraped streams here
+ * are virtually always HLS, iOS transparently falls back to the
+ * `'component'` rendering path in that case (see `PlayerCore.tsx`).
  */
 export type SubtitleRenderMode = 'component' | 'native';
 

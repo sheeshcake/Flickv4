@@ -7,7 +7,7 @@ import {
   setConfig,
   type DownloadTask,
 } from '@kesha-antonov/react-native-background-downloader';
-import type { VideoSource } from 'expo-video';
+import type { ReactVideoSource } from 'react-native-video';
 import type { MediaItem } from '@/src/types';
 import { originOf } from '@/src/utils/streamUrl';
 import {
@@ -300,12 +300,12 @@ class DownloadServiceImpl {
     );
   }
 
-  getLocalSource(id: string): VideoSource | null {
+  getLocalSource(id: string): ReactVideoSource | null {
     const job = this.jobs.get(id);
     if (!job || job.status !== 'completed' || !job.localUri) return null;
     return {
       uri: job.localUri,
-      contentType: job.kind === 'hls' ? 'hls' : 'auto',
+      type: job.kind === 'hls' ? 'm3u8' : undefined,
     };
   }
 

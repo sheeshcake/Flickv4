@@ -11,6 +11,15 @@ interface UseSubtitlesArgs {
   season?: number;
   episode?: number;
   enabled?: boolean;
+  /**
+   * Whether to download + parse the selected track's `.srt`/`.vtt` text into
+   * `cues` for `SubtitleOverlay` to render. Defaults to `true`. Callers that
+   * hand the track's `url` straight to a native sidecar text track instead
+   * (react-native-video's `source.textTracks`) can set this to `false` to
+   * skip the extra network fetch — the track *search* above still needs to
+   * run either way, since it's also how the sidecar list gets built.
+   */
+  loadCues?: boolean;
   /** ISO 639-1 code; auto-selects a matching track when tracks load. */
   defaultLanguage?: string;
 }
@@ -22,6 +31,7 @@ export const useSubtitles = ({
   season,
   episode,
   enabled = true,
+  loadCues = true,
   defaultLanguage,
 }: UseSubtitlesArgs) => {
   const [tracks, setTracks] = useState<WyzieSubtitle[]>([]);
@@ -91,7 +101,7 @@ export const useSubtitles = ({
   }, [tracks, defaultLanguage, selectedId]);
 
   useEffect(() => {
-    if (!selectedId) {
+    if (!loadCues || !selectedId) {
       setCues([]);
       return;
     }
@@ -115,7 +125,7 @@ export const useSubtitles = ({
     return () => {
       cancelled = true;
     };
-  }, [selectedId, tracks]);
+  }, [loadCues, selectedId, tracks]);
 
   const selectTrack = useCallback((id: string | null) => {
     // Any manual selection (including explicit "Off") disables auto-select.
