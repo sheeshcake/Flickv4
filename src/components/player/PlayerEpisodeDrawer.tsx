@@ -14,6 +14,7 @@ import { Focusable } from '@/src/components/Focusable';
 import { useSeasonEpisodes } from '@/src/hooks/useDetailData';
 import { TMDBService } from '@/src/services/TMDBService';
 import type { Episode, MediaItem, Season, TVShowDetails } from '@/src/types';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface PlayerEpisodeDrawerProps {
   visible: boolean;
@@ -94,7 +95,7 @@ export const PlayerEpisodeDrawer = ({
           <Focusable
             onPress={onClose}
             className="rounded-full p-1"
-            focusedClassName="bg-primary"
+            focusedClassName={`bg-primary ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon as={X} className="text-foreground" />
           </Focusable>
@@ -119,7 +120,7 @@ export const PlayerEpisodeDrawer = ({
                     key={season.id}
                     onPress={() => setSelectedSeason(season.season_number)}
                     className={`rounded-full px-3 py-1.5 ${active ? 'bg-primary' : 'bg-secondary'}`}
-                    focusedClassName="border border-primary"
+                    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
                   >
                     <Text
                       size="xs"
@@ -156,7 +157,7 @@ export const PlayerEpisodeDrawer = ({
                     key={ep.id}
                     onPress={() => onSelect(ep.season_number, ep)}
                     className={`rounded-lg ${active ? 'border border-primary' : ''}`}
-                    focusedClassName="scale-[1.02] border border-primary"
+                    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
                   >
                     <HStack space="sm" className="items-center">
                       <Box className="h-16 w-24 overflow-hidden rounded-md bg-background">

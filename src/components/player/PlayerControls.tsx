@@ -21,6 +21,7 @@ import { Icon } from '@/components/ui/icon';
 import { Center } from '@/components/ui/center';
 import { Focusable } from '@/src/components/Focusable';
 import { ProgressBar } from '@/src/components/player/ProgressBar';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import { formatTime } from '@/src/components/player/useTVRemote';
 
 interface PlayerControlsProps {
@@ -64,7 +65,7 @@ const ControlButton = ({
     onPress={onPress}
     hasTVPreferredFocus={hasTVPreferredFocus}
     className="rounded-full bg-background/40 p-4"
-    focusedClassName="scale-[1.1] bg-primary"
+    focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
   >
     <Icon as={icon} size={size} className="text-foreground" />
   </Focusable>
@@ -105,7 +106,7 @@ export const PlayerControls = ({
         <Focusable
           onPress={onBack}
           className="rounded-full bg-background/40 p-2"
-          focusedClassName="scale-[1.1] bg-primary"
+          focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
         >
           <Icon as={ArrowLeft} size="lg" className="text-foreground" />
         </Focusable>
@@ -123,7 +124,7 @@ export const PlayerControls = ({
           <Focusable
             onPress={onOpenEpisodes}
             className="rounded-full bg-background/40 p-2"
-            focusedClassName="scale-[1.1] bg-primary"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon as={ListVideo} size="lg" className="text-foreground" />
           </Focusable>
@@ -132,7 +133,7 @@ export const PlayerControls = ({
           <Focusable
             onPress={onOpenQuality}
             className="rounded-full bg-background/40 p-2"
-            focusedClassName="scale-[1.1] bg-primary"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon as={Settings2} size="lg" className="text-foreground" />
           </Focusable>
@@ -141,7 +142,7 @@ export const PlayerControls = ({
           <Focusable
             onPress={onOpenAspect}
             className="rounded-full bg-background/40 p-2"
-            focusedClassName="scale-[1.1] bg-primary"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon as={Ratio} size="lg" className="text-foreground" />
           </Focusable>
@@ -150,7 +151,7 @@ export const PlayerControls = ({
           <Focusable
             onPress={onEnterPip}
             className="rounded-full bg-background/40 p-2"
-            focusedClassName="scale-[1.1] bg-primary"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon
               as={PictureInPicture2}
@@ -163,7 +164,7 @@ export const PlayerControls = ({
           <Focusable
             onPress={onOpenSubtitles}
             className={`rounded-full p-2 ${subtitlesActive ? 'bg-primary' : 'bg-background/40'}`}
-            focusedClassName="scale-[1.1] bg-primary"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon as={Captions} size="lg" className="text-foreground" />
           </Focusable>

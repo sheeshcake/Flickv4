@@ -21,7 +21,9 @@
       },
       "cleartextTrafficPermitted": true,
       "permissions": [
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE"
       ],
       "predictiveBackGestureEnabled": true,
       "package": "com.flickv4"

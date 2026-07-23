@@ -51,7 +51,6 @@ import {
   ButtonIcon,
   ButtonSpinner,
 } from '@/components/ui/button';
-import { Pressable } from '@/components/ui/pressable';
 import { TrailerWebView } from '@/src/components/TrailerWebView';
 import { ContentCard } from '@/src/components/ContentCard';
 import { getGridColumns } from '@/src/utils/responsive';
@@ -61,7 +60,8 @@ import { useDetailData, useSeasonEpisodes } from '@/src/hooks/useDetailData';
 import { useMyList } from '@/src/hooks/useMyList';
 import { useDeviceKind } from '@/src/hooks/useDeviceKind';
 import { TMDBService } from '@/src/services/TMDBService';
-import { isTV } from '@/src/utils/tv';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
+import { DetailScreenTV } from '@/src/components/tv/DetailScreenTV';
 import {
   getReleaseDate,
   getTitle,
@@ -73,7 +73,7 @@ import {
 } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 
-type Tab = 'episodes' | 'trailers' | 'similar';
+export type Tab = 'episodes' | 'trailers' | 'similar';
 
 export const DetailScreen = ({
   route,
@@ -104,7 +104,12 @@ export const DetailScreen = ({
   const { enqueue, getJobFor, resume, remove, pause } = useDownloads();
 
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
-  const [tab, setTab] = useState<Tab>(movie ? 'trailers' : 'episodes');
+  // TV has no "Trailers & More" tab (see DetailScreenTV), so a TV movie
+  // defaults straight to "More Like This" instead of a tab that doesn't
+  // exist there.
+  const [tab, setTab] = useState<Tab>(
+    movie ? (deviceKind === 'tv' ? 'similar' : 'trailers') : 'episodes',
+  );
   const [muted, setMuted] = useState(true);
   const [liked, setLiked] = useState(false);
   const [qualitySheet, setQualitySheet] = useState<{
@@ -459,6 +464,55 @@ export const DetailScreen = ({
     [tab, loadMoreSimilar],
   );
 
+  if (deviceKind === 'tv') {
+    return (
+      <DetailScreenTV
+        item={item}
+        movie={movie}
+        coming={coming}
+        typeLabel={typeLabel}
+        starring={starring}
+        creators={creators}
+        cast={cast}
+        year={year}
+        certification={certification}
+        logoUrl={logoUrl}
+        backdrop={backdrop}
+        onBack={() => navigation.goBack()}
+        onPlay={play}
+        onShare={onShare}
+        isInList={isInList}
+        onToggleList={toggle}
+        movieJob={movieJob}
+        moviePct={moviePct}
+        resolvingDownload={resolvingDownload}
+        onDownloadMovie={onDownloadMovie}
+        onPauseMovie={onPauseMovie}
+        onResumeMovie={onResumeMovie}
+        onPlayLocalMovie={onPlayLocalMovie}
+        onDeleteLocalMovie={onDeleteLocalMovie}
+        tab={tab}
+        setTab={setTab}
+        loading={loading}
+        error={error}
+        seasons={seasons}
+        selectedSeason={selectedSeason}
+        onSelectSeason={setSelectedSeason}
+        episodes={episodes}
+        loadingEpisodes={loadingEpisodes}
+        firstEpisode={firstEpisode}
+        onDownloadEpisode={onDownloadEpisode}
+        episodeDownloadStatus={episodeDownloadStatus}
+        similarItems={similarItems}
+        similarLoadingMore={similarLoadingMore}
+        onLoadMoreSimilar={loadMoreSimilar}
+        onPressSimilar={(picked) => navigation.push('Detail', { item: picked })}
+        qualitySheet={qualitySheet}
+        onCloseQualitySheet={() => setQualitySheet(null)}
+      />
+    );
+  }
+
   return (
     <Box className="flex-1 bg-background">
       <ScrollView
@@ -492,25 +546,25 @@ export const DetailScreen = ({
             }}
             pointerEvents="none"
           />
-          <Pressable
+          <Focusable
             onPress={() => navigation.goBack()}
-            focusable
             className="absolute left-4 rounded-full bg-background/60 p-2"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
             style={{ top: insets.top + 8 }}
           >
             <Icon as={ArrowLeft} className="text-foreground" />
-          </Pressable>
+          </Focusable>
           {showTrailer && (
-            <Pressable
+            <Focusable
               onPress={() => setMuted((m) => !m)}
-              focusable
               className="absolute bottom-4 right-4 rounded-full bg-background/60 p-2"
+              focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
             >
               <Icon
                 as={muted ? VolumeX : Volume2}
                 className="text-foreground"
               />
-            </Pressable>
+            </Focusable>
           )}
         </Box>
 
@@ -762,7 +816,7 @@ const Badge = ({ label }: { label: string }) => (
  * behind the button contents so the visual progress reads at a glance
  * without needing a separate progress bar row.
  */
-const MovieDownloadButton = ({
+export const MovieDownloadButton = ({
   status,
   progress,
   resolving,
@@ -843,9 +897,17 @@ const MovieDownloadButton = ({
   // downloading / paused — show fill + %
   const isDownloading = status === 'downloading';
   return (
+    // `px-0`: the `lg` size variant bakes in `px-8` on the Button's own
+    // root. React Native positions absolute children relative to the
+    // PADDING edge (not the border edge), so a percentage-width fill living
+    // directly inside that padded root would only ever span the button's
+    // inner content box (minus 64px) — making e.g. "45%" visibly cover much
+    // less than 45% of the button. Zeroing the root's padding and moving it
+    // onto the inner content row instead lets the fill's percentage be
+    // measured against the button's true full width.
     <Button
       size="lg"
-      className="w-full overflow-hidden bg-secondary"
+      className="w-full overflow-hidden bg-secondary px-0"
       onPress={isDownloading ? onPause : onResume}
       onLongPress={onDelete}
     >
@@ -855,21 +917,23 @@ const MovieDownloadButton = ({
         style={{ width: `${Math.max(2, Math.min(100, progress))}%` }}
         pointerEvents="none"
       />
-      {isDownloading ? (
-        <ButtonSpinner color="#E50914" />
-      ) : (
-        <ButtonIcon as={RefreshCw} className="text-secondary-foreground" />
-      )}
-      <ButtonText className="text-secondary-foreground">
-        {isDownloading
-          ? `Downloading ${progress}% — Pause`
-          : `Paused ${progress}% — Resume`}
-      </ButtonText>
+      <HStack space="sm" className="w-full items-center justify-center px-8">
+        {isDownloading ? (
+          <ButtonSpinner color="#E50914" />
+        ) : (
+          <ButtonIcon as={RefreshCw} className="text-secondary-foreground" />
+        )}
+        <ButtonText className="text-secondary-foreground">
+          {isDownloading
+            ? `Downloading ${progress}% — Pause`
+            : `Paused ${progress}% — Resume`}
+        </ButtonText>
+      </HStack>
     </Button>
   );
 };
 
-const ActionIcon = ({
+export const ActionIcon = ({
   icon,
   label,
   onPress,
@@ -882,8 +946,8 @@ const ActionIcon = ({
 }) => (
   <Focusable
     onPress={onPress}
-    className="items-center px-2"
-    focusedClassName="scale-[1.05]"
+    className="items-center rounded-md px-2"
+    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
   >
     <VStack space="xs" className="items-center">
       <Icon
@@ -897,7 +961,7 @@ const ActionIcon = ({
   </Focusable>
 );
 
-const TabButton = ({
+export const TabButton = ({
   label,
   active,
   onPress,
@@ -906,7 +970,11 @@ const TabButton = ({
   active: boolean;
   onPress: () => void;
 }) => (
-  <Focusable onPress={onPress} className="pb-3" focusedClassName="scale-[1.05]">
+  <Focusable
+    onPress={onPress}
+    className="rounded-md pb-3"
+    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+  >
     <Text
       className={
         active
@@ -919,7 +987,7 @@ const TabButton = ({
   </Focusable>
 );
 
-const TrailersTab = ({ videos }: { videos: VideoResult[] }) => {
+export const TrailersTab = ({ videos }: { videos: VideoResult[] }) => {
   if (!videos.length) {
     return (
       <Center className="py-10 px-8">

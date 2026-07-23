@@ -16,11 +16,19 @@ import { PlayerControls } from '@/src/components/player/PlayerControls';
 import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer';
 import { SubtitleOverlay } from '@/src/components/player/SubtitleOverlay';
 import { SubtitleTrackSheet } from '@/src/components/player/SubtitleTrackSheet';
+import {
+  SeriesEndOverlay,
+  UpNextOverlay,
+} from '@/src/components/player/UpNextOverlay';
 import { VideoAspectSheet } from '@/src/components/player/VideoAspectSheet';
 import { VideoQualitySheet } from '@/src/components/player/VideoQualitySheet';
 import { useControlsVisibility } from '@/src/components/player/useControlsVisibility';
 import { useTVRemote } from '@/src/components/player/useTVRemote';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
+import {
+  UP_NEXT_LEAD_SECONDS,
+  useNextEpisode,
+} from '@/src/hooks/useNextEpisode';
 import { useSubtitles } from '@/src/hooks/useSubtitles';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { useVideoAspect } from '@/src/hooks/useVideoAspect';
@@ -77,6 +85,24 @@ export const PlayerCore = ({
     videoViewRef.current?.startPictureInPicture();
   }, []);
 
+  // "Up Next" autoplay, gated on `onSelectEpisode` being provided (the
+  // caller opts a TV show into episode switching at all — see
+  // `PlayerScreen.tsx`). `useNextEpisode` takes this flag directly instead
+  // of re-deriving its own gating, so there's a single source of truth for
+  // "should autoplay-next run at all" — passing a mismatched gate here vs.
+  // inside the hook is exactly what caused next-episode lookups to always
+  // resolve to "nothing" even when more episodes existed.
+  const autoplayNextEnabled = isTVShow && !!onSelectEpisode;
+  const { nextEpisode: nextEpisodeInfo, loading: nextEpisodeLoading } =
+    useNextEpisode(item, season, episode, autoplayNextEnabled);
+  const [upNextDismissed, setUpNextDismissed] = useState(false);
+  const [seriesEnded, setSeriesEnded] = useState(false);
+  // Set when the video plays to its natural end; the actual advance/"series
+  // end" decision is deferred to the effect below until `useNextEpisode` has
+  // definitively resolved things (not just "hasn't found one yet") —
+  // otherwise a still-loading result gets misread as a confirmed finale.
+  const [pendingAdvance, setPendingAdvance] = useState(false);
+
   // HLS-variant state. The master URI is captured once from the initial
   // `source` prop so quality swaps can always jump back to Auto.
   const sourceObj = typeof source === 'object' && source ? source : null;
@@ -96,7 +122,7 @@ export const PlayerCore = ({
     // Widen the forward-buffer window a bit so stalls are less common on
     // spotty networks. Android-only fields no-op on iOS.
     p.bufferOptions = {
-      preferredForwardBufferDuration: 30, // Android default 20, iOS 0 = auto
+      preferredForwardBufferDuration: 500, // Android default 20, iOS 0 = auto
       minBufferForPlayback: 3,
       prioritizeTimeOverSizeThreshold: true,
     };
@@ -122,6 +148,61 @@ export const PlayerCore = ({
   const buffered =
     duration > 0 && bufferedPosition > 0 ? bufferedPosition / duration : 0;
   const { visible, show, toggle } = useControlsVisibility(isPlaying);
+
+  // Seconds left in the episode; `Infinity` until the player reports a real
+  // duration so the Up Next card never flashes on load.
+  const remaining = duration > 0 ? duration - currentTime : Infinity;
+  const showUpNext =
+    autoplayNextEnabled &&
+    !!nextEpisodeInfo &&
+    !upNextDismissed &&
+    !seriesEnded &&
+    remaining <= UP_NEXT_LEAD_SECONDS &&
+    remaining > 0;
+
+  const playNextEpisode = useCallback(() => {
+    if (nextEpisodeInfo) {
+      onSelectEpisode?.(nextEpisodeInfo.season, nextEpisodeInfo.episode);
+    }
+  }, [nextEpisodeInfo, onSelectEpisode]);
+
+  // Fires once when the video plays through to its natural end. Just flags
+  // that an advance decision is due — the actual decision is made by the
+  // effect below, once `nextEpisodeLoading` confirms we actually know
+  // whether there's a next episode (see comment on `pendingAdvance` above).
+  useEventListener(player, 'playToEnd', () => {
+    if (!autoplayNextEnabled) return;
+    setPendingAdvance(true);
+  });
+
+  // Resolve the pending advance: autoplay straight into the next episode
+  // (unless the user already cancelled the Up Next card), or — only once
+  // we've definitively confirmed there's nothing left to play — show a
+  // brief "caught up" state before backing out to Detail. While
+  // `nextEpisodeLoading` is true this intentionally does nothing and waits
+  // for the next run once loading settles.
+  useEffect(() => {
+    if (!pendingAdvance || nextEpisodeLoading) return;
+    setPendingAdvance(false);
+    if (nextEpisodeInfo) {
+      if (!upNextDismissed) playNextEpisode();
+    } else {
+      setSeriesEnded(true);
+    }
+  }, [
+    pendingAdvance,
+    nextEpisodeLoading,
+    nextEpisodeInfo,
+    upNextDismissed,
+    playNextEpisode,
+  ]);
+
+  // Series finale: hold the "caught up" card briefly, then return to Detail.
+  useEffect(() => {
+    if (!seriesEnded) return;
+    const timer = setTimeout(onBack, 2500);
+    return () => clearTimeout(timer);
+  }, [seriesEnded, onBack]);
 
   const { settings: subtitleSettings } = useSubtitleSettings();
   const {
@@ -256,13 +337,31 @@ export const PlayerCore = ({
     [player, duration],
   );
 
+  // On Android TV, `TVEventHandler`'s raw remote-event feed and the native
+  // focus engine's own "click the focused view" handling both react to the
+  // same physical Select/D-pad press. With this hook always listening, a
+  // Select press on a row inside one of the sheets/drawer below (episode
+  // list, quality/aspect/subtitle picker) gets consumed here as a global
+  // "toggle controls" instead of reaching that row's own onPress — so the
+  // row visibly focuses but never actually selects. Suspend every handler
+  // here while any of those overlays are open so their own Focusable rows
+  // own Select/Left/Right/Up/Down uncontested. The Up Next card and the
+  // series-end state get the same treatment for the same reason.
+  const overlayOpen =
+    sheetOpen ||
+    episodesOpen ||
+    qualityOpen ||
+    aspectOpen ||
+    showUpNext ||
+    seriesEnded;
+
   useTVRemote({
-    onSelect: toggle,
-    onPlayPause: togglePlay,
-    onLeft: () => seekBy(-10),
-    onRight: () => seekBy(10),
-    onUp: show,
-    onDown: show,
+    onSelect: overlayOpen ? undefined : toggle,
+    onPlayPause: overlayOpen ? undefined : togglePlay,
+    onLeft: overlayOpen ? undefined : () => seekBy(-10),
+    onRight: overlayOpen ? undefined : () => seekBy(10),
+    onUp: overlayOpen ? undefined : show,
+    onDown: overlayOpen ? undefined : show,
   });
 
   const [scrubPreview, setScrubPreview] = useState<number | null>(null);
@@ -321,7 +420,21 @@ export const PlayerCore = ({
         pipActive={pipActive}
       />
 
+      {!pipActive && seriesEnded && <SeriesEndOverlay />}
+
+      {!pipActive && !seriesEnded && showUpNext && nextEpisodeInfo && (
+        <UpNextOverlay
+          season={nextEpisodeInfo.season}
+          episode={nextEpisodeInfo.episode}
+          secondsRemaining={remaining}
+          onPlayNow={playNextEpisode}
+          onCancel={() => setUpNextDismissed(true)}
+        />
+      )}
+
       {!pipActive &&
+        !seriesEnded &&
+        !showUpNext &&
         (visible ? (
           <PlayerControls
             title={title}
@@ -370,7 +483,19 @@ export const PlayerCore = ({
             onEnterPip={pipSupported ? enterPip : undefined}
           />
         ) : (
-          <Pressable style={StyleSheet.absoluteFill} onPress={show} />
+          // TV: keep a focusable owner mounted while controls are hidden.
+          // Without one, some Android TV/tvOS builds swallow D-pad presses
+          // before they reach useTVRemote's global TVEventHandler listener,
+          // so nothing brings the controls back. `focusable` +
+          // `hasTVPreferredFocus` guarantee Select reliably fires `show`
+          // natively, and give the platform an active focus context for the
+          // other directions.
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={show}
+            focusable
+            hasTVPreferredFocus
+          />
         ))}
 
       <SubtitleTrackSheet

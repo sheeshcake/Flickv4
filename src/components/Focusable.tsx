@@ -1,4 +1,5 @@
 import { forwardRef, useState, type ReactNode } from 'react';
+import type { Insets, StyleProp, ViewStyle } from 'react-native';
 import { Pressable } from '@/components/ui/pressable';
 import { isTV } from '@/src/utils/tv';
 
@@ -10,6 +11,12 @@ interface FocusableProps {
   /** Applied only while the element holds TV focus. */
   focusedClassName?: string;
   hasTVPreferredFocus?: boolean;
+  /** Expands the touch/press target without affecting layout. */
+  hitSlop?: Insets | number;
+  /** Escape hatch for layout that can't be expressed via className (e.g. dynamic safe-area offsets). */
+  style?: StyleProp<ViewStyle>;
+  /** Fires whenever this element gains/loses TV focus. Useful for parents that need to react (e.g. a collapsible rail expanding while one of its rows is focused). */
+  onFocusChange?: (focused: boolean) => void;
 }
 
 /**
@@ -27,6 +34,9 @@ export const Focusable = forwardRef<
     className,
     focusedClassName,
     hasTVPreferredFocus,
+    hitSlop,
+    style,
+    onFocusChange,
   },
   ref,
 ) {
@@ -37,10 +47,18 @@ export const Focusable = forwardRef<
       ref={ref}
       focusable
       hasTVPreferredFocus={hasTVPreferredFocus}
+      hitSlop={hitSlop}
+      style={style}
       onPress={onPress}
       onLongPress={onLongPress}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
+      onFocus={() => {
+        setFocused(true);
+        onFocusChange?.(true);
+      }}
+      onBlur={() => {
+        setFocused(false);
+        onFocusChange?.(false);
+      }}
       className={`${className ?? ''} ${isTV && focused ? (focusedClassName ?? '') : ''}`}
     >
       {typeof children === 'function' ? children(focused) : children}

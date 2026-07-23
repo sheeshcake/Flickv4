@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Modal, StyleSheet } from 'react-native';
 import {
   AlertCircle,
   CheckCircle2,
@@ -21,6 +22,7 @@ import { ScrollView } from '@/components/ui/scroll-view';
 import { Focusable } from '@/src/components/Focusable';
 import { TMDBService } from '@/src/services/TMDBService';
 import { getComingSoon } from '@/src/utils/comingSoon';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import type { Episode, Season } from '@/src/types';
 
 export type EpisodeDownloadState = {
@@ -61,62 +63,81 @@ export const SeasonEpisodePicker = ({
 
   return (
     <VStack space="md" className="px-4">
-      <Box className="z-20">
-        <Pressable
-          onPress={() => setOpen((v) => !v)}
-          focusable
+      <Box>
+        <Focusable
+          onPress={() => setOpen(true)}
           className="flex-row items-center justify-between rounded-md border border-border bg-secondary px-4 py-3 w-50"
+          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
         >
           <Text className="font-semibold text-foreground">
             {selected?.name ?? 'Select season'}
           </Text>
           <Icon as={ChevronDown} className="text-foreground" />
-        </Pressable>
+        </Focusable>
 
-        {open && (
-          <Box className="absolute left-0 right-0 top-14 z-30 max-h-64 overflow-hidden rounded-md border border-border bg-card">
-            {/*
-              Wrap the season list in a ScrollView so shows with many seasons
-              can be scrolled instead of clipping. `nestedScrollEnabled` is
-              required because the picker lives inside DetailScreen's parent
-              ScrollView (Android would otherwise refuse to route the touch
-              gesture to this inner scroller).
-            */}
-            <ScrollView
-              nestedScrollEnabled
-              showsVerticalScrollIndicator
-              keyboardShouldPersistTaps="handled"
-            >
-              {seasons.map((season) => {
-                const active = season.season_number === selectedSeason;
-                return (
-                  <Focusable
-                    key={season.id}
-                    onPress={() => {
-                      onSelectSeason(season.season_number);
-                      setOpen(false);
-                    }}
-                    className={`px-4 py-3 ${active ? 'bg-primary/20' : ''}`}
-                    focusedClassName="bg-primary"
-                  >
-                    <Text
-                      className={
-                        active
-                          ? 'font-semibold text-foreground'
-                          : 'text-muted-foreground'
-                      }
-                    >
-                      {season.name}
-                      {season.episode_count != null
-                        ? ` (${season.episode_count} episodes)`
-                        : ''}
-                    </Text>
-                  </Focusable>
-                );
-              })}
-            </ScrollView>
+        {/*
+          Rendered as its own Modal (matching ConfirmDialog) rather than an
+          absolute-positioned sibling: an inline overlay doesn't stop the TV
+          focus engine from wandering into the rest of the (still-mounted)
+          screen behind it, so D-pad "down" could escape the list before
+          reaching the last season and the inner ScrollView would never get
+          reliable focus-driven auto-scroll. A real Modal puts the list in
+          its own native layer so it's the only focusable content while
+          open, which lets the ScrollView scroll the focused row into view
+          as expected.
+        */}
+        <Modal
+          visible={open}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setOpen(false)}
+        >
+          <Box className="flex-1 bg-background/80" style={StyleSheet.absoluteFill}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => setOpen(false)}
+            />
+            <Box className="flex-1 items-center justify-center px-6">
+              <Box className="w-full max-w-sm rounded-2xl bg-card p-5 max-h-[30%]">
+                <Heading size="md" bold className="mb-3 text-foreground">
+                  Select season
+                </Heading>
+                <ScrollView showsVerticalScrollIndicator>
+                  <VStack space="xs">
+                    {seasons.map((season) => {
+                      const active = season.season_number === selectedSeason;
+                      return (
+                        <Focusable
+                          key={season.id}
+                          hasTVPreferredFocus={active}
+                          onPress={() => {
+                            onSelectSeason(season.season_number);
+                            setOpen(false);
+                          }}
+                          className={`rounded-md px-4 py-3 ${active ? 'bg-primary/20' : ''}`}
+                          focusedClassName={`bg-primary ${TV_FOCUS_BORDER_CLASSNAME}`}
+                        >
+                          <Text
+                            className={
+                              active
+                                ? 'font-semibold text-foreground'
+                                : 'text-muted-foreground'
+                            }
+                          >
+                            {season.name}
+                            {season.episode_count != null
+                              ? ` (${season.episode_count} episodes)`
+                              : ''}
+                          </Text>
+                        </Focusable>
+                      );
+                    })}
+                  </VStack>
+                </ScrollView>
+              </Box>
+            </Box>
           </Box>
-        )}
+        </Modal>
       </Box>
 
       {loadingEpisodes ? (
@@ -184,7 +205,7 @@ export const SeasonEpisodePicker = ({
                   <Focusable
                     onPress={() => onPlayEpisode(ep)}
                     className="flex-1 rounded-lg"
-                    focusedClassName="scale-[1.02] border border-primary"
+                    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
                   >
                     {info}
                   </Focusable>
@@ -238,7 +259,7 @@ const EpisodeDownloadButton = ({
     <Focusable
       onPress={onPress}
       className="items-center justify-center rounded-full p-2"
-      focusedClassName="scale-[1.1] border border-primary"
+      focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
     >
       <VStack className="items-center">
         {iconEl}

@@ -6,12 +6,13 @@ import { HStack } from '@/components/ui/hstack';
 import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
-import { Pressable } from '@/components/ui/pressable';
 import { ContentCard } from '@/src/components/ContentCard';
 import { ConfirmDialog } from '@/src/components/ConfirmDialog';
+import { Focusable } from '@/src/components/Focusable';
 import { getTitle, type MediaItem } from '@/src/types';
 import type { DeviceKind } from '@/src/utils/responsive';
 import { getCardWidth, getHorizontalPadding } from '@/src/utils/responsive';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface ContentRowProps {
   title: string;
@@ -61,33 +62,38 @@ export const ContentRow = ({
 
   const cardWidth = getCardWidth(deviceKind, screenWidth);
   const padding = getHorizontalPadding(deviceKind);
+  const isTv = deviceKind === 'tv';
 
   return (
-    <Box className="mb-6">
+    <Box className={isTv ? 'mb-10' : 'mb-6'}>
       {title ? (
         <HStack
           className="mb-3 items-center justify-between"
           style={{ paddingHorizontal: padding }}
         >
-          <Heading size="lg" className="text-foreground">
-            {title}
-          </Heading>
+          <HStack space="sm" className="items-center">
+            <Box className="h-6 w-1 rounded-full bg-primary" />
+            <Heading size={isTv ? '2xl' : 'lg'} className="text-foreground">
+              {title}
+            </Heading>
+          </HStack>
           <HStack space="sm" className="items-center">
             {selectionEnabled ? (
-              <Pressable
+              <Focusable
                 onPress={onExitSelection}
                 className="rounded-full bg-primary/20 px-3 py-1"
+                focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
               >
                 <Text size="sm" className="font-semibold text-primary">
                   Done
                 </Text>
-              </Pressable>
+              </Focusable>
             ) : null}
             {onViewMore && !selectionEnabled ? (
-              <Pressable
+              <Focusable
                 onPress={onViewMore}
-                focusable
-                className="flex-row items-center gap-1"
+                className="flex-row items-center gap-1 rounded-md"
+                focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
               >
                 <Text size="sm" className="text-muted-foreground">
                   View More
@@ -97,7 +103,7 @@ export const ContentRow = ({
                   size="sm"
                   className="text-muted-foreground"
                 />
-              </Pressable>
+              </Focusable>
             ) : null}
           </HStack>
         </HStack>

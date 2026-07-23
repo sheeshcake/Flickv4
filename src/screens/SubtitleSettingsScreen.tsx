@@ -9,10 +9,11 @@ import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Button, ButtonText } from '@/components/ui/button';
-import { Pressable } from '@/components/ui/pressable';
 import { ScrollView } from '@/components/ui/scroll-view';
+import { Focusable } from '@/src/components/Focusable';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { SUBTITLE_LANGUAGES } from '@/src/constants/languages';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 const FONT_STEPS = [14, 16, 18, 20, 24, 28, 32];
 const TEXT_COLORS = ['#FFFFFF', '#FFE66D', '#00E5FF', '#FF6B6B', '#B8F2E6'];
@@ -47,9 +48,14 @@ export const SubtitleSettingsScreen = () => {
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <HStack space="md" className="items-center px-4 py-3">
-        <Pressable onPress={() => navigation.goBack()} focusable hitSlop={12}>
+        <Focusable
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+          className="rounded-full"
+          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+        >
           <Icon as={ArrowLeft} size="xl" className="text-foreground" />
-        </Pressable>
+        </Focusable>
         <Heading size="xl" bold className="text-foreground">
           Subtitles
         </Heading>
@@ -201,10 +207,14 @@ const ColorSwatch = ({
   selected: boolean;
   onPress: () => void;
 }) => (
-  <Pressable onPress={onPress} focusable>
+  <Focusable
+    onPress={onPress}
+    className="rounded-full"
+    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+  >
     <Box
       className={`h-9 w-9 rounded-full border-2 ${selected ? 'border-primary' : 'border-border'}`}
       style={{ backgroundColor: color }}
     />
-  </Pressable>
+  </Focusable>
 );

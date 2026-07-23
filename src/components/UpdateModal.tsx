@@ -14,6 +14,7 @@ import {
   updateService,
   type UpdateInfo,
 } from '@/src/services/UpdateService';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface UpdateModalProps {
   visible: boolean;
@@ -88,7 +89,7 @@ export const UpdateModal = ({
               <Focusable
                 onPress={onClose}
                 className="rounded-full bg-background/40 p-2"
-                focusedClassName="scale-[1.1] bg-primary"
+                focusedClassName={`bg-primary ${TV_FOCUS_BORDER_CLASSNAME}`}
               >
                 <Icon as={X} size="lg" className="text-foreground" />
               </Focusable>
@@ -121,7 +122,7 @@ export const UpdateModal = ({
                   <Focusable
                     onPress={runCheck}
                     className="mt-4 rounded-md border border-border px-4 py-3"
-                    focusedClassName="scale-[1.02] border-primary bg-primary/10"
+                    focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
                   >
                     <Text className="text-foreground">Check again</Text>
                   </Focusable>
@@ -174,7 +175,7 @@ export const UpdateModal = ({
                       onPress={openDownload}
                       hasTVPreferredFocus
                       className="items-center rounded-md bg-primary px-4 py-3"
-                      focusedClassName="scale-[1.02] border border-foreground"
+                      focusedClassName="border-2 border-foreground"
                     >
                       <Text className="font-semibold text-primary-foreground">
                         {info.downloadUrl ? 'Download & install' : 'View on GitHub'}
@@ -183,7 +184,7 @@ export const UpdateModal = ({
                     <Focusable
                       onPress={openReleasePage}
                       className="items-center rounded-md border border-border px-4 py-3"
-                      focusedClassName="scale-[1.02] border-primary bg-primary/10"
+                      focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
                     >
                       <Text className="text-foreground">Release page</Text>
                     </Focusable>
@@ -214,7 +215,7 @@ export const UpdateModal = ({
                   <Focusable
                     onPress={runCheck}
                     className="mt-4 rounded-md bg-primary px-4 py-3"
-                    focusedClassName="scale-[1.02] border border-foreground"
+                    focusedClassName="border-2 border-foreground"
                   >
                     <Text className="font-semibold text-primary-foreground">
                       Try again

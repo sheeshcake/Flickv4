@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   FlatList,
   type NativeScrollEvent,
@@ -10,6 +10,17 @@ import { HStack } from '@/components/ui/hstack';
 import { HeroBanner } from '@/src/components/HeroBanner';
 import type { MediaItem } from '@/src/types';
 import type { DeviceKind } from '@/src/utils/responsive';
+
+/** Props every hero banner variant needs, minus the per-item `item`. */
+export interface HeroBannerCommonProps {
+  deviceKind: DeviceKind;
+  height: number;
+  inMyList: boolean;
+  onPlay: (item: MediaItem) => void;
+  onToggleList: (item: MediaItem) => void;
+  onPress: (item: MediaItem) => void;
+  comingSoonLabel?: string;
+}
 
 interface HeroCarouselProps {
   items: MediaItem[];
@@ -26,6 +37,12 @@ interface HeroCarouselProps {
    * on `getReleaseDate(item)`.
    */
   getComingSoonLabel?: (item: MediaItem) => string | undefined;
+  /**
+   * Swaps the banner rendered for each page. Defaults to `HeroBanner`
+   * (phone/tablet, unchanged). The paging/auto-advance/dot-indicator logic
+   * here stays shared across every variant.
+   */
+  renderBanner?: (item: MediaItem, common: HeroBannerCommonProps) => ReactNode;
 }
 
 const AUTO_ADVANCE_MS = 6000;
@@ -40,6 +57,7 @@ export const HeroCarousel = ({
   onToggleList,
   onPress,
   getComingSoonLabel,
+  renderBanner,
 }: HeroCarouselProps) => {
   const listRef = useRef<FlatList<MediaItem>>(null);
   const [index, setIndex] = useState(0);
@@ -97,20 +115,26 @@ export const HeroCarousel = ({
         onMomentumScrollEnd={onMomentumEnd}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
-        renderItem={({ item }) => (
-          <Box style={{ width, height }}>
-            <HeroBanner
-              item={item}
-              deviceKind={deviceKind}
-              height={height}
-              inMyList={isInList(item)}
-              onPlay={onPlay}
-              onToggleList={onToggleList}
-              onPress={onPress}
-              comingSoonLabel={getComingSoonLabel?.(item)}
-            />
-          </Box>
-        )}
+        renderItem={({ item }) => {
+          const common: HeroBannerCommonProps = {
+            deviceKind,
+            height,
+            inMyList: isInList(item),
+            onPlay,
+            onToggleList,
+            onPress,
+            comingSoonLabel: getComingSoonLabel?.(item),
+          };
+          return (
+            <Box style={{ width, height }}>
+              {renderBanner ? (
+                renderBanner(item, common)
+              ) : (
+                <HeroBanner item={item} {...common} />
+              )}
+            </Box>
+          );
+        }}
       />
       {items.length > 1 && (
         <HStack

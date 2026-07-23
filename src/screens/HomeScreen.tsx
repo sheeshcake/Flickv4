@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
 import { RefreshControl, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -13,6 +13,8 @@ import { VStack } from '@/components/ui/vstack';
 import { AppHeader } from '@/src/components/AppHeader';
 import { HeroCarousel } from '@/src/components/HeroCarousel';
 import { ContentRow } from '@/src/components/ContentRow';
+import { HomeScreenTV } from '@/src/components/tv/HomeScreenTV';
+import type { TVSideNavHandle } from '@/src/components/tv/TVSideNav';
 import { useHomeData } from '@/src/hooks/useHomeData';
 import { useMyList } from '@/src/hooks/useMyList';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
@@ -23,7 +25,17 @@ import type { RootStackParamList } from '@/src/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-export const HomeScreen = () => {
+interface HomeScreenProps {
+  /**
+   * TV-only: ref to the sidebar rail, forwarded down to `HomeScreenTV`'s
+   * hero so it can hand D-pad focus back to the sidebar on a dead-end
+   * "Left" press. Undefined on phone/tablet (`TabNavigator` renders
+   * `HomeScreen` with no props).
+   */
+  sidebarRef?: RefObject<TVSideNavHandle | null>;
+}
+
+export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   const navigation = useNavigation<Nav>();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -118,6 +130,34 @@ export const HomeScreen = () => {
     const c = getComingSoon({ releaseDate: getReleaseDate(item) });
     return c.comingSoon ? c.label : undefined;
   };
+
+  if (deviceKind === 'tv') {
+    return (
+      <HomeScreenTV
+        hero={hero}
+        rows={rows}
+        continueItems={continueItems}
+        myList={myList}
+        isInList={isInList}
+        onPlay={(item) => play(item)}
+        onToggleList={toggle}
+        onPress={openDetail}
+        getComingSoonLabel={getHeroComingSoonLabel}
+        onPlayContinue={playContinue}
+        getContinueProgress={continueProgress}
+        getContinueCaption={continueCaption}
+        onRemoveContinue={removeContinue}
+        cwSelecting={cwSelecting}
+        setCwSelecting={setCwSelecting}
+        myListSelecting={myListSelecting}
+        setMyListSelecting={setMyListSelecting}
+        onViewMore={(row) =>
+          navigation.navigate('ViewMore', { title: row.title, query: row.query })
+        }
+        sidebarRef={sidebarRef}
+      />
+    );
+  }
 
   return (
     <Box className="flex-1 bg-background">
