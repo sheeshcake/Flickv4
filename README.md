@@ -69,6 +69,26 @@ Public scrapers get patched fast and abused just as fast. Keeping the resolver p
 
 ---
 
+## 💬 Community & Discussions
+
+Have a suggestion, found a bug, want to share your server configuration, or just want to discuss Flickv4?
+
+Join the **GitHub Discussions** page:
+
+👉 **https://github.com/sheeshcake/Flickv4/discussions**
+
+You can use Discussions for:
+
+- 💡 Feature requests and ideas
+- ❓ Questions and community support
+- 🌐 Server sharing and recommendations
+- 🛠 Troubleshooting and setup help
+- 📢 Announcements and general discussions
+
+Before opening a new discussion, please search to see if your topic has already been covered.
+
+---
+
 ## Contributing
 
 If Flickv4 has been useful, you can support continued development:
