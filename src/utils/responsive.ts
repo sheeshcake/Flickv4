@@ -61,7 +61,7 @@ export const getHorizontalPadding = (kind: DeviceKind): number => {
     case 'tv':
       return 48;
     case 'tablet':
-      return 32;
+      return 16;
     default:
       return 16;
   }

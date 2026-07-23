@@ -10,6 +10,7 @@ import { Focusable } from '@/src/components/Focusable';
 import { TMDBService } from '@/src/services/TMDBService';
 import { getTitle, type MediaItem } from '@/src/types';
 import { POSTER_ASPECT_RATIO } from '@/src/utils/responsive';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface ContentCardProps {
   item: MediaItem;
@@ -60,7 +61,7 @@ export const ContentCard = ({
       onLongPress={onLongPress ? () => onLongPress(item) : undefined}
       hasTVPreferredFocus={hasTVPreferredFocus}
       className="rounded-md"
-      focusedClassName="scale-[1.05] border-2 border-primary"
+      focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
     >
       <VStack space="xs" style={{ width }}>
         <Box

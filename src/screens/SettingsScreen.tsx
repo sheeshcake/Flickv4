@@ -18,7 +18,7 @@ import { HStack } from '@/components/ui/hstack';
 import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
-import { Pressable } from '@/components/ui/pressable';
+import { Focusable } from '@/src/components/Focusable';
 import { useServers } from '@/src/hooks/useServers';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import {
@@ -32,6 +32,7 @@ import {
 import { getLanguageLabel } from '@/src/constants/languages';
 import { UpdateModal } from '@/src/components/UpdateModal';
 import { updateService } from '@/src/services/UpdateService';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import type { RootStackParamList } from '@/src/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -118,7 +119,11 @@ const MenuRow = ({
   value?: string;
   onPress: () => void;
 }) => (
-  <Pressable onPress={onPress} focusable>
+  <Focusable
+    onPress={onPress}
+    className="rounded-lg"
+    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+  >
     <HStack className="items-center rounded-lg bg-card px-4 py-4">
       <Icon as={icon} className="text-foreground" />
       <VStack className="ml-3 flex-1">
@@ -131,5 +136,5 @@ const MenuRow = ({
       </VStack>
       <Icon as={ChevronRight} className="text-muted-foreground" />
     </HStack>
-  </Pressable>
+  </Focusable>
 );

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 // TV event APIs are only present on tvOS/Android TV builds and are not part of
 // the standard react-native type surface, so we access them defensively.
 import * as ReactNative from 'react-native';
@@ -27,8 +27,18 @@ interface TVEventHandlerInstance {
 
 /**
  * Subscribes to TV remote (D-pad) events. No-op on non-TV platforms.
+ *
+ * Registers the native `TVEventHandler` listener exactly once (not on every
+ * render): callers typically pass a fresh `handlers` object literal each
+ * render, and tearing down + re-enabling the native listener that often
+ * (e.g. every ~500ms while a video is playing) risks a key press landing in
+ * the gap between disable() and the next enable(). A ref keeps the listener
+ * itself stable while always invoking the latest handlers.
  */
 export const useTVRemote = (handlers: TVRemoteHandlers) => {
+  const handlersRef = useRef(handlers);
+  handlersRef.current = handlers;
+
   useEffect(() => {
     if (!isTV) return;
     const TVEventHandlerCtor = (
@@ -41,29 +51,32 @@ export const useTVRemote = (handlers: TVRemoteHandlers) => {
     const tvEventHandler = new TVEventHandlerCtor();
     tvEventHandler.enable(null, (_cmp, evt) => {
       if (!evt) return;
+      const current = handlersRef.current;
       switch (evt.eventType) {
         case 'select':
-          handlers.onSelect?.();
+          current.onSelect?.();
           break;
         case 'left':
-          handlers.onLeft?.();
+          current.onLeft?.();
           break;
         case 'right':
-          handlers.onRight?.();
+          current.onRight?.();
           break;
         case 'up':
-          handlers.onUp?.();
+          current.onUp?.();
           break;
         case 'down':
-          handlers.onDown?.();
+          current.onDown?.();
           break;
         case 'playPause':
-          handlers.onPlayPause?.();
+          current.onPlayPause?.();
           break;
       }
     });
     return () => tvEventHandler.disable();
-  }, [handlers]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
+    // mount-once; latest handlers are read via `handlersRef` above.
+  }, []);
 };
 
 export const formatTime = (seconds: number): string => {

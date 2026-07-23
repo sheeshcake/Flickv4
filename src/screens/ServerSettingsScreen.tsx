@@ -10,9 +10,10 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { Button, ButtonText, ButtonIcon } from '@/components/ui/button';
 import { Input, InputField } from '@/components/ui/input';
-import { Pressable } from '@/components/ui/pressable';
 import { ScrollView } from '@/components/ui/scroll-view';
+import { Focusable } from '@/src/components/Focusable';
 import { useServers, type PlaybackServer } from '@/src/hooks/useServers';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 export const ServerSettingsScreen = () => {
   const insets = useSafeAreaInsets();
@@ -34,9 +35,14 @@ export const ServerSettingsScreen = () => {
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <HStack space="md" className="items-center px-4 py-3">
-        <Pressable onPress={() => navigation.goBack()} focusable hitSlop={12}>
+        <Focusable
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+          className="rounded-full"
+          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+        >
           <Icon as={ArrowLeft} size="xl" className="text-foreground" />
-        </Pressable>
+        </Focusable>
         <Heading size="xl" bold className="text-foreground">
           Playback server
         </Heading>
@@ -119,10 +125,10 @@ const ServerRow = ({
   onRemove?: () => void;
 }) => (
   <HStack className="items-center rounded-lg bg-card px-4 py-3">
-    <Pressable
+    <Focusable
       onPress={onSelect}
-      focusable
-      className="flex-1 flex-row items-center gap-3"
+      className="flex-1 flex-row items-center gap-3 rounded-md"
+      focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
     >
       <Box
         className={`h-5 w-5 items-center justify-center rounded-full border-2 ${
@@ -137,12 +143,17 @@ const ServerRow = ({
           {server.url}
         </Text>
       </VStack>
-    </Pressable>
+    </Focusable>
     {active ? <Icon as={Check} className="text-primary" /> : null}
     {onRemove ? (
-      <Pressable onPress={onRemove} focusable hitSlop={12} className="ml-3">
+      <Focusable
+        onPress={onRemove}
+        hitSlop={12}
+        className="ml-3 rounded-full"
+        focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+      >
         <Icon as={Trash2} className="text-muted-foreground" />
-      </Pressable>
+      </Focusable>
     ) : null}
   </HStack>
 );

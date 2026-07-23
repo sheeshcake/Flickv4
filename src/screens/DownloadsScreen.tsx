@@ -22,7 +22,6 @@ import { Text } from '@/components/ui/text';
 import { Icon } from '@/components/ui/icon';
 import { Image } from '@/components/ui/image';
 import { Spinner } from '@/components/ui/spinner';
-import { Pressable } from '@/components/ui/pressable';
 import { Focusable } from '@/src/components/Focusable';
 import { ConfirmDialog } from '@/src/components/ConfirmDialog';
 import { useDownloads } from '@/src/hooks/useDownloads';
@@ -30,6 +29,7 @@ import { formatBytes, type DownloadJob } from '@/src/services/DownloadService';
 import { TMDBService } from '@/src/services/TMDBService';
 import { getTitle, type MediaItem } from '@/src/types';
 import type { RootStackParamList } from '@/src/navigation/types';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -281,7 +281,11 @@ const DownloadGroupCard = ({
 
   return (
     <Box className="rounded-lg bg-card p-3">
-      <Pressable onPress={() => setExpanded((v) => !v)} focusable>
+      <Focusable
+        onPress={() => setExpanded((v) => !v)}
+        className="rounded-md"
+        focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+      >
         <HStack space="md" className="items-center">
           <Box className="h-24 w-16 overflow-hidden rounded-md bg-background">
             {poster ? (
@@ -312,7 +316,7 @@ const DownloadGroupCard = ({
             className="text-foreground"
           />
         </HStack>
-      </Pressable>
+      </Focusable>
 
       {expanded ? (
         <VStack space="sm" className="mt-3 border-t border-border pt-3">
@@ -393,7 +397,7 @@ const EpisodeRow = ({
           <Focusable
             onPress={onPlay}
             className="rounded-full bg-primary p-2"
-            focusedClassName="scale-[1.1]"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
           >
             <Icon as={Play} className="text-primary-foreground" />
           </Focusable>
@@ -408,7 +412,7 @@ const EpisodeRow = ({
         <Focusable
           onPress={onPrimary}
           className="rounded-full bg-background/40 p-2"
-          focusedClassName="scale-[1.1] border border-primary"
+          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
         >
           <Icon as={primaryIcon} className="text-foreground" />
         </Focusable>
@@ -416,7 +420,7 @@ const EpisodeRow = ({
         <Focusable
           onPress={onDelete}
           className="rounded-full bg-background/40 p-2"
-          focusedClassName="scale-[1.1] border border-primary"
+          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
         >
           <Icon as={Trash2} className="text-foreground" />
         </Focusable>
@@ -494,7 +498,7 @@ const DownloadRow = ({
             <Focusable
               onPress={onPlay}
               className="rounded-full bg-primary p-2"
-              focusedClassName="scale-[1.1]"
+              focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
             >
               <Icon as={Play} className="text-primary-foreground" />
             </Focusable>
@@ -509,7 +513,7 @@ const DownloadRow = ({
           <Focusable
             onPress={onPrimary}
             className="rounded-full bg-background/40 p-2"
-            focusedClassName="scale-[1.1] border border-primary"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
           >
             <Icon as={primaryIcon} className="text-foreground" />
           </Focusable>
@@ -517,7 +521,7 @@ const DownloadRow = ({
           <Focusable
             onPress={onDelete}
             className="rounded-full bg-background/40 p-2"
-            focusedClassName="scale-[1.1] border border-primary"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
           >
             <Icon as={Trash2} className="text-foreground" />
           </Focusable>

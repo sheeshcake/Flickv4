@@ -7,6 +7,7 @@ import { VStack } from '@/components/ui/vstack';
 import { Pressable } from '@/components/ui/pressable';
 import { Focusable } from '@/src/components/Focusable';
 import type { Variant } from '@/src/utils/hlsVariants';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 export interface DownloadQualityChoice {
   height: number;
@@ -67,7 +68,7 @@ export const DownloadQualitySheet = ({
                   onClose();
                 }}
                 className="rounded-md"
-                focusedClassName="scale-[1.02] border border-primary"
+                focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
               >
                 <Box className="rounded-md px-3 py-3">
                   <HStack className="items-center justify-between">

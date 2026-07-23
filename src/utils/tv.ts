@@ -26,7 +26,11 @@ export const isMacCatalyst: boolean = (() => {
  */
 export const isTVLayout = isTV || isMacCatalyst;
 
-export const TV_FOCUS_SCALE = 1.08;
+/**
+ * Canonical TV D-pad focus ring: a 2px primary-colored border, used by every
+ * focusable control so highlighting is visually consistent app-wide.
+ */
+export const TV_FOCUS_BORDER_CLASSNAME = 'border-2 border-primary';
 
 /**
  * TV remote event types surfaced by RN's TVEventHandler / useTVEventHandler.

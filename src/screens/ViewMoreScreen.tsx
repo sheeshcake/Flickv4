@@ -9,11 +9,12 @@ import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
-import { Pressable } from '@/components/ui/pressable';
 import { ContentCard } from '@/src/components/ContentCard';
+import { Focusable } from '@/src/components/Focusable';
 import { fetchCategoryPage } from '@/src/services/categories';
 import { useDeviceKind } from '@/src/hooks/useDeviceKind';
 import { getGridColumns, getHorizontalPadding } from '@/src/utils/responsive';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import type { MediaItem } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 
@@ -73,9 +74,14 @@ export const ViewMoreScreen = ({
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <HStack space="md" className="items-center px-4 py-3">
-        <Pressable onPress={() => navigation.goBack()} focusable hitSlop={12}>
+        <Focusable
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+          className="rounded-full"
+          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+        >
           <Icon as={ArrowLeft} size="xl" className="text-foreground" />
-        </Pressable>
+        </Focusable>
         <Heading size="xl" bold className="flex-1 text-foreground" numberOfLines={1}>
           {title}
         </Heading>

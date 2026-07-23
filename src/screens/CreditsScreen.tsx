@@ -9,9 +9,10 @@ import { HStack } from '@/components/ui/hstack';
 import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
-import { Pressable } from '@/components/ui/pressable';
 import { ScrollView } from '@/components/ui/scroll-view';
+import { Focusable } from '@/src/components/Focusable';
 import { updateService } from '@/src/services/UpdateService';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface Credit {
   name: string;
@@ -70,9 +71,14 @@ export const CreditsScreen = () => {
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <HStack space="md" className="items-center px-4 py-3">
-        <Pressable onPress={() => navigation.goBack()} focusable hitSlop={12}>
+        <Focusable
+          onPress={() => navigation.goBack()}
+          hitSlop={12}
+          className="rounded-full"
+          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+        >
           <Icon as={ArrowLeft} size="xl" className="text-foreground" />
-        </Pressable>
+        </Focusable>
         <Heading size="xl" bold className="text-foreground">
           Credits
         </Heading>
@@ -87,10 +93,11 @@ export const CreditsScreen = () => {
 
           <VStack space="md">
             {CREDITS.map((credit) => (
-              <Pressable
+              <Focusable
                 key={credit.name}
                 onPress={() => open(credit.url)}
-                focusable
+                className="rounded-lg"
+                focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
               >
                 <Box className="rounded-lg bg-card p-4">
                   <HStack className="items-center justify-between">
@@ -109,7 +116,7 @@ export const CreditsScreen = () => {
                     {credit.description}
                   </Text>
                 </Box>
-              </Pressable>
+              </Focusable>
             ))}
           </VStack>
         </VStack>

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Box } from '@/components/ui/box';
 import { HStack } from '@/components/ui/hstack';
-import { TVSideNav, TVTab } from '@/src/components/tv/TVSideNav';
+import { TVSideNav, TVTab, type TVSideNavHandle } from '@/src/components/tv/TVSideNav';
 import { HomeScreen } from '@/src/screens/HomeScreen';
 import { SearchScreen } from '@/src/screens/SearchScreen';
 import { SettingsScreen } from '@/src/screens/SettingsScreen';
@@ -13,12 +13,13 @@ import { DownloadsScreen } from '@/src/screens/DownloadsScreen';
  */
 export const TVNavigator = () => {
   const [activeTab, setActiveTab] = useState<TVTab>('Home');
+  const sideNavRef = useRef<TVSideNavHandle>(null);
 
   return (
     <HStack className="h-full flex-1 bg-background">
-      <TVSideNav activeTab={activeTab} onTabChange={setActiveTab} />
+      <TVSideNav ref={sideNavRef} activeTab={activeTab} onTabChange={setActiveTab} />
       <Box className="flex-1">
-        {activeTab === 'Home' && <HomeScreen />}
+        {activeTab === 'Home' && <HomeScreen sidebarRef={sideNavRef} />}
         {activeTab === 'Search' && <SearchScreen />}
         {activeTab === 'Downloads' && <DownloadsScreen />}
         {activeTab === 'Settings' && <SettingsScreen />}

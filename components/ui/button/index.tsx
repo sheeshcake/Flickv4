@@ -10,6 +10,7 @@ import {
 import { styled } from 'nativewind';
 import React from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { isTV } from '@/src/utils/tv';
 const SCOPE = 'BUTTON';
 const Root = withStyleContext(Pressable, SCOPE);
 const StyledUIIcon = styled(UIIcon, {
@@ -22,8 +23,31 @@ const UIButton = createButton({
   Spinner: ActivityIndicator,
   Icon: StyledUIIcon,
 });
+// TV D-pad focus ring: `data-focus-visible` looked like the right hook (it's
+// what drives web's `:focus-visible` outline) but `@gluestack-ui/utils`'
+// native `useFocusRing()` is a hardcoded stub that always returns
+// `isFocusVisible: false` — it can never reflect real D-pad focus on
+// Android TV / tvOS. `data-focus` (from `useFocus`, driven by plain
+// onFocus/onBlur) *does* toggle correctly once the underlying Pressable is
+// `focusable`, so use that instead. Only enable it on TV: Android can also
+// grant native view-focus from a normal touch tap, and we don't want a
+// border flash on every phone/tablet button press.
+//
+// IMPORTANT: this must be a literal string (not built via
+// `.split/.map/.join` from a shared constant) — NativeWind/Tailwind's JIT
+// scanner statically greps source files for whole class-name candidates
+// like `data-[focus=true]:border-primary`. A dynamically concatenated
+// string never appears as that literal substring anywhere, so the scanner
+// never discovers it and no CSS is ever generated for it, even though the
+// runtime `data-focus` attribute toggles correctly. Keep this in sync with
+// `TV_FOCUS_BORDER_CLASSNAME` in `src/utils/tv.ts` (currently
+// `border-2 border-primary`) — the base style below already sets
+// `border-2 border-transparent`, so only the color needs to flip on focus.
+const buttonFocusVisibleClassName = isTV
+  ? 'data-[focus=true]:border-primary'
+  : '';
 const buttonStyle = tva({
-  base: 'rounded-md flex-row items-center justify-center data-[focus-visible=true]:web:outline-none data-[focus-visible=true]:web:ring-2 data-[disabled=true]:opacity-40 gap-2 h-fit',
+  base: 'rounded-md flex-row items-center justify-center border-2 border-transparent data-[focus-visible=true]:web:outline-none data-[focus-visible=true]:web:ring-2 data-[disabled=true]:opacity-40 gap-2 h-fit',
   variants: {
     variant: {
       default:
@@ -130,16 +154,30 @@ type IButtonProps = Omit<
 const Button = React.forwardRef<
   React.ElementRef<typeof UIButton>,
   IButtonProps
->(({ className, variant = 'default', size = 'default', ...props }, ref) => {
-  return (
-    <UIButton
-      ref={ref}
-      {...props}
-      className={buttonStyle({ variant, size, class: className })}
-      context={{ variant, size }}
-    />
-  );
-});
+>(
+  (
+    { className, variant = 'default', size = 'default', focusable, isDisabled, ...props },
+    ref,
+  ) => {
+    return (
+      <UIButton
+        ref={ref}
+        isDisabled={isDisabled}
+        // TV: make every button D-pad reachable by default (it isn't
+        // today), but skip disabled buttons so focus doesn't land on an
+        // inert control.
+        focusable={focusable ?? !isDisabled}
+        {...props}
+        className={buttonStyle({
+          variant,
+          size,
+          class: `${buttonFocusVisibleClassName} ${className ?? ''}`.trim(),
+        })}
+        context={{ variant, size }}
+      />
+    );
+  },
+);
 type IButtonTextProps = React.ComponentPropsWithoutRef<typeof UIButton.Text> &
   VariantProps<typeof buttonTextStyle> & { className?: string };
 const ButtonText = React.forwardRef<

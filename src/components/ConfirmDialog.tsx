@@ -5,6 +5,7 @@ import { HStack } from '@/components/ui/hstack';
 import { VStack } from '@/components/ui/vstack';
 import { Text } from '@/components/ui/text';
 import { Focusable } from '@/src/components/Focusable';
+import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface ConfirmDialogProps {
   visible: boolean;
@@ -56,7 +57,7 @@ export const ConfirmDialog = ({
                 <Focusable
                   onPress={onCancel}
                   className="rounded-md border border-border px-4 py-2"
-                  focusedClassName="scale-[1.02] border-primary bg-primary/10"
+                  focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
                 >
                   <Text className="text-foreground">{cancelLabel}</Text>
                 </Focusable>
@@ -64,7 +65,11 @@ export const ConfirmDialog = ({
                   onPress={onConfirm}
                   hasTVPreferredFocus
                   className={`rounded-md px-4 py-2 ${destructive ? 'bg-primary' : 'bg-foreground'}`}
-                  focusedClassName="scale-[1.02] border border-foreground"
+                  focusedClassName={
+                    destructive
+                      ? 'border-2 border-foreground'
+                      : TV_FOCUS_BORDER_CLASSNAME
+                  }
                 >
                   <Text
                     className={
