@@ -3,8 +3,10 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  Bug,
   ChevronRight,
   Captions,
+  CheckCircle2,
   Download,
   Info,
   Heart,
@@ -32,6 +34,8 @@ import {
 import { getLanguageLabel } from '@/src/constants/languages';
 import { UpdateModal } from '@/src/components/UpdateModal';
 import { updateService } from '@/src/services/UpdateService';
+import { useFinishedMovies } from '@/src/hooks/useFinishedMovies';
+import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import type { RootStackParamList } from '@/src/navigation/types';
 
@@ -41,6 +45,9 @@ export const SettingsScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { activeServer } = useServers();
+  const { entries: finishedMovies } = useFinishedMovies();
+  const { scraperDebugEnabled, setScraperDebugEnabled } =
+    usePlayerDebugSettings();
   const { settings: subtitleSettings } = useSubtitleSettings();
   const { preference: videoQuality } = useVideoQuality();
   const { aspect: videoAspect } = useVideoAspect();
@@ -81,6 +88,12 @@ export const SettingsScreen = () => {
           onPress={() => navigation.navigate('SubtitleSettings')}
         />
         <MenuRow
+          icon={CheckCircle2}
+          label="Finished movies"
+          value={`${finishedMovies.length} completed`}
+          onPress={() => navigation.navigate('FinishedMovies')}
+        />
+        <MenuRow
           icon={Download}
           label="Check for updates"
           value={`Current version: v${updateService.getCurrentVersion()}`}
@@ -97,6 +110,13 @@ export const SettingsScreen = () => {
           label="Credits"
           value="Attributions for TMDB, Wyzie & more"
           onPress={() => navigation.navigate('Credits')}
+        />
+        <SwitchRow
+          icon={Bug}
+          label="Debug video player"
+          hint="Show the stream-finder webpage while a video loads"
+          value={scraperDebugEnabled}
+          onToggle={setScraperDebugEnabled}
         />
       </VStack>
 
@@ -135,6 +155,49 @@ const MenuRow = ({
         ) : null}
       </VStack>
       <Icon as={ChevronRight} className="text-muted-foreground" />
+    </HStack>
+  </Focusable>
+);
+
+const SwitchRow = ({
+  icon,
+  label,
+  hint,
+  value,
+  onToggle,
+}: {
+  icon: typeof ServerIcon;
+  label: string;
+  hint?: string;
+  value: boolean;
+  onToggle: (next: boolean) => void;
+}) => (
+  <Focusable
+    onPress={() => onToggle(!value)}
+    className="rounded-lg"
+    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+  >
+    <HStack className="items-center rounded-lg bg-card px-4 py-4">
+      <Icon as={icon} className="text-foreground" />
+      <VStack className="ml-3 flex-1">
+        <Text className="text-foreground">{label}</Text>
+        {hint ? (
+          <Text size="xs" className="text-muted-foreground">
+            {hint}
+          </Text>
+        ) : null}
+      </VStack>
+      <Box
+        className={`h-7 w-12 justify-center rounded-full p-0.5 ${
+          value ? 'bg-primary' : 'bg-background'
+        }`}
+      >
+        <Box
+          className={`h-6 w-6 rounded-full bg-foreground ${
+            value ? 'ml-5' : 'ml-0'
+          }`}
+        />
+      </Box>
     </HStack>
   </Focusable>
 );

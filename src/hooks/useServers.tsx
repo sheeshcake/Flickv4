@@ -18,6 +18,31 @@ export interface PlaybackServer {
   url: string;
   /** Built-in servers cannot be deleted. */
   builtIn?: boolean;
+  /**
+   * Optional custom embed URL template for servers that don't follow the
+   * default `{url}/{type}/{tmdbId}` path pattern — e.g. a server using query
+   * params instead: `{url}/{type}?tmdb={tmdbId}`, or one that bakes a
+   * slugified title into the path: `{url}/{type}/{tmdbId}-{slug}?streaming=true`.
+   * Supports `{url}`, `{type}`, `{tmdbId}`, `{slug}`, `{season}`, `{episode}`
+   * placeholders. See `buildEmbedUrl` in `src/utils/streamUrl.ts`.
+   */
+  urlPattern?: string;
+  /**
+   * Optional override for what `{type}` resolves to on movies — some
+   * servers use "movies" instead of "movie".
+   */
+  movieTypeLabel?: string;
+  /**
+   * Optional override for what `{type}` resolves to on TV shows — some
+   * servers use "series" instead of "tv".
+   */
+  tvTypeLabel?: string;
+}
+
+export interface AddServerOptions {
+  urlPattern?: string;
+  movieTypeLabel?: string;
+  tvTypeLabel?: string;
 }
 
 export const DEFAULT_SERVERS: PlaybackServer[] = [
@@ -34,7 +59,14 @@ interface ServersContextValue {
   activeId: string;
   activeServer: PlaybackServer;
   loaded: boolean;
-  addServer: (name: string, url: string) => void;
+  addServer: (name: string, url: string, options?: AddServerOptions) => void;
+  /** Edits a custom (non-built-in) server's fields in place. No-op for built-ins. */
+  updateServer: (
+    id: string,
+    name: string,
+    url: string,
+    options?: AddServerOptions,
+  ) => void;
   removeServer: (id: string) => void;
   setActive: (id: string) => void;
 }
@@ -45,11 +77,12 @@ const ServersContext = createContext<ServersContextValue>({
   activeServer: DEFAULT_SERVERS[0],
   loaded: false,
   addServer: () => {},
+  updateServer: () => {},
   removeServer: () => {},
   setActive: () => {},
 });
 
-const normalizeUrl = (url: string): string => {
+export const normalizeUrl = (url: string): string => {
   const trimmed = url.trim().replace(/\/+$/, '');
   if (!trimmed) return trimmed;
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
@@ -82,20 +115,57 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const addServer = useCallback(
-    (name: string, url: string) => {
+    (name: string, url: string, options?: AddServerOptions) => {
       const cleanUrl = normalizeUrl(url);
       const cleanName = name.trim();
       if (!cleanUrl || !cleanName) return;
+      const cleanPattern = options?.urlPattern?.trim();
+      const cleanMovieLabel = options?.movieTypeLabel?.trim();
+      const cleanTvLabel = options?.tvTypeLabel?.trim();
       setState((prev) => {
         const server: PlaybackServer = {
           id: `custom-${Date.now()}`,
           name: cleanName,
           url: cleanUrl,
+          ...(cleanPattern ? { urlPattern: cleanPattern } : {}),
+          ...(cleanMovieLabel ? { movieTypeLabel: cleanMovieLabel } : {}),
+          ...(cleanTvLabel ? { tvTypeLabel: cleanTvLabel } : {}),
         };
         const next: PersistedState = {
           servers: [...prev.servers, server],
           activeId: prev.activeId,
         };
+        AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+        return next;
+      });
+    },
+    [],
+  );
+
+  const updateServer = useCallback(
+    (id: string, name: string, url: string, options?: AddServerOptions) => {
+      const cleanUrl = normalizeUrl(url);
+      const cleanName = name.trim();
+      if (!cleanUrl || !cleanName) return;
+      const cleanPattern = options?.urlPattern?.trim();
+      const cleanMovieLabel = options?.movieTypeLabel?.trim();
+      const cleanTvLabel = options?.tvTypeLabel?.trim();
+      setState((prev) => {
+        const target = prev.servers.find((s) => s.id === id);
+        if (!target || target.builtIn) return prev;
+        const servers = prev.servers.map((s) =>
+          s.id === id
+            ? {
+                ...s,
+                name: cleanName,
+                url: cleanUrl,
+                urlPattern: cleanPattern || undefined,
+                movieTypeLabel: cleanMovieLabel || undefined,
+                tvTypeLabel: cleanTvLabel || undefined,
+              }
+            : s,
+        );
+        const next: PersistedState = { servers, activeId: prev.activeId };
         AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {});
         return next;
       });
@@ -141,10 +211,20 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       activeServer,
       loaded,
       addServer,
+      updateServer,
       removeServer,
       setActive,
     }),
-    [servers, activeId, activeServer, loaded, addServer, removeServer, setActive],
+    [
+      servers,
+      activeId,
+      activeServer,
+      loaded,
+      addServer,
+      updateServer,
+      removeServer,
+      setActive,
+    ],
   );
 
   return (

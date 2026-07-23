@@ -13,6 +13,7 @@ export type RootStackParamList = {
   VideoAspectSettings: undefined;
   Disclaimer: undefined;
   Credits: undefined;
+  FinishedMovies: undefined;
   Player: {
     item: MediaItem;
     title: string;

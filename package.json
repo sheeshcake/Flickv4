@@ -1,6 +1,6 @@
 {
   "name": "flick",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "main": "index.ts",
   "dependencies": {
     "@expo/html-elements": "^0.12.5",
@@ -16,6 +16,7 @@
     "babel-preset-expo": "~57.0.0",
     "expo": "~57.0.7",
     "expo-file-system": "~57.0.1",
+    "expo-intent-launcher": "~57.0.1",
     "expo-keep-awake": "~57.0.1",
     "expo-linear-gradient": "~57.0.1",
     "expo-navigation-bar": "~57.0.2",

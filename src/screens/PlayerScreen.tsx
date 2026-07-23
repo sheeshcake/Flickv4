@@ -22,14 +22,11 @@ import {
 } from '@/src/components/player/WebViewScraper';
 import { useServers } from '@/src/hooks/useServers';
 import { useDownloads } from '@/src/hooks/useDownloads';
+import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { forceLandscape, restoreOrientation } from '@/src/utils/orientation';
 import { originOf } from '@/src/utils/streamUrl';
 import { getTitle, type Episode } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
-
-// TEMP: show the scraper WebView on screen so the page output is visible.
-// Set back to false (or remove) once done debugging.
-const DEBUG_SCRAPER = false;
 
 export const PlayerScreen = ({
   route,
@@ -54,6 +51,10 @@ export const PlayerScreen = ({
 
   const { activeServer } = useServers();
   const { getLocalSource, getJobFor } = useDownloads();
+  // Settings > "Debug video player" — when on, render the stream-resolving
+  // WebViewScraper full-screen and interactive instead of invisible, so you
+  // can watch exactly what the embed page is doing.
+  const { scraperDebugEnabled } = usePlayerDebugSettings();
   const toast = useToast();
   const type: 'movie' | 'tv' = item.media_type === 'tv' ? 'tv' : 'movie';
 
@@ -241,17 +242,21 @@ export const PlayerScreen = ({
       <StatusBar hidden />
       {!localForCurrent && (
         <WebViewScraper
-          baseUrl={activeServer.url}
+          server={activeServer}
           tmdbId={item.id}
           type={type}
           season={season}
           episode={episode}
+          // Use the raw item title (not the episode-suffixed display `title`
+          // state) so servers with a `{slug}` in their URL pattern always
+          // slugify the show/movie name, not "Show — Episode Name".
+          title={getTitle(item)}
           onDataExtracted={onExtracted}
           onError={onScrapeError}
-          debug={DEBUG_SCRAPER}
+          debug={scraperDebugEnabled}
         />
       )}
-      {DEBUG_SCRAPER ? (
+      {scraperDebugEnabled ? (
         // Debug: keep the WebView visible/interactive; show a small badge only.
         <Center
           className="absolute bottom-6 self-center rounded-full bg-black/80 px-4 py-2"

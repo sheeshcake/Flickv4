@@ -10,6 +10,7 @@ import { VideoQualitySettingsScreen } from '@/src/screens/VideoQualitySettingsSc
 import { VideoAspectSettingsScreen } from '@/src/screens/VideoAspectSettingsScreen';
 import { DisclaimerScreen } from '@/src/screens/DisclaimerScreen';
 import { CreditsScreen } from '@/src/screens/CreditsScreen';
+import { FinishedMoviesScreen } from '@/src/screens/FinishedMoviesScreen';
 import { TabNavigator } from './TabNavigator';
 import { TVNavigator } from './TVNavigator';
 import { isTVLayout } from '@/src/utils/tv';
@@ -79,6 +80,7 @@ export const AppNavigator = () => {
         />
         <Stack.Screen name="Disclaimer" component={DisclaimerScreen} />
         <Stack.Screen name="Credits" component={CreditsScreen} />
+        <Stack.Screen name="FinishedMovies" component={FinishedMoviesScreen} />
         <Stack.Screen
           name="Player"
           component={PlayerScreen}
