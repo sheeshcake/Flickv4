@@ -21,6 +21,7 @@ import { HStack } from '@/components/ui/hstack';
 import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
+import { ScrollView } from '@/components/ui/scroll-view';
 import { Focusable } from '@/src/components/Focusable';
 import { useServers } from '@/src/hooks/useServers';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
@@ -67,69 +68,74 @@ export const SettingsScreen = () => {
         Settings
       </Heading>
 
-      <VStack space="sm" className="px-4">
-        <MenuRow
-          icon={ServerIcon}
-          label="Playback server"
-          value={activeServer.name}
-          onPress={() => navigation.navigate('ServerSettings')}
-        />
-        <MenuRow
-          icon={MonitorPlay}
-          label="Video quality"
-          value={`Preferred: ${videoQualityLabel}`}
-          onPress={() => navigation.navigate('VideoQualitySettings')}
-        />
-        <MenuRow
-          icon={Ratio}
-          label="Video aspect"
-          value={videoAspectLabel}
-          onPress={() => navigation.navigate('VideoAspectSettings')}
-        />
-        <MenuRow
-          icon={Captions}
-          label="Subtitles"
-          value={`Default: ${subtitleLangLabel}`}
-          onPress={() => navigation.navigate('SubtitleSettings')}
-        />
-        <MenuRow
-          icon={Gauge}
-          label="Buffering"
-          value={`${effectiveForwardBufferSeconds}s${forwardBufferSeconds == null ? ' · Auto' : ''} · ${formatMemoryGb(deviceTotalMemory)} RAM`}
-          onPress={() => navigation.navigate('PlaybackPerformance')}
-        />
-        <MenuRow
-          icon={CheckCircle2}
-          label="Finished movies"
-          value={`${finishedMovies.length} completed`}
-          onPress={() => navigation.navigate('FinishedMovies')}
-        />
-        <MenuRow
-          icon={Download}
-          label="Check for updates"
-          value={`Current version: v${updateService.getCurrentVersion()}`}
-          onPress={() => setUpdaterOpen(true)}
-        />
-        <MenuRow
-          icon={Info}
-          label="Disclaimer"
-          value="About content sources & third-party servers"
-          onPress={() => navigation.navigate('Disclaimer')}
-        />
-        <MenuRow
-          icon={Heart}
-          label="Credits"
-          value="Attributions for TMDB, Wyzie & more"
-          onPress={() => navigation.navigate('Credits')}
-        />
-        <SwitchRow
-          icon={Bug}
-          label="Debug video player"
-          hint="Show the stream-finder webpage, never time out, and play video directly in it instead of handing off to the built-in player, 3rd party players may have ads"
-          value={scraperDebugEnabled}
-          onToggle={setScraperDebugEnabled}
-        />
-      </VStack>
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+      >
+        <VStack space="sm" className="px-4">
+          <MenuRow
+            icon={ServerIcon}
+            label="Playback server"
+            value={activeServer.name}
+            onPress={() => navigation.navigate('ServerSettings')}
+          />
+          <MenuRow
+            icon={MonitorPlay}
+            label="Video quality"
+            value={`Preferred: ${videoQualityLabel}`}
+            onPress={() => navigation.navigate('VideoQualitySettings')}
+          />
+          <MenuRow
+            icon={Ratio}
+            label="Video aspect"
+            value={videoAspectLabel}
+            onPress={() => navigation.navigate('VideoAspectSettings')}
+          />
+          <MenuRow
+            icon={Captions}
+            label="Subtitles"
+            value={`Default: ${subtitleLangLabel}`}
+            onPress={() => navigation.navigate('SubtitleSettings')}
+          />
+          <MenuRow
+            icon={Gauge}
+            label="Buffering"
+            value={`${effectiveForwardBufferSeconds}s${forwardBufferSeconds == null ? ' · Auto' : ''} · ${formatMemoryGb(deviceTotalMemory)} RAM`}
+            onPress={() => navigation.navigate('PlaybackPerformance')}
+          />
+          <MenuRow
+            icon={CheckCircle2}
+            label="Finished movies"
+            value={`${finishedMovies.length} completed`}
+            onPress={() => navigation.navigate('FinishedMovies')}
+          />
+          <MenuRow
+            icon={Download}
+            label="Check for updates"
+            value={`Current version: v${updateService.getCurrentVersion()}`}
+            onPress={() => setUpdaterOpen(true)}
+          />
+          <MenuRow
+            icon={Info}
+            label="Disclaimer"
+            value="About content sources & third-party servers"
+            onPress={() => navigation.navigate('Disclaimer')}
+          />
+          <MenuRow
+            icon={Heart}
+            label="Credits"
+            value="Attributions for TMDB, Wyzie & more"
+            onPress={() => navigation.navigate('Credits')}
+          />
+          <SwitchRow
+            icon={Bug}
+            label="Debug video player"
+            hint="Show the stream-finder webpage, never time out, and play video directly in it instead of handing off to the built-in player, 3rd party players may have ads"
+            value={scraperDebugEnabled}
+            onToggle={setScraperDebugEnabled}
+          />
+        </VStack>
+      </ScrollView>
 
       <UpdateModal
         visible={updaterOpen}

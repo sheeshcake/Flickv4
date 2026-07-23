@@ -4,8 +4,9 @@ import { Text } from '@/components/ui/text';
 import { Heading } from '@/components/ui/heading';
 import { VStack } from '@/components/ui/vstack';
 
-/** A single selectable entry, decoupled from where the track actually came
- * from (a Wyzie search result vs. a native `expo-video` `SubtitleTrack`). */
+/** A single selectable entry, decoupled from how it's ultimately rendered
+ * (drawn by our own `SubtitleOverlay` vs. handed to react-native-video as a
+ * native sidecar text track — see `useSubtitleSettings`'s `renderMode`). */
 export interface SubtitleTrackOption {
   id: string;
   label: string;

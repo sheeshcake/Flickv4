@@ -34,10 +34,10 @@
     },
     "plugins": [
       [
-        "expo-video",
+        "react-native-video",
         {
-          "supportsBackgroundPlayback": true,
-          "supportsPictureInPicture": true
+          "enableBackgroundAudio": true,
+          "enableAndroidPictureInPicture": true
         }
       ],
       [

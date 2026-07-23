@@ -35,7 +35,7 @@ const RENDER_MODE_OPTIONS: {
   {
     value: 'native',
     label: 'Native (device)',
-    hint: "Uses the video's own built-in subtitle tracks, if the stream provides any — most scraped streams don't.",
+    hint: "Uses your device's own caption renderer instead of Flick's. Works for any stream on Android; on iOS it only works for non-HLS video, so HLS streams there (almost all of them) automatically use App captions instead.",
   },
 ];
 

@@ -10,9 +10,10 @@ export const FORWARD_BUFFER_STEP_SECONDS = 10;
 const DEFAULT_FORWARD_BUFFER_SECONDS = 30;
 
 /**
- * Recommends a `preferredForwardBufferDuration` (seconds of media to buffer
- * ahead of the playhead — see `expo-video`'s `BufferOptions`) based on the
- * device's total RAM.
+ * Recommends a forward-buffer window (seconds of media to buffer ahead of
+ * the playhead — fed into react-native-video as `preferredForwardBufferDuration`
+ * on iOS and `source.bufferConfig` on Android) based on the device's total
+ * RAM.
  *
  * A larger read-ahead window means fewer stalls on flaky connections, but
  * costs more resident memory per player instance (buffered segments are kept

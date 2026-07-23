@@ -8,18 +8,26 @@ import {
   type ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { VideoContentFit } from 'expo-video';
+import type { EnumValues, ResizeMode as VideoResizeMode } from 'react-native-video';
 
 const STORAGE_KEY = 'flick.videoAspect';
 
 /**
- * Mirrors expo-video's `VideoContentFit`:
+ * App-level aspect abstraction (kept simple/stable for Settings UI), mapped
+ * to react-native-video's `resizeMode` at the `<Video>` call site via
+ * `toResizeMode` below:
  *
  * - `contain` (default) - keep aspect ratio, letterbox as needed.
  * - `cover` - keep aspect ratio, crop to fill the screen.
  * - `fill` - stretch to fill the screen (may distort).
  */
-export type VideoAspect = VideoContentFit;
+export type VideoAspect = 'contain' | 'cover' | 'fill';
+
+/** Maps our `VideoAspect` to react-native-video's `resizeMode` prop values
+ * (`'none' | 'contain' | 'cover' | 'stretch'`) — RNV has no `fill`, its
+ * equivalent non-uniform-scale mode is `stretch`. */
+export const toResizeMode = (aspect: VideoAspect): EnumValues<VideoResizeMode> =>
+  aspect === 'fill' ? 'stretch' : aspect;
 
 export interface VideoAspectOption {
   value: VideoAspect;

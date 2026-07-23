@@ -36,8 +36,14 @@ const CREDITS: Credit[] = [
   {
     name: 'Expo',
     description:
-      'Built with Expo SDK 57 on top of React Native. expo-video powers playback, expo-navigation-bar keeps the player immersive, expo-keep-awake holds the wake lock during playback.',
+      'Built with Expo SDK 57 on top of React Native. expo-navigation-bar keeps the player immersive, expo-keep-awake holds the wake lock during playback.',
     url: 'https://expo.dev',
+  },
+  {
+    name: 'react-native-video',
+    description:
+      "Powers all video playback, including quality switching, Picture-in-Picture, and native subtitle tracks. Maintained by TheWidlarzGroup and the react-native-video community.",
+    url: 'https://github.com/TheWidlarzGroup/react-native-video',
   },
   {
     name: 'gluestack-ui v5',

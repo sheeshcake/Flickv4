@@ -3,7 +3,7 @@ import { Platform, Pressable, StatusBar, StyleSheet } from 'react-native';
 import { ArrowLeft, VideoOff } from 'lucide-react-native';
 import { useKeepAwake } from 'expo-keep-awake';
 import { NavigationBar } from 'expo-navigation-bar';
-import type { VideoSource } from 'expo-video';
+import type { ReactVideoSource } from 'react-native-video';
 import { Box } from '@/components/ui/box';
 import { Center } from '@/components/ui/center';
 import { Icon } from '@/components/ui/icon';
@@ -64,7 +64,7 @@ export const PlayerScreen = ({
   const [episode, setEpisode] = useState<number | undefined>(initialEpisode);
   const [title, setTitle] = useState(initialTitle);
   const [subtitle, setSubtitle] = useState<string | undefined>(initialSubtitle);
-  const [source, setSource] = useState<VideoSource | null>(null);
+  const [source, setSource] = useState<ReactVideoSource | null>(null);
   /**
    * Set to `true` when the WebViewScraper gives up. Renders a "No video
    * available" UI instead of silently falling back to a sample URL.
@@ -99,7 +99,7 @@ export const PlayerScreen = ({
     };
   }, []);
 
-  const finish = useCallback((s: VideoSource) => {
+  const finish = useCallback((s: ReactVideoSource) => {
     if (resolvedRef.current) return;
     resolvedRef.current = true;
     setSource(s);
@@ -110,7 +110,7 @@ export const PlayerScreen = ({
   // Downloads screen), otherwise best-effort lookup by the current item +
   // season/episode. This lets Home "Continue Watching", Detail Play, and
   // Downloads all seamlessly reuse a completed download.
-  const localForCurrent = useMemo<VideoSource | null>(() => {
+  const localForCurrent = useMemo<ReactVideoSource | null>(() => {
     const id = localSourceId ?? getJobFor(item, season, episode)?.id;
     if (!id) return null;
     return getLocalSource(id) ?? null;
@@ -121,9 +121,9 @@ export const PlayerScreen = ({
   const toastedKeyRef = useRef<string | null>(null);
 
   // Playing back a downloaded copy: short-circuit the scraper entirely and
-  // feed the local URI straight into expo-video. We also surface a lightweight
-  // "playing offline copy" toast the first time this happens per episode so
-  // the user knows we're saving data.
+  // feed the local URI straight into react-native-video. We also surface a
+  // lightweight "playing offline copy" toast the first time this happens
+  // per episode so the user knows we're saving data.
   //
   // The `resolvedRef` guard matters: if the user was ALREADY streaming and a
   // background download for this same episode finished mid-playback, we
@@ -155,19 +155,22 @@ export const PlayerScreen = ({
       // Debug mode: a stream request was intercepted, confirming the page
       // itself is now actually playing the video — but deliberately don't
       // hand off to the native `PlayerCore`. Some streams that fail (DRM,
-      // header/cookie quirks, decoder support) in expo-video play back fine
-      // directly inside the browser context that resolved them, so staying
-      // on the WebView here doubles as a way to actually watch those.
+      // header/cookie quirks, decoder support) in react-native-video play
+      // back fine directly inside the browser context that resolved them,
+      // so staying on the WebView here doubles as a way to actually watch
+      // those.
       if (scraperDebugEnabled) {
         setDebugStreamFound(true);
         return;
       }
       finish({
         uri: url,
-        contentType: url.includes('.m3u8') ? 'hls' : 'auto',
-        // Persistent LRU cache: Android caches HLS/MP4/WebM, iOS caches
-        // MP4/WebM only (HLS caching is unsupported by AVFoundation).
-        useCaching: true,
+        // Explicit MIME hint for HLS; react-native-video otherwise infers
+        // from the URL/response, matching expo-video's 'auto' for anything
+        // else. Persistent caching is handled separately, per-platform, via
+        // `source.bufferConfig.cacheSizeMB` inside `PlayerCore` (Android
+        // only — iOS/AVFoundation never cached HLS anyway).
+        type: url.includes('.m3u8') ? 'm3u8' : undefined,
         // Default the request origin to the selected server, which many
         // stream hosts require (403 otherwise).
         headers: {
