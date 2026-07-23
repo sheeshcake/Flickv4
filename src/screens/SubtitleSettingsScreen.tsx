@@ -11,13 +11,33 @@ import { Text } from '@/components/ui/text';
 import { Button, ButtonText } from '@/components/ui/button';
 import { ScrollView } from '@/components/ui/scroll-view';
 import { Focusable } from '@/src/components/Focusable';
-import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
+import {
+  useSubtitleSettings,
+  type SubtitleRenderMode,
+} from '@/src/hooks/useSubtitleSettings';
 import { SUBTITLE_LANGUAGES } from '@/src/constants/languages';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 const FONT_STEPS = [14, 16, 18, 20, 24, 28, 32];
 const TEXT_COLORS = ['#FFFFFF', '#FFE66D', '#00E5FF', '#FF6B6B', '#B8F2E6'];
 const BG_COLORS = ['#000000', '#1A1A1A', '#003366', '#4A0000', '#1B4332'];
+
+const RENDER_MODE_OPTIONS: {
+  value: SubtitleRenderMode;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    value: 'component',
+    label: 'App captions',
+    hint: 'Fetched separately and styled below. Works the same on every server.',
+  },
+  {
+    value: 'native',
+    label: 'Native (device)',
+    hint: "Uses the video's own built-in subtitle tracks, if the stream provides any — most scraped streams don't.",
+  },
+];
 
 export const SubtitleSettingsScreen = () => {
   const insets = useSafeAreaInsets();
@@ -62,25 +82,64 @@ export const SubtitleSettingsScreen = () => {
       </HStack>
 
       <ScrollView className="flex-1 px-4">
-        {/* Live preview */}
-        <Box className="mb-6 items-center rounded-lg bg-card py-8">
-          <Box
-            className="rounded-md px-3 py-1.5"
-            style={{ backgroundColor: `${settings.backgroundColor}${bgAlpha}` }}
-          >
-            <Text
+        {/* Live preview, only meaningful for our own overlay */}
+        {settings.renderMode === 'component' && (
+          <Box className="mb-6 items-center rounded-lg bg-card py-8">
+            <Box
+              className="rounded-md px-3 py-1.5"
               style={{
-                color: settings.textColor,
-                fontSize: settings.fontSize,
-                fontWeight: settings.bold ? '700' : '400',
+                backgroundColor: `${settings.backgroundColor}${bgAlpha}`,
               }}
             >
-              Sample subtitle preview
-            </Text>
+              <Text
+                style={{
+                  color: settings.textColor,
+                  fontSize: settings.fontSize,
+                  fontWeight: settings.bold ? '700' : '400',
+                }}
+              >
+                Sample subtitle preview
+              </Text>
+            </Box>
           </Box>
-        </Box>
+        )}
 
         <VStack space="xl" className="pb-10">
+          <SettingRow label="Subtitle rendering">
+            <VStack space="sm">
+              <Box className="flex-row flex-wrap" style={{ gap: 8 }}>
+                {RENDER_MODE_OPTIONS.map((opt) => {
+                  const active = settings.renderMode === opt.value;
+                  return (
+                    <Button
+                      key={opt.value}
+                      size="sm"
+                      variant={active ? 'default' : 'outline'}
+                      onPress={() => update({ renderMode: opt.value })}
+                    >
+                      <ButtonText
+                        className={
+                          active
+                            ? 'text-primary-foreground'
+                            : 'text-foreground'
+                        }
+                      >
+                        {opt.label}
+                      </ButtonText>
+                    </Button>
+                  );
+                })}
+              </Box>
+              <Text size="xs" className="text-muted-foreground">
+                {
+                  RENDER_MODE_OPTIONS.find(
+                    (o) => o.value === settings.renderMode,
+                  )?.hint
+                }
+              </Text>
+            </VStack>
+          </SettingRow>
+
           <SettingRow label="Default language">
             <Box className="flex-row flex-wrap" style={{ gap: 8 }}>
               {SUBTITLE_LANGUAGES.map((lang) => {
@@ -105,76 +164,103 @@ export const SubtitleSettingsScreen = () => {
             </Box>
           </SettingRow>
 
-          <SettingRow label="Font size">
-            <HStack space="md" className="items-center">
-              <Button size="sm" variant="outline" onPress={() => bumpFont(-1)}>
-                <ButtonText>A-</ButtonText>
-              </Button>
-              <Text className="min-w-10 text-center text-foreground">
-                {settings.fontSize}
-              </Text>
-              <Button size="sm" variant="outline" onPress={() => bumpFont(1)}>
-                <ButtonText>A+</ButtonText>
-              </Button>
-            </HStack>
-          </SettingRow>
+          {settings.renderMode === 'component' ? (
+            <>
+              <SettingRow label="Font size">
+                <HStack space="md" className="items-center">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={() => bumpFont(-1)}
+                  >
+                    <ButtonText>A-</ButtonText>
+                  </Button>
+                  <Text className="min-w-10 text-center text-foreground">
+                    {settings.fontSize}
+                  </Text>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={() => bumpFont(1)}
+                  >
+                    <ButtonText>A+</ButtonText>
+                  </Button>
+                </HStack>
+              </SettingRow>
 
-          <SettingRow label="Text color">
-            <HStack space="sm">
-              {TEXT_COLORS.map((c) => (
-                <ColorSwatch
-                  key={c}
-                  color={c}
-                  selected={settings.textColor === c}
-                  onPress={() => update({ textColor: c })}
-                />
-              ))}
-            </HStack>
-          </SettingRow>
+              <SettingRow label="Text color">
+                <HStack space="sm">
+                  {TEXT_COLORS.map((c) => (
+                    <ColorSwatch
+                      key={c}
+                      color={c}
+                      selected={settings.textColor === c}
+                      onPress={() => update({ textColor: c })}
+                    />
+                  ))}
+                </HStack>
+              </SettingRow>
 
-          <SettingRow label="Background">
-            <HStack space="sm">
-              {BG_COLORS.map((c) => (
-                <ColorSwatch
-                  key={c}
-                  color={c}
-                  selected={settings.backgroundColor === c}
-                  onPress={() => update({ backgroundColor: c })}
-                />
-              ))}
-            </HStack>
-          </SettingRow>
+              <SettingRow label="Background">
+                <HStack space="sm">
+                  {BG_COLORS.map((c) => (
+                    <ColorSwatch
+                      key={c}
+                      color={c}
+                      selected={settings.backgroundColor === c}
+                      onPress={() => update({ backgroundColor: c })}
+                    />
+                  ))}
+                </HStack>
+              </SettingRow>
 
-          <SettingRow label="Background opacity">
-            <HStack space="md" className="items-center">
-              <Button size="sm" variant="outline" onPress={() => bumpOpacity(-1)}>
-                <ButtonText>-</ButtonText>
-              </Button>
-              <Text className="min-w-12 text-center text-foreground">
-                {Math.round(settings.backgroundOpacity * 100)}%
-              </Text>
-              <Button size="sm" variant="outline" onPress={() => bumpOpacity(1)}>
-                <ButtonText>+</ButtonText>
-              </Button>
-            </HStack>
-          </SettingRow>
+              <SettingRow label="Background opacity">
+                <HStack space="md" className="items-center">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={() => bumpOpacity(-1)}
+                  >
+                    <ButtonText>-</ButtonText>
+                  </Button>
+                  <Text className="min-w-12 text-center text-foreground">
+                    {Math.round(settings.backgroundOpacity * 100)}%
+                  </Text>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={() => bumpOpacity(1)}
+                  >
+                    <ButtonText>+</ButtonText>
+                  </Button>
+                </HStack>
+              </SettingRow>
 
-          <SettingRow label="Bold">
-            <Button
-              size="sm"
-              variant={settings.bold ? 'default' : 'outline'}
-              className={settings.bold ? 'bg-primary' : undefined}
-              onPress={() => update({ bold: !settings.bold })}
-            >
-              <ButtonText
-                className={
-                  settings.bold ? 'text-primary-foreground' : 'text-foreground'
-                }
-              >
-                {settings.bold ? 'On' : 'Off'}
-              </ButtonText>
-            </Button>
-          </SettingRow>
+              <SettingRow label="Bold">
+                <Button
+                  size="sm"
+                  variant={settings.bold ? 'default' : 'outline'}
+                  className={settings.bold ? 'bg-primary' : undefined}
+                  onPress={() => update({ bold: !settings.bold })}
+                >
+                  <ButtonText
+                    className={
+                      settings.bold
+                        ? 'text-primary-foreground'
+                        : 'text-foreground'
+                    }
+                  >
+                    {settings.bold ? 'On' : 'Off'}
+                  </ButtonText>
+                </Button>
+              </SettingRow>
+            </>
+          ) : (
+            <Text size="sm" className="text-muted-foreground">
+              Native captions are styled by your device, not by Flick — these
+              appearance options only apply to App captions.
+            </Text>
+          )}
 
           <Button variant="outline" onPress={reset} className="mt-4">
             <ButtonText>Reset to defaults</ButtonText>

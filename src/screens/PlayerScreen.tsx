@@ -70,6 +70,13 @@ export const PlayerScreen = ({
    * available" UI instead of silently falling back to a sample URL.
    */
   const [noSource, setNoSource] = useState(false);
+  /**
+   * Debug mode only: set once a stream URL has actually been intercepted,
+   * even though we deliberately don't hand off to `PlayerCore` for it (see
+   * `onExtracted`). Just flips the status badge below so it's clear the page
+   * is now the thing actually playing the video, not still searching.
+   */
+  const [debugStreamFound, setDebugStreamFound] = useState(false);
   // `resumeFrom` only applies to the initial episode; switches always start
   // from the beginning.
   const [effectiveResumeFrom, setEffectiveResumeFrom] = useState<
@@ -145,6 +152,16 @@ export const PlayerScreen = ({
 
   const onExtracted = useCallback(
     ({ videoUrl: url }: ExtractedStream) => {
+      // Debug mode: a stream request was intercepted, confirming the page
+      // itself is now actually playing the video — but deliberately don't
+      // hand off to the native `PlayerCore`. Some streams that fail (DRM,
+      // header/cookie quirks, decoder support) in expo-video play back fine
+      // directly inside the browser context that resolved them, so staying
+      // on the WebView here doubles as a way to actually watch those.
+      if (scraperDebugEnabled) {
+        setDebugStreamFound(true);
+        return;
+      }
       finish({
         uri: url,
         contentType: url.includes('.m3u8') ? 'hls' : 'auto',
@@ -159,7 +176,7 @@ export const PlayerScreen = ({
         },
       });
     },
-    [finish, activeServer.url],
+    [finish, activeServer.url, scraperDebugEnabled],
   );
 
   // On scrape failure/timeout, show the empty state — no sample-URL
@@ -179,6 +196,7 @@ export const PlayerScreen = ({
       resolvedRef.current = false;
       setSource(null);
       setNoSource(false);
+      setDebugStreamFound(false);
       setEffectiveResumeFrom(undefined);
       setSeason(nextSeason);
       setEpisode(nextEpisode);
@@ -257,13 +275,18 @@ export const PlayerScreen = ({
         />
       )}
       {scraperDebugEnabled ? (
-        // Debug: keep the WebView visible/interactive; show a small badge only.
+        // Debug: keep the WebView visible/interactive — once a stream is
+        // found we deliberately keep showing it (see `onExtracted`) instead
+        // of switching to the native player, so the page keeps playing the
+        // video itself. Just a small status badge on top.
         <Center
           className="absolute bottom-6 self-center rounded-full bg-black/80 px-4 py-2"
           pointerEvents="none"
         >
           <Text size="xs" className="text-muted-foreground">
-            Finding stream… (debug)
+            {debugStreamFound
+              ? 'Stream found — playing in WebView (debug)'
+              : 'Finding stream… (debug, no timeout)'}
           </Text>
         </Center>
       ) : (
