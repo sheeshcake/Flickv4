@@ -65,9 +65,13 @@ export const PlayerCore = ({
   onSelectEpisode,
 }: PlayerCoreProps) => {
   const isFocused = useIsFocused();
-  const { upsert } = useContinueWatching();
+  const { upsert, advanceEpisode } = useContinueWatching();
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
+  // Set right before autoplay hands off to the next episode. Guards the
+  // unmount cleanup below from clobbering the Continue Watching entry we
+  // just re-pointed at the next episode (see `playNextEpisode`).
+  const advancingRef = useRef(false);
   // Latest position/duration mirrored into refs so unmount cleanup never
   // touches the (already released) player during back navigation.
   const currentTimeRef = useRef(0);
@@ -122,7 +126,7 @@ export const PlayerCore = ({
     // Widen the forward-buffer window a bit so stalls are less common on
     // spotty networks. Android-only fields no-op on iOS.
     p.bufferOptions = {
-      preferredForwardBufferDuration: 500, // Android default 20, iOS 0 = auto
+      preferredForwardBufferDuration: 1000, // Android default 20, iOS 0 = auto
       minBufferForPlayback: 3,
       prioritizeTimeOverSizeThreshold: true,
     };
@@ -162,9 +166,19 @@ export const PlayerCore = ({
 
   const playNextEpisode = useCallback(() => {
     if (nextEpisodeInfo) {
+      // Re-point the show's Continue Watching entry at the next episode
+      // *before* handing off, so it never disappears mid-transition (the
+      // outgoing PlayerCore's unmount save would otherwise remove it, since
+      // it finished this episode at ~100%). See `advancingRef` below.
+      advancingRef.current = true;
+      advanceEpisode(
+        item,
+        nextEpisodeInfo.season,
+        nextEpisodeInfo.episode.episode_number,
+      );
       onSelectEpisode?.(nextEpisodeInfo.season, nextEpisodeInfo.episode);
     }
-  }, [nextEpisodeInfo, onSelectEpisode]);
+  }, [nextEpisodeInfo, onSelectEpisode, advanceEpisode, item]);
 
   // Fires once when the video plays through to its natural end. Just flags
   // that an advance decision is due — the actual decision is made by the
@@ -312,6 +326,12 @@ export const PlayerCore = ({
 
   useEffect(() => {
     return () => {
+      // Skip the "episode finished" save when we're mid-handoff to the next
+      // episode — `playNextEpisode` already re-pointed the Continue
+      // Watching entry at the new episode, and this call's ratio>0.95
+      // removal would otherwise immediately delete it again (same
+      // per-show dedupe key).
+      if (advancingRef.current) return;
       saveProgress();
     };
   }, [saveProgress]);

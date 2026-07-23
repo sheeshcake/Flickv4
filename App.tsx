@@ -7,10 +7,12 @@ import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { AppNavigator } from '@/src/navigation/AppNavigator';
 import { SubtitleSettingsProvider } from '@/src/hooks/useSubtitleSettings';
 import { ContinueWatchingProvider } from '@/src/hooks/useContinueWatching';
+import { FinishedMoviesProvider } from '@/src/hooks/useFinishedMovies';
 import { ServersProvider } from '@/src/hooks/useServers';
 import { MyListProvider } from '@/src/hooks/useMyList';
 import { VideoQualityProvider } from '@/src/hooks/useVideoQuality';
 import { VideoAspectProvider } from '@/src/hooks/useVideoAspect';
+import { PlayerDebugSettingsProvider } from '@/src/hooks/usePlayerDebugSettings';
 import { DownloadsProvider } from '@/src/hooks/useDownloads';
 import { DownloadResolverHost } from '@/src/components/DownloadResolverHost';
 import { UpdateChecker } from '@/src/components/UpdateChecker';
@@ -37,14 +39,18 @@ export default function App() {
               <SubtitleSettingsProvider>
                 <VideoQualityProvider>
                   <VideoAspectProvider>
-                    <ContinueWatchingProvider>
-                      <DownloadsProvider>
-                        <StatusBar style="light" />
-                        <AppNavigator />
-                        <DownloadResolverHost />
-                        <UpdateChecker />
-                      </DownloadsProvider>
-                    </ContinueWatchingProvider>
+                    <PlayerDebugSettingsProvider>
+                      <FinishedMoviesProvider>
+                        <ContinueWatchingProvider>
+                          <DownloadsProvider>
+                            <StatusBar style="light" />
+                            <AppNavigator />
+                            <DownloadResolverHost />
+                            <UpdateChecker />
+                          </DownloadsProvider>
+                        </ContinueWatchingProvider>
+                      </FinishedMoviesProvider>
+                    </PlayerDebugSettingsProvider>
                   </VideoAspectProvider>
                 </VideoQualityProvider>
               </SubtitleSettingsProvider>

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal, ScrollView } from 'react-native';
 import { X } from 'lucide-react-native';
+import type { File } from 'expo-file-system';
 import { Box } from '@/components/ui/box';
 import { HStack } from '@/components/ui/hstack';
 import { VStack } from '@/components/ui/vstack';
@@ -25,7 +26,14 @@ interface UpdateModalProps {
   onSkipVersion?: () => void;
 }
 
-type UpdateState = 'checking' | 'available' | 'up-to-date' | 'error';
+type UpdateState =
+  | 'checking'
+  | 'available'
+  | 'up-to-date'
+  | 'error'
+  | 'downloading'
+  | 'installing'
+  | 'downloaded';
 
 export const UpdateModal = ({
   visible,
@@ -36,6 +44,17 @@ export const UpdateModal = ({
   const [state, setState] = useState<UpdateState>('checking');
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+
+  // In-app download/install flow state (Android only — see `downloadUrl`).
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(0);
+  const [downloadedFile, setDownloadedFile] = useState<File | null>(null);
+
+  // Tracked so the unmount/close cleanup only cancels a download that's
+  // actually still in flight, not one that already finished.
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const runCheck = useCallback(async () => {
     setState('checking');
@@ -54,6 +73,10 @@ export const UpdateModal = ({
 
   useEffect(() => {
     if (!visible) return;
+    setDownloadProgress(0);
+    setDownloadedBytes(0);
+    setTotalBytes(0);
+    setDownloadedFile(null);
     if (initialUpdateInfo) {
       setInfo(initialUpdateInfo);
       setState(initialUpdateInfo.hasUpdate ? 'available' : 'up-to-date');
@@ -62,15 +85,83 @@ export const UpdateModal = ({
     }
   }, [visible, initialUpdateInfo, runCheck]);
 
-  const openDownload = useCallback(async () => {
-    if (!info) return;
-    await updateService.openDownloadOrRelease(info);
-  }, [info]);
+  // If the modal is closed/unmounted mid-download, don't leave an orphaned
+  // download silently running forever in the background.
+  useEffect(() => {
+    return () => {
+      if (stateRef.current === 'downloading') updateService.cancelDownload();
+    };
+  }, []);
 
   const openReleasePage = useCallback(async () => {
     if (!info?.releaseUrl) return;
     await updateService.openReleasePage(info.releaseUrl);
   }, [info]);
+
+  // Hands a downloaded file to the system installer and reacts to the
+  // result. A successful install typically kills/replaces this process
+  // before the promise below even resolves — if we DO see it resolve, the
+  // user most likely backed out of the installer, so offer a retry using
+  // the file we already have (no need to re-download).
+  const runInstall = useCallback(async (file: File) => {
+    setState('installing');
+    try {
+      // Either outcome lands here in the same place: if the install
+      // actually completed, this process is almost certainly about to be
+      // replaced anyway; if it was cancelled, `downloaded` lets the user
+      // retry without re-fetching the file.
+      await updateService.installApk(file);
+      setState('downloaded');
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Failed to open the installer.',
+      );
+      setState('error');
+    }
+  }, []);
+
+  // Primary "Update" action: downloads the APK in-app with progress, then
+  // automatically launches the installer — no extra manual step beyond the
+  // OS's own install confirmation dialog.
+  const startUpdate = useCallback(async () => {
+    if (!info?.downloadUrl) {
+      // No direct APK asset for this platform — fall back to the release page.
+      await openReleasePage();
+      return;
+    }
+    setState('downloading');
+    setDownloadProgress(0);
+    setDownloadedBytes(0);
+    setTotalBytes(info.assetSize ?? 0);
+    try {
+      const file = await updateService.downloadApk(
+        info.downloadUrl,
+        ({ bytesWritten, totalBytes: total }) => {
+          setDownloadedBytes(bytesWritten);
+          if (total > 0) {
+            setTotalBytes(total);
+            setDownloadProgress(Math.min(100, (bytesWritten / total) * 100));
+          }
+        },
+      );
+      setDownloadedFile(file);
+      await runInstall(file);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Failed to download the update.',
+      );
+      setState('error');
+    }
+  }, [info, openReleasePage, runInstall]);
+
+  const cancelDownloadFlow = useCallback(() => {
+    updateService.cancelDownload();
+    setState('available');
+  }, []);
+
+  const retryInstall = useCallback(() => {
+    if (downloadedFile) void runInstall(downloadedFile);
+  }, [downloadedFile, runInstall]);
 
   return (
     <Modal
@@ -131,48 +222,11 @@ export const UpdateModal = ({
 
               {state === 'available' && info && (
                 <VStack space="md">
-                  <VStack className="rounded-lg bg-background/40 p-4">
-                    <HStack className="items-center justify-between">
-                      <Text size="sm" className="text-muted-foreground">
-                        Current
-                      </Text>
-                      <Text className="font-semibold text-foreground">
-                        {info.currentVersion}
-                      </Text>
-                    </HStack>
-                    <HStack className="mt-2 items-center justify-between">
-                      <Text size="sm" className="text-muted-foreground">
-                        New
-                      </Text>
-                      <Text className="font-semibold text-primary">
-                        {info.latestVersion}
-                      </Text>
-                    </HStack>
-                  </VStack>
-
-                  {!!info.releaseDate && (
-                    <Text size="xs" className="text-muted-foreground">
-                      Released: {updateService.formatDate(info.releaseDate)}
-                    </Text>
-                  )}
-                  {!!info.assetSize && (
-                    <Text size="xs" className="text-muted-foreground">
-                      Download size: {updateService.formatFileSize(info.assetSize)}
-                    </Text>
-                  )}
-
-                  <VStack space="xs" className="rounded-lg bg-background/40 p-4">
-                    <Text className="font-semibold text-foreground">
-                      What&apos;s new
-                    </Text>
-                    <Text size="sm" className="text-muted-foreground">
-                      {info.releaseNotes}
-                    </Text>
-                  </VStack>
+                  <VersionSummary info={info} />
 
                   <VStack space="sm" className="mt-2">
                     <Focusable
-                      onPress={openDownload}
+                      onPress={startUpdate}
                       hasTVPreferredFocus
                       className="items-center rounded-md bg-primary px-4 py-3"
                       focusedClassName="border-2 border-foreground"
@@ -201,6 +255,77 @@ export const UpdateModal = ({
                 </VStack>
               )}
 
+              {state === 'downloading' && info && (
+                <VStack space="md">
+                  <VersionSummary info={info} />
+
+                  <VStack space="sm" className="mt-2">
+                    <HStack className="items-center justify-between">
+                      <Text size="sm" className="text-foreground">
+                        Downloading…
+                      </Text>
+                      <Text size="sm" className="text-muted-foreground">
+                        {Math.round(downloadProgress)}%
+                      </Text>
+                    </HStack>
+                    <Box className="h-2 w-full overflow-hidden rounded-full bg-background/60">
+                      <Box
+                        className="h-2 rounded-full bg-primary"
+                        style={{ width: `${Math.min(100, Math.max(0, downloadProgress))}%` }}
+                      />
+                    </Box>
+                    <Text size="xs" className="text-muted-foreground">
+                      {updateService.formatFileSize(downloadedBytes)}
+                      {totalBytes > 0
+                        ? ` / ${updateService.formatFileSize(totalBytes)}`
+                        : ''}
+                    </Text>
+
+                    <Focusable
+                      onPress={cancelDownloadFlow}
+                      className="mt-2 items-center rounded-md border border-border px-4 py-3"
+                      focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                    >
+                      <Text className="text-foreground">Cancel</Text>
+                    </Focusable>
+                  </VStack>
+                </VStack>
+              )}
+
+              {state === 'installing' && (
+                <VStack space="md" className="items-center py-8">
+                  <Spinner size="large" color="#E50914" />
+                  <Text className="text-foreground">Opening installer…</Text>
+                  <Text size="xs" className="text-center text-muted-foreground">
+                    Confirm the install prompt to finish updating.
+                  </Text>
+                </VStack>
+              )}
+
+              {state === 'downloaded' && info && (
+                <VStack space="md">
+                  <VersionSummary info={info} />
+
+                  <Text size="xs" className="text-center text-muted-foreground">
+                    Downloaded — install was cancelled or dismissed. You can
+                    try again without re-downloading.
+                  </Text>
+
+                  <VStack space="sm" className="mt-2">
+                    <Focusable
+                      onPress={retryInstall}
+                      hasTVPreferredFocus
+                      className="items-center rounded-md bg-primary px-4 py-3"
+                      focusedClassName="border-2 border-foreground"
+                    >
+                      <Text className="font-semibold text-primary-foreground">
+                        Install
+                      </Text>
+                    </Focusable>
+                  </VStack>
+                </VStack>
+              )}
+
               {state === 'error' && (
                 <VStack space="md" className="items-center py-8">
                   <Text size="3xl" className="text-primary">
@@ -213,7 +338,7 @@ export const UpdateModal = ({
                     {errorMessage || 'Please try again in a moment.'}
                   </Text>
                   <Focusable
-                    onPress={runCheck}
+                    onPress={info ? startUpdate : runCheck}
                     className="mt-4 rounded-md bg-primary px-4 py-3"
                     focusedClassName="border-2 border-foreground"
                   >
@@ -221,6 +346,17 @@ export const UpdateModal = ({
                       Try again
                     </Text>
                   </Focusable>
+                  {info?.releaseUrl && (
+                    <Focusable
+                      onPress={openReleasePage}
+                      className="mt-1 rounded-md border border-border px-4 py-3"
+                      focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                    >
+                      <Text className="text-foreground">
+                        Open in browser instead
+                      </Text>
+                    </Focusable>
+                  )}
                 </VStack>
               )}
             </ScrollView>
@@ -230,3 +366,45 @@ export const UpdateModal = ({
     </Modal>
   );
 };
+
+/** Current → new version comparison + release notes, shared across states. */
+const VersionSummary = ({ info }: { info: UpdateInfo }) => (
+  <>
+    <VStack className="rounded-lg bg-background/40 p-4">
+      <HStack className="items-center justify-between">
+        <Text size="sm" className="text-muted-foreground">
+          Current
+        </Text>
+        <Text className="font-semibold text-foreground">
+          {info.currentVersion}
+        </Text>
+      </HStack>
+      <HStack className="mt-2 items-center justify-between">
+        <Text size="sm" className="text-muted-foreground">
+          New
+        </Text>
+        <Text className="font-semibold text-primary">
+          {info.latestVersion}
+        </Text>
+      </HStack>
+    </VStack>
+
+    {!!info.releaseDate && (
+      <Text size="xs" className="text-muted-foreground">
+        Released: {updateService.formatDate(info.releaseDate)}
+      </Text>
+    )}
+    {!!info.assetSize && (
+      <Text size="xs" className="text-muted-foreground">
+        Download size: {updateService.formatFileSize(info.assetSize)}
+      </Text>
+    )}
+
+    <VStack space="xs" className="rounded-lg bg-background/40 p-4">
+      <Text className="font-semibold text-foreground">What&apos;s new</Text>
+      <Text size="sm" className="text-muted-foreground">
+        {info.releaseNotes}
+      </Text>
+    </VStack>
+  </>
+);

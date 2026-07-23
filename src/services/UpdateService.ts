@@ -1,4 +1,11 @@
 import { Linking, Platform } from 'react-native';
+import {
+  File,
+  Paths,
+  type DownloadProgress,
+  type DownloadTask,
+} from 'expo-file-system';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { version as currentVersion } from '../../package.json';
 import { UPDATE_CONFIG } from '@/src/config/env';
 
@@ -10,10 +17,11 @@ import { UPDATE_CONFIG } from '@/src/config/env';
  * Adapted from https://github.com/sheeshcake/Flickv4/blob/main/src/services/UpdateService.ts
  * with the following changes for this codebase:
  * - Uses global `fetch` instead of `axios` (no extra dependency).
- * - Removes bundled APK download/install (would require `react-native-fs`
- *   plus a custom `ApkInstaller` native module + prebuild rebuild). We
- *   instead hand the download URL to the system browser via `Linking`, which
- *   triggers the standard Android "install from unknown sources" flow.
+ * - Downloads the APK in-app (via `expo-file-system`'s `File.createDownloadTask`,
+ *   with progress) and hands it to the system installer directly (via
+ *   `expo-intent-launcher`'s `INSTALL_PACKAGE` intent, using the file's
+ *   built-in Android `contentUri`) instead of routing through the system
+ *   browser — see `downloadApk`/`installApk` below.
  * - Reads the current app version from `package.json`, which is kept in
  *   lockstep with `app.json`'s `expo.version` (both currently `2.0.0`).
  */
@@ -103,7 +111,18 @@ const findApkAsset = (assets: ReleaseAsset[]): ReleaseAsset | null => {
   return preferred ?? assets.find((a) => a.name.endsWith('.apk')) ?? null;
 };
 
+// Fixed filename in the cache directory so a stale copy from a previous
+// attempt/check can be found and cleared before starting a new download.
+const APK_FILENAME = 'flick-update.apk';
+
+// `Intent.FLAG_GRANT_READ_URI_PERMISSION` — required so the Package
+// Installer (a different app/process) can read our content:// URI.
+const FLAG_GRANT_READ_URI_PERMISSION = 1;
+
 class UpdateService {
+  /** The in-flight APK download task, if any — lets `cancelDownload` stop it. */
+  private activeDownload: DownloadTask | null = null;
+
   getCurrentVersion(): string {
     return currentVersion;
   }
@@ -207,6 +226,75 @@ class UpdateService {
     if (!url) return;
     const canOpen = await Linking.canOpenURL(url);
     if (canOpen) await Linking.openURL(url);
+  }
+
+  /**
+   * Downloads an APK into the app's cache directory, reporting progress via
+   * `onProgress`. Clears out any stale copy from a previous attempt first so
+   * the download always starts clean. Only one download is tracked at a
+   * time — starting a new one before finishing/cancelling the last just
+   * replaces the tracked task (used by `cancelDownload`).
+   */
+  async downloadApk(
+    url: string,
+    onProgress?: (progress: DownloadProgress) => void,
+  ): Promise<File> {
+    const destination = new File(Paths.cache, APK_FILENAME);
+    if (destination.exists) {
+      try {
+        destination.delete();
+      } catch {
+        /* best-effort — a locked/missing file here isn't fatal */
+      }
+    }
+
+    const task = File.createDownloadTask(url, destination, { onProgress });
+    this.activeDownload = task;
+    try {
+      const file = await task.downloadAsync();
+      if (!file) {
+        // `downloadAsync` resolves `null` only when paused — we never pause,
+        // so this would only happen if something externally interfered.
+        throw new Error('Download did not complete.');
+      }
+      return file;
+    } finally {
+      if (this.activeDownload === task) this.activeDownload = null;
+    }
+  }
+
+  /** Cancels the in-flight `downloadApk` call, if any. No-op otherwise. */
+  cancelDownload(): void {
+    this.activeDownload?.cancel();
+    this.activeDownload = null;
+  }
+
+  /**
+   * Hands a downloaded APK off to the Android system installer via the
+   * `INSTALL_PACKAGE` intent, using the file's built-in Android `contentUri`
+   * (no manual `FileProvider` plumbing needed with the new `expo-file-system`
+   * API). Resolves once the user returns to the app — check `resultCode` on
+   * the returned result to tell a completed install from a cancelled one.
+   *
+   * Android-only. Even with `REQUEST_INSTALL_PACKAGES` declared in the
+   * manifest, Android still shows a one-time "Allow installs from this app"
+   * toggle the first time — that's an OS security gate no app-side code can
+   * skip.
+   */
+  async installApk(
+    file: File,
+  ): Promise<IntentLauncher.IntentLauncherResult> {
+    if (Platform.OS !== 'android') {
+      throw new Error('In-app install is only supported on Android.');
+    }
+    return IntentLauncher.startActivityAsync(
+      'android.intent.action.INSTALL_PACKAGE',
+      {
+        data: file.contentUri,
+        flags: FLAG_GRANT_READ_URI_PERMISSION,
+        type: 'application/vnd.android.package-archive',
+      },
+    );
   }
 }
 

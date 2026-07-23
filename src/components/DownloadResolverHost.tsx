@@ -74,7 +74,12 @@ export const DownloadResolverHost = () => {
   return (
     <View style={styles.hidden} pointerEvents="none">
       <WebViewScraper
-        baseUrl={job.baseUrl}
+        // Downloads always resolve against the default `{url}/{type}/{tmdbId}`
+        // pattern — `ResolveRequest` only carries a plain base URL, not a
+        // full server config, so a custom pattern/TV type label set on a
+        // server only applies to live playback (`PlayerScreen`), not queued
+        // downloads.
+        server={{ url: job.baseUrl }}
         tmdbId={job.tmdbId}
         type={job.type}
         season={job.season}
@@ -87,12 +92,16 @@ export const DownloadResolverHost = () => {
 };
 
 const styles = StyleSheet.create({
+  // Full-size (not 1x1) so the inner WebViewScraper's own full-size hidden
+  // style isn't clipped down by this wrapper — see the comment on
+  // `WebViewScraper`'s `styles.hidden` for why a tiny viewport can make some
+  // ad-supported embeds silently refuse to serve the real video request.
   hidden: {
     position: 'absolute',
-    top: -10000,
-    left: -10000,
-    width: 1,
-    height: 1,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     opacity: 0,
   },
 });

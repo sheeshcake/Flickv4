@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type {
   WebViewMessageEvent,
   WebViewErrorEvent,
 } from 'react-native-webview/lib/WebViewTypes';
-import { buildEmbedUrl } from '@/src/utils/streamUrl';
+import { buildEmbedUrl, type ServerUrlConfig } from '@/src/utils/streamUrl';
 
 export interface ExtractedStream {
   videoUrl: string;
@@ -13,17 +13,27 @@ export interface ExtractedStream {
 }
 
 interface WebViewScraperProps {
-  /** Base URL of the active playback server, e.g. https://vidfast.pro */
-  baseUrl: string;
+  /** Playback server to scrape against — base URL + optional custom URL pattern/type label. */
+  server: ServerUrlConfig;
   tmdbId: number;
   type: 'movie' | 'tv';
   season?: number;
   episode?: number;
+  /** Raw media title — fills the `{slug}` placeholder for servers that need it. */
+  title?: string;
   onDataExtracted: (data: ExtractedStream) => void;
   onLoading?: (isLoading: boolean) => void;
   onError?: (error: string) => void;
   /** Temporarily render the WebView full-screen & interactive for debugging. */
   debug?: boolean;
+  /**
+   * Render the WebView visible (and interactive, in case a challenge needs
+   * solving) inside a caller-provided box instead of fully hidden — e.g. a
+   * small "Testing…" preview window. Ignored when `debug` is true. Pass the
+   * sizing/position style (the WebView itself fills it via
+   * `StyleSheet.absoluteFill`).
+   */
+  previewStyle?: StyleProp<ViewStyle>;
 }
 
 interface MessageData {
@@ -49,9 +59,12 @@ const TAG = '[WebViewScraper]';
 // eslint-disable-next-line no-console
 const log = (...args: unknown[]) => console.log(TAG, ...args);
 
-// Injected into the page (and every frame): hooks XMLHttpRequest to catch
-// video responses (m3u8/mp4/webm/mkv) and posts the resolved URL back to React
-// Native. Also forwards debug logs (type: 'log') so they surface in devtools.
+// Injected into the page (and every frame): hooks XMLHttpRequest AND fetch()
+// to catch video responses (m3u8/mp4/webm/mkv) and posts the resolved URL
+// back to React Native. Some newer players (hls.js configured with a fetch
+// loader, native <video> + MSE via fetch, etc.) issue segment/manifest
+// requests through `fetch` instead of `XMLHttpRequest`, so both are patched.
+// Also forwards debug logs (type: 'log') so they surface in devtools.
 const INJECTED_JAVASCRIPT = `
 (function() {
   function post(p) {
@@ -63,6 +76,16 @@ const INJECTED_JAVASCRIPT = `
 
   var VIDEO_RE = /\\.(m3u8|mp4|webm|mkv)($|\\?)/i;
 
+  function reportIfVideo(url, source) {
+    if (!url || !VIDEO_RE.test(url)) return;
+    log(source + ' ' + url);
+    post({
+      type: 'video',
+      responseURL: url,
+      isWebM: /\\.webm($|\\?)/i.test(url)
+    });
+  }
+
   log('hook installed');
 
   var originalOpen = XMLHttpRequest.prototype.open;
@@ -72,21 +95,30 @@ const INJECTED_JAVASCRIPT = `
         var responseURL = this.responseURL;
         if (!responseURL) return;
         log('xhr ' + responseURL);
-
-        var isVideo = VIDEO_RE.test(responseURL);
-        if (isVideo) {
-          post({
-            type: 'video',
-            responseURL: responseURL,
-            isWebM: /\\.webm($|\\?)/i.test(responseURL)
-          });
-        }
+        reportIfVideo(responseURL, 'xhr');
       } catch (error) {
         log('xhr listener error: ' + error);
       }
     });
     originalOpen.apply(this, arguments);
   };
+
+  if (window.fetch) {
+    var originalFetch = window.fetch;
+    window.fetch = function(input, init) {
+      var requestUrl = typeof input === 'string' ? input : (input && input.url);
+      return originalFetch.apply(this, arguments).then(function(response) {
+        try {
+          var responseURL = response.url || requestUrl;
+          log('fetch ' + responseURL);
+          reportIfVideo(responseURL, 'fetch');
+        } catch (error) {
+          log('fetch listener error: ' + error);
+        }
+        return response;
+      });
+    };
+  }
 })();
 true;
 `;
@@ -94,29 +126,49 @@ true;
 /**
  * WebView that loads a streaming-server embed page and intercepts the
  * underlying video request via an injected XMLHttpRequest hook, returning the
- * resolved stream URL. Rendered hidden (offscreen) so it never affects layout.
+ * resolved stream URL. When not previewed, it's rendered fully transparent
+ * and non-interactive (`styles.hidden`) at *normal screen size* — not a 1x1
+ * box — so it never affects layout or catches touches, but still presents a
+ * normal-looking viewport to the page. Many ad-supported embeds fingerprint
+ * `window.innerWidth/innerHeight` (or use `IntersectionObserver`/size checks
+ * before initializing their player) as a bot signal; a 1x1 viewport can make
+ * those sites quietly refuse to ever fire the real video request, even
+ * though the exact same URL resolves fine in a normally-sized WebView (e.g.
+ * the visible "Test" preview in `ServerSettingsScreen`).
  *
  * Reimplementation of the reference `WebViewScrapper` adapted to this app:
  * configurable server (`baseUrl` + `buildEmbedUrl`) and debug logging.
  */
 export const WebViewScraper = ({
-  baseUrl,
+  server,
   tmdbId,
   type,
   season,
   episode,
+  title,
   onDataExtracted,
   onLoading,
   onError,
   debug = false,
+  previewStyle,
 }: WebViewScraperProps) => {
   const [webViewKey, setWebViewKey] = useState(0);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasExtractedDataRef = useRef(false);
 
   const embedUrl = useMemo(
-    () => buildEmbedUrl(baseUrl, { type, tmdbId, season, episode }),
-    [baseUrl, type, tmdbId, season, episode],
+    () => buildEmbedUrl(server, { type, tmdbId, season, episode, title }),
+    [
+      server.url,
+      server.urlPattern,
+      server.movieTypeLabel,
+      server.tvTypeLabel,
+      type,
+      tmdbId,
+      season,
+      episode,
+      title,
+    ],
   );
 
   // Reset the WebView when the target changes.
@@ -200,11 +252,13 @@ export const WebViewScraper = ({
     };
   }, []);
 
+  const visible = debug || !!previewStyle;
+  const containerStyle = debug
+    ? StyleSheet.absoluteFill
+    : (previewStyle ?? styles.hidden);
+
   return (
-    <View
-      style={debug ? StyleSheet.absoluteFill : styles.hidden}
-      pointerEvents={debug ? 'auto' : 'none'}
-    >
+    <View style={containerStyle} pointerEvents={visible ? 'auto' : 'none'}>
       <WebView
         key={webViewKey}
         source={{ uri: embedUrl }}
@@ -241,12 +295,14 @@ export const WebViewScraper = ({
 };
 
 const styles = StyleSheet.create({
+  // Fully transparent + non-interactive, but sized like a real screen (NOT
+  // 1x1 — see the class doc comment above for why that broke some servers).
   hidden: {
     position: 'absolute',
-    top: -10000,
-    left: -10000,
-    width: 1,
-    height: 1,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     opacity: 0,
   },
 });
