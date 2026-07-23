@@ -3,13 +3,21 @@ import { Box } from '@/components/ui/box';
 import { Text } from '@/components/ui/text';
 import { Heading } from '@/components/ui/heading';
 import { VStack } from '@/components/ui/vstack';
-import type { WyzieSubtitle } from '@/src/services/WyzieService';
+
+/** A single selectable entry, decoupled from where the track actually came
+ * from (a Wyzie search result vs. a native `expo-video` `SubtitleTrack`). */
+export interface SubtitleTrackOption {
+  id: string;
+  label: string;
+}
 
 interface SubtitleTrackSheetProps {
   visible: boolean;
-  tracks: WyzieSubtitle[];
+  tracks: SubtitleTrackOption[];
   selectedId: string | null;
   loading?: boolean;
+  /** Shown instead of the list when `tracks` is empty and not loading. */
+  emptyLabel?: string;
   onSelect: (id: string | null) => void;
   onClose: () => void;
 }
@@ -19,6 +27,7 @@ export const SubtitleTrackSheet = ({
   tracks,
   selectedId,
   loading,
+  emptyLabel = 'No subtitles found for this title.',
   onSelect,
   onClose,
 }: SubtitleTrackSheetProps) => {
@@ -49,7 +58,7 @@ export const SubtitleTrackSheet = ({
               {tracks.map((track) => (
                 <TrackRow
                   key={track.id}
-                  label={`${track.display}${track.isHearingImpaired ? ' (CC)' : ''}`}
+                  label={track.label}
                   active={selectedId === track.id}
                   onPress={() => {
                     onSelect(track.id);
@@ -59,7 +68,7 @@ export const SubtitleTrackSheet = ({
               ))}
               {!tracks.length && (
                 <Text size="sm" className="py-2 text-muted-foreground">
-                  No subtitles found for this title.
+                  {emptyLabel}
                 </Text>
               )}
             </VStack>

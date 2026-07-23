@@ -8,6 +8,7 @@ import {
   Captions,
   CheckCircle2,
   Download,
+  Gauge,
   Info,
   Heart,
   MonitorPlay,
@@ -36,6 +37,8 @@ import { UpdateModal } from '@/src/components/UpdateModal';
 import { updateService } from '@/src/services/UpdateService';
 import { useFinishedMovies } from '@/src/hooks/useFinishedMovies';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
+import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
+import { formatMemoryGb } from '@/src/utils/deviceRecommendations';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import type { RootStackParamList } from '@/src/navigation/types';
 
@@ -48,6 +51,8 @@ export const SettingsScreen = () => {
   const { entries: finishedMovies } = useFinishedMovies();
   const { scraperDebugEnabled, setScraperDebugEnabled } =
     usePlayerDebugSettings();
+  const { forwardBufferSeconds, effectiveForwardBufferSeconds, deviceTotalMemory } =
+    usePlaybackSettings();
   const { settings: subtitleSettings } = useSubtitleSettings();
   const { preference: videoQuality } = useVideoQuality();
   const { aspect: videoAspect } = useVideoAspect();
@@ -88,6 +93,12 @@ export const SettingsScreen = () => {
           onPress={() => navigation.navigate('SubtitleSettings')}
         />
         <MenuRow
+          icon={Gauge}
+          label="Buffering"
+          value={`${effectiveForwardBufferSeconds}s${forwardBufferSeconds == null ? ' · Auto' : ''} · ${formatMemoryGb(deviceTotalMemory)} RAM`}
+          onPress={() => navigation.navigate('PlaybackPerformance')}
+        />
+        <MenuRow
           icon={CheckCircle2}
           label="Finished movies"
           value={`${finishedMovies.length} completed`}
@@ -114,7 +125,7 @@ export const SettingsScreen = () => {
         <SwitchRow
           icon={Bug}
           label="Debug video player"
-          hint="Show the stream-finder webpage while a video loads"
+          hint="Show the stream-finder webpage, never time out, and play video directly in it instead of handing off to the built-in player, 3rd party players may have ads"
           value={scraperDebugEnabled}
           onToggle={setScraperDebugEnabled}
         />

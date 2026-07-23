@@ -29,6 +29,7 @@ import {
   UP_NEXT_LEAD_SECONDS,
   useNextEpisode,
 } from '@/src/hooks/useNextEpisode';
+import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
 import { useSubtitles } from '@/src/hooks/useSubtitles';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { useVideoAspect } from '@/src/hooks/useVideoAspect';
@@ -121,12 +122,20 @@ export const PlayerCore = ({
   const didApplyInitialQualityRef = useRef(false);
   const { pickInitial: pickInitialVariant } = useVideoQuality();
 
+  // Settings > "Buffering" — user-editable forward-buffer window, defaulting
+  // to a recommendation derived from the device's RAM (see
+  // `deviceRecommendations.ts`). Read once here: like `resumeFrom` and the
+  // other options below, this only applies at player-creation time (the
+  // player is never recreated mid-playback — see the class doc comment).
+  const { effectiveForwardBufferSeconds } = usePlaybackSettings();
+
   const player = useVideoPlayer(source, (p) => {
     p.timeUpdateEventInterval = 0.5;
-    // Widen the forward-buffer window a bit so stalls are less common on
-    // spotty networks. Android-only fields no-op on iOS.
+    // Widen the forward-buffer window so stalls are less common on spotty
+    // networks. `minBufferForPlayback`/`prioritizeTimeOverSizeThreshold` are
+    // Android-only and no-op on iOS.
     p.bufferOptions = {
-      preferredForwardBufferDuration: 1000, // Android default 20, iOS 0 = auto
+      preferredForwardBufferDuration: effectiveForwardBufferSeconds, // Android default 20, iOS default 0 = auto
       minBufferForPlayback: 3,
       prioritizeTimeOverSizeThreshold: true,
     };
@@ -219,20 +228,101 @@ export const PlayerCore = ({
   }, [seriesEnded, onBack]);
 
   const { settings: subtitleSettings } = useSubtitleSettings();
+  const nativeSubtitlesEnabled = subtitleSettings.renderMode === 'native';
+
+  // "Component" mode: search Wyzie for external subtitle files by TMDB id,
+  // parse them, and drive `SubtitleOverlay` off the playhead ourselves.
+  // Skipped entirely (no network calls) while native mode is active.
   const {
-    tracks,
-    selectedId,
-    selectTrack,
+    tracks: wyzieTracks,
+    selectedId: wyzieSelectedId,
+    selectTrack: selectWyzieTrack,
     cueAt,
-    loading: loadingTracks,
+    loading: loadingWyzieTracks,
   } = useSubtitles({
     tmdbId: item.id,
     season,
     episode,
+    enabled: !nativeSubtitlesEnabled,
     defaultLanguage: subtitleSettings.defaultLanguage,
   });
 
-  const activeCue = cueAt(currentTime);
+  // "Native" mode: let expo-video render whatever subtitle tracks are
+  // embedded in the scraped stream itself via `player.subtitleTrack`. Only
+  // produces captions when the source actually contains tracks (see the
+  // `SubtitleRenderMode` doc comment in `useSubtitleSettings`).
+  const { availableSubtitleTracks } = useEvent(
+    player,
+    'availableSubtitleTracksChange',
+    { availableSubtitleTracks: player.availableSubtitleTracks },
+  );
+  const { subtitleTrack: nativeSubtitleTrack } = useEvent(
+    player,
+    'subtitleTrackChange',
+    { subtitleTrack: player.subtitleTrack },
+  );
+  // Guards against re-selecting after the user has made (or explicitly
+  // cleared to "Off") a choice. Naturally resets on remount, which is all
+  // that's needed since `PlayerCore` is remounted per-episode by its caller.
+  const didAutoSelectNativeRef = useRef(false);
+  useEffect(() => {
+    if (!nativeSubtitlesEnabled) return;
+    if (didAutoSelectNativeRef.current) return;
+    if (!subtitleSettings.defaultLanguage) return;
+    if (!availableSubtitleTracks.length) return;
+    const match = availableSubtitleTracks.find(
+      (t) => t.language === subtitleSettings.defaultLanguage,
+    );
+    if (match) {
+      didAutoSelectNativeRef.current = true;
+      player.subtitleTrack = match;
+    }
+  }, [
+    nativeSubtitlesEnabled,
+    availableSubtitleTracks,
+    subtitleSettings.defaultLanguage,
+    player,
+  ]);
+
+  const selectNativeTrack = useCallback(
+    (id: string | null) => {
+      didAutoSelectNativeRef.current = true;
+      if (id == null) {
+        player.subtitleTrack = null;
+        return;
+      }
+      const idx = Number(id);
+      player.subtitleTrack = availableSubtitleTracks[idx] ?? null;
+    },
+    [availableSubtitleTracks, player],
+  );
+
+  const subtitleTrackOptions = nativeSubtitlesEnabled
+    ? availableSubtitleTracks.map((t, i) => ({
+        id: String(i),
+        label: t.label || t.name || t.language,
+      }))
+    : wyzieTracks.map((t) => ({
+        id: t.id,
+        label: `${t.display}${t.isHearingImpaired ? ' (CC)' : ''}`,
+      }));
+  const selectedSubtitleId = nativeSubtitlesEnabled
+    ? nativeSubtitleTrack
+      ? String(
+          availableSubtitleTracks.findIndex(
+            (t) =>
+              t.language === nativeSubtitleTrack.language &&
+              t.label === nativeSubtitleTrack.label &&
+              t.name === nativeSubtitleTrack.name,
+          ),
+        )
+      : null
+    : wyzieSelectedId;
+  const subtitlesActive = nativeSubtitlesEnabled
+    ? nativeSubtitleTrack != null
+    : wyzieSelectedId != null;
+
+  const activeCue = nativeSubtitlesEnabled ? null : cueAt(currentTime);
 
   // Mirror the latest position/duration into refs for safe cleanup reads.
   useEffect(() => {
@@ -479,7 +569,7 @@ export const PlayerCore = ({
               setSheetOpen(true);
               show();
             }}
-            subtitlesActive={selectedId != null}
+            subtitlesActive={subtitlesActive}
             onOpenEpisodes={
               isTVShow && onSelectEpisode
                 ? () => {
@@ -520,10 +610,15 @@ export const PlayerCore = ({
 
       <SubtitleTrackSheet
         visible={sheetOpen}
-        tracks={tracks}
-        selectedId={selectedId}
-        loading={loadingTracks}
-        onSelect={selectTrack}
+        tracks={subtitleTrackOptions}
+        selectedId={selectedSubtitleId}
+        loading={!nativeSubtitlesEnabled && loadingWyzieTracks}
+        emptyLabel={
+          nativeSubtitlesEnabled
+            ? "This stream doesn't include any built-in subtitle tracks."
+            : 'No subtitles found for this title.'
+        }
+        onSelect={nativeSubtitlesEnabled ? selectNativeTrack : selectWyzieTrack}
         onClose={() => setSheetOpen(false)}
       />
 
