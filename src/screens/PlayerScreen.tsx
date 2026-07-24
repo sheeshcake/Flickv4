@@ -275,6 +275,7 @@ export const PlayerScreen = ({
           onDataExtracted={onExtracted}
           onError={onScrapeError}
           debug={scraperDebugEnabled}
+          timeoutSeconds={activeServer.scraperTimeoutSeconds}
         />
       )}
       {scraperDebugEnabled ? (

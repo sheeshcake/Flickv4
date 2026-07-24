@@ -2,12 +2,10 @@ import { Pressable, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ArrowLeft,
-  Captions,
   ListVideo,
   Pause,
   PictureInPicture2,
   Play,
-  Ratio,
   RotateCcw,
   RotateCw,
   Settings2,
@@ -38,14 +36,14 @@ interface PlayerControlsProps {
   onSeekBy: (seconds: number) => void;
   onScrub: (value: number) => void;
   onScrubEnd: (value: number) => void;
-  onOpenSubtitles?: () => void;
-  subtitlesActive?: boolean;
   /** When provided, shows an Episodes button (TV only). */
   onOpenEpisodes?: () => void;
-  /** When provided, shows a Video-quality picker button. */
-  onOpenQuality?: () => void;
-  /** When provided, shows a Video-aspect picker button. */
-  onOpenAspect?: () => void;
+  /** When provided, shows the consolidated Settings button (quality,
+   * aspect, speed, subtitles — see `PlayerSettingsDrawer`). */
+  onOpenSettings?: () => void;
+  /** Highlights the Settings button when any of its settings are non-
+   * default (speed ≠ 1x, subtitles on, quality not Auto, aspect changed). */
+  settingsActive?: boolean;
   /** When provided, shows a Picture-in-Picture button. */
   onEnterPip?: () => void;
 }
@@ -84,11 +82,9 @@ export const PlayerControls = ({
   onSeekBy,
   onScrub,
   onScrubEnd,
-  onOpenSubtitles,
-  subtitlesActive,
   onOpenEpisodes,
-  onOpenQuality,
-  onOpenAspect,
+  onOpenSettings,
+  settingsActive,
   onEnterPip,
 }: PlayerControlsProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
@@ -129,22 +125,13 @@ export const PlayerControls = ({
             <Icon as={ListVideo} size="lg" className="text-foreground" />
           </Focusable>
         )}
-        {onOpenQuality && (
+        {onOpenSettings && (
           <Focusable
-            onPress={onOpenQuality}
-            className="rounded-full bg-background/40 p-2"
+            onPress={onOpenSettings}
+            className={`rounded-full p-2 ${settingsActive ? 'bg-primary' : 'bg-background/40'}`}
             focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon as={Settings2} size="lg" className="text-foreground" />
-          </Focusable>
-        )}
-        {onOpenAspect && (
-          <Focusable
-            onPress={onOpenAspect}
-            className="rounded-full bg-background/40 p-2"
-            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
-          >
-            <Icon as={Ratio} size="lg" className="text-foreground" />
           </Focusable>
         )}
         {onEnterPip && (
@@ -158,15 +145,6 @@ export const PlayerControls = ({
               size="lg"
               className="text-foreground"
             />
-          </Focusable>
-        )}
-        {onOpenSubtitles && (
-          <Focusable
-            onPress={onOpenSubtitles}
-            className={`rounded-full p-2 ${subtitlesActive ? 'bg-primary' : 'bg-background/40'}`}
-            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
-          >
-            <Icon as={Captions} size="lg" className="text-foreground" />
           </Focusable>
         )}
       </HStack>

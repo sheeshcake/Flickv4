@@ -6,6 +6,7 @@ import type {
   WebViewErrorEvent,
 } from 'react-native-webview/lib/WebViewTypes';
 import { buildEmbedUrl, type ServerUrlConfig } from '@/src/utils/streamUrl';
+import { DEFAULT_SCRAPER_TIMEOUT_SECONDS } from '@/src/hooks/useServers';
 
 export interface ExtractedStream {
   videoUrl: string;
@@ -24,8 +25,22 @@ interface WebViewScraperProps {
   onDataExtracted: (data: ExtractedStream) => void;
   onLoading?: (isLoading: boolean) => void;
   onError?: (error: string) => void;
-  /** Temporarily render the WebView full-screen & interactive for debugging. */
+  /**
+   * Temporarily render the WebView full-screen & interactive for debugging
+   * (or for manually solving a captcha challenge). Purely a visibility
+   * concern — does NOT affect the give-up timeout; see `timeoutSeconds`.
+   */
   debug?: boolean;
+  /**
+   * Seconds to wait after the page finishes loading before giving up if no
+   * stream has been found. `0` (or below) means wait indefinitely.
+   * Independent of `debug` — a server can need a long/no timeout to solve
+   * a captcha even while its WebView stays hidden, and `debug` can be on
+   * with a short timeout for a quick look. Defaults to
+   * `DEFAULT_SCRAPER_TIMEOUT_SECONDS` (per-server override lives on
+   * `PlaybackServer.scraperTimeoutSeconds`, see `useServers.tsx`).
+   */
+  timeoutSeconds?: number;
   /**
    * Render the WebView visible (and interactive, in case a challenge needs
    * solving) inside a caller-provided box instead of fully hidden — e.g. a
@@ -43,9 +58,6 @@ interface MessageData {
   message?: string;
   frame?: string;
 }
-
-// Time to wait after the page finishes loading before giving up (ms).
-const LOAD_END_DELAY = 60000;
 
 // A normal mobile Chrome User-Agent. The default Android WebView UA contains a
 // "; wv" token that anti-bot systems (e.g. Cloudflare) flag; presenting a
@@ -150,11 +162,14 @@ export const WebViewScraper = ({
   onLoading,
   onError,
   debug = false,
+  timeoutSeconds,
   previewStyle,
 }: WebViewScraperProps) => {
   const [webViewKey, setWebViewKey] = useState(0);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasExtractedDataRef = useRef(false);
+  const timeoutMs =
+    (timeoutSeconds ?? DEFAULT_SCRAPER_TIMEOUT_SECONDS) * 1000;
 
   const embedUrl = useMemo(
     () => buildEmbedUrl(server, { type, tmdbId, season, episode, title }),
@@ -216,20 +231,22 @@ export const WebViewScraper = ({
     onLoading?.(true);
   }, [onLoading]);
 
-  // On load end, arm a timeout: if nothing was extracted, give up.
-  // In debug mode we skip the timeout so there's time to solve a challenge.
+  // On load end, arm a timeout: if nothing was extracted, give up. This is
+  // deliberately independent of `debug` (visibility) — a `0`/negative
+  // `timeoutSeconds` (per-server "no timeout") is what actually disables
+  // it, e.g. to leave time to solve a captcha by hand.
   const handleLoadEnd = useCallback(() => {
     log('load end');
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-    if (debug) return;
+    if (timeoutMs <= 0) return;
     loadingTimerRef.current = setTimeout(() => {
       if (!hasExtractedDataRef.current) {
-        log(`timeout after ${LOAD_END_DELAY}ms - no stream found`);
+        log(`timeout after ${timeoutMs}ms - no stream found`);
         onLoading?.(false);
         onError?.('Timed out while finding a stream.');
       }
-    }, LOAD_END_DELAY);
-  }, [debug, onLoading, onError]);
+    }, timeoutMs);
+  }, [timeoutMs, onLoading, onError]);
 
   const handleError = useCallback(
     (event: WebViewErrorEvent) => {

@@ -21,14 +21,15 @@ import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
 import { PlayerControls } from '@/src/components/player/PlayerControls';
 import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer';
+import {
+  PlayerSettingsDrawer,
+  type PlaybackSpeed,
+} from '@/src/components/player/PlayerSettingsDrawer';
 import { SubtitleOverlay } from '@/src/components/player/SubtitleOverlay';
-import { SubtitleTrackSheet } from '@/src/components/player/SubtitleTrackSheet';
 import {
   SeriesEndOverlay,
   UpNextOverlay,
 } from '@/src/components/player/UpNextOverlay';
-import { VideoAspectSheet } from '@/src/components/player/VideoAspectSheet';
-import { VideoQualitySheet } from '@/src/components/player/VideoQualitySheet';
 import { useControlsVisibility } from '@/src/components/player/useControlsVisibility';
 import { useTVRemote } from '@/src/components/player/useTVRemote';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
@@ -115,11 +116,13 @@ export const PlayerCore = ({
   // touches the (already released) player during back navigation.
   const currentTimeRef = useRef(0);
   const durationRef = useRef(0);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [episodesOpen, setEpisodesOpen] = useState(false);
-  const [qualityOpen, setQualityOpen] = useState(false);
-  const [aspectOpen, setAspectOpen] = useState(false);
   const [pipActive, setPipActive] = useState(false);
+  // Session-only: resets to Normal every time a new video/PlayerCore mounts,
+  // rather than persisting app-wide — see the flick-player-controls skill's
+  // "session-only vs per-server vs persisted" table.
+  const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(1);
   const { aspect, setAspect } = useVideoAspect();
   const videoRef = useRef<VideoRef>(null);
   const isTVShow = item.media_type === 'tv';
@@ -214,6 +217,26 @@ export const PlayerCore = ({
     wyzieTracks.find((t) => t.id === wyzieSelectedId) ?? null;
   const subtitlesActive = wyzieSelectedId != null;
 
+  // Drives the consolidated Settings button's "something's customized"
+  // highlight (see `PlayerSettingsDrawer`) now that quality/aspect/speed/
+  // subtitles no longer each get their own top-bar icon to flag at a
+  // glance.
+  const settingsActive =
+    playbackRate !== 1 ||
+    subtitlesActive ||
+    selectedVariantUri != null ||
+    aspect !== 'contain';
+
+  // Session-only sync offset (seconds) for the currently selected track —
+  // only meaningful in component-render mode, where we control the cue
+  // lookup ourselves (see `activeCue` below). Reset whenever the selected
+  // track changes, since a different track's natural sync is unrelated to
+  // whatever offset fixed the previous one.
+  const [subtitleOffsetSeconds, setSubtitleOffsetSeconds] = useState(0);
+  useEffect(() => {
+    setSubtitleOffsetSeconds(0);
+  }, [wyzieSelectedId]);
+
   // Sidecar text tracks handed straight to react-native-video: Wyzie serves
   // `.srt` files directly from a hosted URL, so no fetch/parse is needed on
   // our side at all for this path.
@@ -248,8 +271,11 @@ export const PlayerCore = ({
     duration > 0 && playableDuration > 0 ? playableDuration / duration : 0;
 
   // Component mode (or the iOS+HLS native fallback): drive `SubtitleOverlay`
-  // off the playhead ourselves.
-  const activeCue = useNativeSidecar ? null : cueAt(currentTime);
+  // off the playhead ourselves. Positive offset = captions appear later
+  // (delayed), so we look up the cue as of `currentTime - offset`.
+  const activeCue = useNativeSidecar
+    ? null
+    : cueAt(currentTime - subtitleOffsetSeconds);
 
   const { visible, show, toggle } = useControlsVisibility(isPlaying);
 
@@ -510,20 +536,15 @@ export const PlayerCore = ({
   // On Android TV, `TVEventHandler`'s raw remote-event feed and the native
   // focus engine's own "click the focused view" handling both react to the
   // same physical Select/D-pad press. With this hook always listening, a
-  // Select press on a row inside one of the sheets/drawer below (episode
-  // list, quality/aspect/subtitle picker) gets consumed here as a global
-  // "toggle controls" instead of reaching that row's own onPress — so the
-  // row visibly focuses but never actually selects. Suspend every handler
-  // here while any of those overlays are open so their own Focusable rows
-  // own Select/Left/Right/Up/Down uncontested. The Up Next card and the
+  // Select press on a row inside one of the drawers below (episode list,
+  // settings menu/submenu) gets consumed here as a global "toggle controls"
+  // instead of reaching that row's own onPress — so the row visibly focuses
+  // but never actually selects. Suspend every handler here while any of
+  // those overlays are open so their own Focusable rows own
+  // Select/Left/Right/Up/Down uncontested. The Up Next card and the
   // series-end state get the same treatment for the same reason.
   const overlayOpen =
-    sheetOpen ||
-    episodesOpen ||
-    qualityOpen ||
-    aspectOpen ||
-    showUpNext ||
-    seriesEnded;
+    settingsOpen || episodesOpen || showUpNext || seriesEnded;
 
   useTVRemote({
     onSelect: overlayOpen ? undefined : toggle,
@@ -550,6 +571,7 @@ export const PlayerCore = ({
           resizeMode={toResizeMode(aspect)}
           pointerEvents="none"
           paused={paused}
+          rate={playbackRate}
           progressUpdateInterval={500}
           preferredForwardBufferDuration={
             Platform.OS === 'ios'
@@ -636,11 +658,6 @@ export const PlayerCore = ({
               seekToFraction(v);
               setScrubPreview(null);
             }}
-            onOpenSubtitles={() => {
-              setSheetOpen(true);
-              show();
-            }}
-            subtitlesActive={subtitlesActive}
             onOpenEpisodes={
               isTVShow && onSelectEpisode
                 ? () => {
@@ -649,18 +666,11 @@ export const PlayerCore = ({
                   }
                 : undefined
             }
-            onOpenQuality={
-              variants.length > 1
-                ? () => {
-                    setQualityOpen(true);
-                    show();
-                  }
-                : undefined
-            }
-            onOpenAspect={() => {
-              setAspectOpen(true);
+            onOpenSettings={() => {
+              setSettingsOpen(true);
               show();
             }}
+            settingsActive={settingsActive}
             onEnterPip={pipSupported ? enterPip : undefined}
           />
         ) : (
@@ -679,29 +689,24 @@ export const PlayerCore = ({
           />
         ))}
 
-      <SubtitleTrackSheet
-        visible={sheetOpen}
-        tracks={subtitleTrackOptions}
-        selectedId={wyzieSelectedId}
-        loading={loadingWyzieTracks}
-        emptyLabel="No subtitles found for this title."
-        onSelect={selectWyzieTrack}
-        onClose={() => setSheetOpen(false)}
-      />
-
-      <VideoQualitySheet
-        visible={qualityOpen}
+      <PlayerSettingsDrawer
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
         variants={variants}
-        selectedUri={selectedVariantUri}
-        onSelect={onSelectQuality}
-        onClose={() => setQualityOpen(false)}
-      />
-
-      <VideoAspectSheet
-        visible={aspectOpen}
-        selected={aspect}
-        onSelect={setAspect}
-        onClose={() => setAspectOpen(false)}
+        selectedVariantUri={selectedVariantUri}
+        onSelectQuality={onSelectQuality}
+        aspect={aspect}
+        onSelectAspect={setAspect}
+        playbackRate={playbackRate}
+        onSelectSpeed={setPlaybackRate}
+        subtitleTracks={subtitleTrackOptions}
+        selectedSubtitleId={wyzieSelectedId}
+        subtitlesLoading={loadingWyzieTracks}
+        onSelectSubtitle={selectWyzieTrack}
+        subtitleOffsetSeconds={subtitleOffsetSeconds}
+        onChangeSubtitleOffset={
+          useNativeSidecar ? undefined : setSubtitleOffsetSeconds
+        }
       />
 
       {isTVShow && onSelectEpisode && (

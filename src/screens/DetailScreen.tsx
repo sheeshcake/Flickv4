@@ -3,11 +3,17 @@ import {
   Alert,
   ImageBackground,
   Share,
-  ScrollView,
   useWindowDimensions,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
+  type LayoutChangeEvent,
 } from 'react-native';
+import Animated, {
+  Extrapolation,
+  interpolate,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  runOnJS,
+} from 'react-native-reanimated';
 import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,6 +34,7 @@ import {
   DownloadQualitySheet,
   type DownloadQualityChoice,
 } from '@/src/components/DownloadQualitySheet';
+import { CastSheet } from '@/src/components/CastSheet';
 import { useDownloads } from '@/src/hooks/useDownloads';
 import { useServers } from '@/src/hooks/useServers';
 import { DownloadService } from '@/src/services/DownloadService';
@@ -73,6 +80,8 @@ import {
 } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 
+const AnimatedBox = Animated.createAnimatedComponent(Box);
+
 export type Tab = 'episodes' | 'trailers' | 'similar';
 
 export const DetailScreen = ({
@@ -112,6 +121,7 @@ export const DetailScreen = ({
   );
   const [muted, setMuted] = useState(true);
   const [liked, setLiked] = useState(false);
+  const [castSheetOpen, setCastSheetOpen] = useState(false);
   const [qualitySheet, setQualitySheet] = useState<{
     variants: Variant[];
     onSelect: (choice: DownloadQualityChoice) => void;
@@ -453,16 +463,56 @@ export const DetailScreen = ({
   const similarCardWidth =
     (width - gridPadding * 2 - gridGap * (columns - 1)) / columns;
 
-  const onScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+  const handlePaginationScroll = useCallback(
+    (offsetY: number, layoutHeight: number, contentHeight: number) => {
       if (tab !== 'similar') return;
-      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
-      const distanceToEnd =
-        contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      const distanceToEnd = contentHeight - (offsetY + layoutHeight);
       if (distanceToEnd < 400) loadMoreSimilar();
     },
     [tab, loadMoreSimilar],
   );
+
+  // Sticky back button + scroll-revealed title header: `scrollY` mirrors the
+  // ScrollView's offset, `titleY` is the (one-time, via onLayout) content
+  // offset of the logo/title block below the hero — once `scrollY` passes
+  // it, the sticky header's title fades in and gains a solid backdrop.
+  const scrollY = useSharedValue(0);
+  const titleY = useSharedValue(Number.MAX_SAFE_INTEGER);
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+    runOnJS(handlePaginationScroll)(
+      event.contentOffset.y,
+      event.layoutMeasurement.height,
+      event.contentSize.height,
+    );
+  });
+  const onTitleLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      titleY.value = e.nativeEvent.layout.y;
+    },
+    [titleY],
+  );
+  const headerProgressStyle = useAnimatedStyle(() => {
+    const progress = interpolate(
+      scrollY.value,
+      [titleY.value - 40, titleY.value],
+      [0, 1],
+      Extrapolation.CLAMP,
+    );
+    return { opacity: progress };
+  });
+  const headerTitleStyle = useAnimatedStyle(() => {
+    const progress = interpolate(
+      scrollY.value,
+      [titleY.value - 40, titleY.value],
+      [0, 1],
+      Extrapolation.CLAMP,
+    );
+    return {
+      opacity: progress,
+      transform: [{ translateY: interpolate(progress, [0, 1], [8, 0]) }],
+    };
+  });
 
   if (deviceKind === 'tv') {
     return (
@@ -515,7 +565,7 @@ export const DetailScreen = ({
 
   return (
     <Box className="flex-1 bg-background">
-      <ScrollView
+      <Animated.ScrollView
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}
@@ -546,14 +596,6 @@ export const DetailScreen = ({
             }}
             pointerEvents="none"
           />
-          <Focusable
-            onPress={() => navigation.goBack()}
-            className="absolute left-4 rounded-full bg-background/60 p-2"
-            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
-            style={{ top: insets.top + 8 }}
-          >
-            <Icon as={ArrowLeft} className="text-foreground" />
-          </Focusable>
           {showTrailer && (
             <Focusable
               onPress={() => setMuted((m) => !m)}
@@ -569,7 +611,7 @@ export const DetailScreen = ({
         </Box>
 
         {/* Metadata + actions */}
-        <VStack space="md" className="-mt-8 px-4">
+        <VStack space="md" className="-mt-8 px-4" onLayout={onTitleLayout}>
           {logoUrl ? (
             <Image
               source={{ uri: logoUrl }}
@@ -668,7 +710,12 @@ export const DetailScreen = ({
                 {starring}
               </Text>
               {cast.length > 4 ? (
-                <Text size="sm" className="text-foreground">
+                <Text
+                  size="sm"
+                  className="font-semibold text-primary"
+                  onPress={() => setCastSheetOpen(true)}
+                  suppressHighlighting
+                >
                   {' '}
                   ... more
                 </Text>
@@ -783,13 +830,70 @@ export const DetailScreen = ({
         </Box>
 
         <Box style={{ height: insets.bottom + 24 }} />
-      </ScrollView>
+      </Animated.ScrollView>
+
+      {/* Sticky header: back button always pinned; title fades/slides in
+          once the user scrolls past the logo/title block below the hero. */}
+      <Box
+        className="absolute left-0 right-0 top-0 z-50"
+        pointerEvents="box-none"
+      >
+        <AnimatedBox
+          className="absolute inset-0 border-b border-border bg-background"
+          style={headerProgressStyle}
+          pointerEvents="none"
+        />
+        <HStack
+          className="items-center justify-between px-4 pb-3"
+          style={{ paddingTop: insets.top + 8 }}
+        >
+          <Focusable
+            onPress={() => navigation.goBack()}
+            className="rounded-full bg-background/60 p-2"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <Icon as={ArrowLeft} className="text-foreground" />
+          </Focusable>
+
+          <AnimatedBox
+            className="flex-1 items-center px-2"
+            style={headerTitleStyle}
+            pointerEvents="none"
+          >
+            {logoUrl ? (
+              <Image
+                source={{ uri: logoUrl }}
+                alt={getTitle(item)}
+                resizeMode="contain"
+                className="h-8 w-32"
+              />
+            ) : (
+              <Text
+                size="md"
+                bold
+                numberOfLines={1}
+                className="text-foreground"
+              >
+                {getTitle(item)}
+              </Text>
+            )}
+          </AnimatedBox>
+
+          <Box className="h-10 w-10" />
+        </HStack>
+      </Box>
 
       <DownloadQualitySheet
         visible={qualitySheet != null}
         variants={qualitySheet?.variants ?? []}
         onSelect={(choice) => qualitySheet?.onSelect(choice)}
         onClose={() => setQualitySheet(null)}
+      />
+
+      <CastSheet
+        visible={castSheetOpen}
+        cast={cast}
+        onClose={() => setCastSheetOpen(false)}
       />
     </Box>
   );

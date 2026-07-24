@@ -37,13 +37,27 @@ export interface PlaybackServer {
    * servers use "series" instead of "tv".
    */
   tvTypeLabel?: string;
+  /**
+   * Seconds to wait for a stream after the embed page finishes loading,
+   * before `WebViewScraper` gives up. `0` means no timeout — wait
+   * indefinitely, e.g. to manually solve a captcha via the Debug video
+   * player (Settings). Omitted/`undefined` falls back to
+   * `DEFAULT_SCRAPER_TIMEOUT_SECONDS`. Deliberately independent of the
+   * Debug video player toggle, which only controls WebView visibility.
+   */
+  scraperTimeoutSeconds?: number;
 }
 
 export interface AddServerOptions {
   urlPattern?: string;
   movieTypeLabel?: string;
   tvTypeLabel?: string;
+  scraperTimeoutSeconds?: number;
 }
+
+/** Fallback used whenever a server doesn't specify its own
+ * `scraperTimeoutSeconds` — shared with `WebViewScraper.tsx`. */
+export const DEFAULT_SCRAPER_TIMEOUT_SECONDS = 60;
 
 export const DEFAULT_SERVERS: PlaybackServer[] = [
   { id: 'vidfast', name: 'VidFast', url: 'https://vidfast.pro', builtIn: true },
@@ -122,6 +136,12 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       const cleanPattern = options?.urlPattern?.trim();
       const cleanMovieLabel = options?.movieTypeLabel?.trim();
       const cleanTvLabel = options?.tvTypeLabel?.trim();
+      // `0` ("no timeout") is a meaningful value, not a falsy-omit case —
+      // only fall back to "unset" when the option itself is `null`/`undefined`.
+      const cleanTimeout =
+        options?.scraperTimeoutSeconds != null
+          ? Math.max(0, Math.round(options.scraperTimeoutSeconds))
+          : undefined;
       setState((prev) => {
         const server: PlaybackServer = {
           id: `custom-${Date.now()}`,
@@ -130,6 +150,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
           ...(cleanPattern ? { urlPattern: cleanPattern } : {}),
           ...(cleanMovieLabel ? { movieTypeLabel: cleanMovieLabel } : {}),
           ...(cleanTvLabel ? { tvTypeLabel: cleanTvLabel } : {}),
+          ...(cleanTimeout != null ? { scraperTimeoutSeconds: cleanTimeout } : {}),
         };
         const next: PersistedState = {
           servers: [...prev.servers, server],
@@ -150,6 +171,10 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       const cleanPattern = options?.urlPattern?.trim();
       const cleanMovieLabel = options?.movieTypeLabel?.trim();
       const cleanTvLabel = options?.tvTypeLabel?.trim();
+      const cleanTimeout =
+        options?.scraperTimeoutSeconds != null
+          ? Math.max(0, Math.round(options.scraperTimeoutSeconds))
+          : undefined;
       setState((prev) => {
         const target = prev.servers.find((s) => s.id === id);
         if (!target || target.builtIn) return prev;
@@ -162,6 +187,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
                 urlPattern: cleanPattern || undefined,
                 movieTypeLabel: cleanMovieLabel || undefined,
                 tvTypeLabel: cleanTvLabel || undefined,
+                scraperTimeoutSeconds: cleanTimeout,
               }
             : s,
         );
