@@ -1,0 +1,16 @@
+[
+    {
+        "name": "VidFast",
+        "url": "https://vidfast.pro",
+        "url_pattern": null,
+        "movie_alias": null,
+        "tv_alias": null
+    },
+    {
+        "name": "CineSrc",
+        "url": "https://cinesrc.st/embed",
+        "url_pattern": null,
+        "movie_alias": null,
+        "tv_alias": null
+    }
+]

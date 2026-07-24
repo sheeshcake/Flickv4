@@ -393,7 +393,7 @@ const EpisodeRow = ({
       </VStack>
 
       <HStack space="xs" className="items-center">
-        {job.status === 'completed' ? (
+        {/* {job.status === 'completed' ? (
           <Focusable
             onPress={onPlay}
             className="rounded-full bg-primary p-2"
@@ -407,7 +407,7 @@ const EpisodeRow = ({
           <Icon as={AlertCircle} className="text-primary" />
         ) : (
           <Icon as={CheckCircle2} className="text-muted-foreground" />
-        )}
+        )} */}
 
         <Focusable
           onPress={onPrimary}
@@ -494,7 +494,7 @@ const DownloadRow = ({
         </VStack>
 
         <VStack space="xs" className="items-center">
-          {job.status === 'completed' ? (
+          {/* {job.status === 'completed' ? (
             <Focusable
               onPress={onPlay}
               className="rounded-full bg-primary p-2"
@@ -508,7 +508,7 @@ const DownloadRow = ({
             <Icon as={AlertCircle} className="text-primary" />
           ) : (
             <Icon as={CheckCircle2} className="text-muted-foreground" />
-          )}
+          )} */}
 
           <Focusable
             onPress={onPrimary}

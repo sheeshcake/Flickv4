@@ -23,7 +23,7 @@ import { UPDATE_CONFIG } from '@/src/config/env';
  *   built-in Android `contentUri`) instead of routing through the system
  *   browser — see `downloadApk`/`installApk` below.
  * - Reads the current app version from `package.json`, which is kept in
- *   lockstep with `app.json`'s `expo.version` (both currently `2.0.0`).
+ *   lockstep with `app.json`'s `expo.version`.
  */
 
 export interface ReleaseAsset {

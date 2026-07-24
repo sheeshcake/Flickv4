@@ -1,6 +1,11 @@
 import { useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
-import { RefreshControl, ScrollView } from 'react-native';
+import { RefreshControl } from 'react-native';
+import Animated, {
+  clamp,
+  useAnimatedScrollHandler,
+  useSharedValue,
+} from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +29,10 @@ import { getComingSoon } from '@/src/utils/comingSoon';
 import type { RootStackParamList } from '@/src/navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+/** Scroll distance (px) over which the sticky AppHeader fades from fully
+ * transparent (over the hero) to a solid backdrop. */
+const HEADER_FADE_DISTANCE = 140;
 
 interface HomeScreenProps {
   /**
@@ -50,6 +59,17 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   // header to exit selection mode without deleting anything.
   const [cwSelecting, setCwSelecting] = useState(false);
   const [myListSelecting, setMyListSelecting] = useState(false);
+
+  // Drives the sticky AppHeader's fade-in backdrop + logo shrink as the hero
+  // scrolls out of view — see AppHeader's `progress` prop.
+  const headerProgress = useSharedValue(0);
+  const onScroll = useAnimatedScrollHandler((event) => {
+    headerProgress.value = clamp(
+      event.contentOffset.y / HEADER_FADE_DISTANCE,
+      0,
+      1,
+    );
+  });
 
   const openDetail = (item: MediaItem) => navigation.navigate('Detail', { item });
 
@@ -161,8 +181,10 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
 
   return (
     <Box className="flex-1 bg-background">
-      <ScrollView
+      <Animated.ScrollView
         showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -183,13 +205,6 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
             onPress={openDetail}
             getComingSoonLabel={getHeroComingSoonLabel}
           />
-          <Box
-            className="absolute left-0 right-0"
-            style={{ top: insets.top }}
-            pointerEvents="box-none"
-          >
-            <AppHeader paddingHorizontal={16} />
-          </Box>
         </Box>
 
         <Box className="mt-4">
@@ -243,7 +258,15 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
           ))}
         </Box>
         <Box style={{ height: insets.bottom + 16 }} />
-      </ScrollView>
+      </Animated.ScrollView>
+
+      <Box className="absolute left-0 right-0 top-0" pointerEvents="box-none">
+        <AppHeader
+          paddingHorizontal={16}
+          progress={headerProgress}
+          topInset={insets.top}
+        />
+      </Box>
     </Box>
   );
 };
