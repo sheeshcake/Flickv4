@@ -121,6 +121,12 @@ export interface ContentRatingsResponse {
   results: { iso_3166_1: string; rating: string }[];
 }
 
+/** TMDB's `/movie/{id}/external_ids` and `/tv/{id}/external_ids` response —
+ * only the field this app actually uses is modeled. */
+export interface ExternalIdsResponse {
+  imdb_id: string | null;
+}
+
 export interface TmdbImage {
   file_path: string;
   width: number;

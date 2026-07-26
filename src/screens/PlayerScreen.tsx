@@ -23,6 +23,7 @@ import {
 import { useServers } from '@/src/hooks/useServers';
 import { useDownloads } from '@/src/hooks/useDownloads';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
+import { TMDBService } from '@/src/services/TMDBService';
 import { forceLandscape, restoreOrientation } from '@/src/utils/orientation';
 import { originOf } from '@/src/utils/streamUrl';
 import { getTitle, type Episode } from '@/src/types';
@@ -49,7 +50,7 @@ export const PlayerScreen = ({
   // sleep during playback (or while paused/buffering). Released on unmount.
   useKeepAwake('flick-player');
 
-  const { activeServer } = useServers();
+  const { servers, activeServer, setActive } = useServers();
   const { getLocalSource, getJobFor } = useDownloads();
   // Settings > "Debug video player" — when on, render the stream-resolving
   // WebViewScraper full-screen and interactive instead of invisible, so you
@@ -83,6 +84,32 @@ export const PlayerScreen = ({
     number | undefined
   >(resumeFrom);
   const resolvedRef = useRef(false);
+  // Servers already tried (and failed) for the CURRENT target — reset
+  // whenever the target itself changes (item/episode) or the user
+  // explicitly picks a server, so a fresh failover cycle can run each time.
+  // See `switchToServer`/`tryNextServer` below.
+  const triedServerIdsRef = useRef<Set<string>>(new Set());
+
+  // Best-effort IMDb id lookup for the current item — fills a playback
+  // server's `{imdbId}` URL placeholder, if its pattern uses one. Swallow
+  // errors; servers that don't need it are unaffected by a missing value.
+  const [imdbId, setImdbId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setImdbId(null);
+    const request =
+      type === 'tv'
+        ? TMDBService.getTVExternalIds(item.id)
+        : TMDBService.getMovieExternalIds(item.id);
+    request
+      .then((res) => {
+        if (!cancelled) setImdbId(res.imdb_id ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [item.id, type]);
 
   // Orientation: hard-force landscape for the player; restore on leave.
   // Also hide the Android navigation bar for immersive playback.
@@ -182,12 +209,69 @@ export const PlayerScreen = ({
     [finish, activeServer.url, scraperDebugEnabled],
   );
 
-  // On scrape failure/timeout, show the empty state — no sample-URL
-  // fallback. Callers who want a specific pre-resolved stream should push
-  // `Player` with a `localSourceId` (for downloads) instead.
+  // Shared by manual server switching (Settings > Server, in-player) and
+  // automatic failover below: resets resolution state and points `useServers`
+  // at a different server, re-arming `WebViewScraper` to resolve against it.
+  // `resumeFromSeconds` re-seeds `effectiveResumeFrom` so a switch resumes
+  // near wherever playback was, instead of restarting from 0.
+  const switchToServer = useCallback(
+    (id: string, resumeFromSeconds: number) => {
+      setActive(id);
+      resolvedRef.current = false;
+      setSource(null);
+      setNoSource(false);
+      setDebugStreamFound(false);
+      setEffectiveResumeFrom(resumeFromSeconds);
+    },
+    [setActive],
+  );
+
+  // User-initiated switch (in-player Settings > Server, or Server Settings
+  // itself) — always starts a fresh failover cycle from the chosen server.
+  const handleSelectServer = useCallback(
+    (id: string, resumeFromSeconds: number) => {
+      if (id === activeServer.id) return;
+      triedServerIdsRef.current = new Set();
+      switchToServer(id, resumeFromSeconds);
+    },
+    [activeServer.id, switchToServer],
+  );
+
+  // Failure-driven: mark the current server as tried and move on to the
+  // first server in the list not yet tried this cycle. Once every server
+  // has failed, fall through to the "No video available" empty state.
+  const tryNextServer = useCallback(
+    (resumeFromSeconds: number) => {
+      triedServerIdsRef.current.add(activeServer.id);
+      const next = servers.find((s) => !triedServerIdsRef.current.has(s.id));
+      if (!next) {
+        setNoSource(true);
+        return;
+      }
+      switchToServer(next.id, resumeFromSeconds);
+    },
+    [servers, activeServer.id, switchToServer],
+  );
+
+  // On scrape failure/timeout, try the next configured server before giving
+  // up — no sample-URL fallback either way. Callers who want a specific
+  // pre-resolved stream should push `Player` with a `localSourceId` (for
+  // downloads) instead.
   const onScrapeError = useCallback(() => {
-    setNoSource(true);
-  }, []);
+    // Nothing has played yet at the resolution stage, so there's no
+    // position worth preserving.
+    tryNextServer(0);
+  }, [tryNextServer]);
+
+  // A stream that DID resolve but then failed to actually play (403,
+  // decoder/DRM issue, etc.) — reported by `PlayerCore`'s native `<Video>`
+  // error handler. Also fails over, preserving how far playback got.
+  const handlePlaybackFailed = useCallback(
+    (resumeFromSeconds: number) => {
+      tryNextServer(resumeFromSeconds);
+    },
+    [tryNextServer],
+  );
 
   // Switch to a different episode without recreating the whole player screen:
   // reset the resolved source so `WebViewScraper` re-runs with new params, and
@@ -196,6 +280,7 @@ export const PlayerScreen = ({
     (nextSeason: number, ep: Episode) => {
       const nextEpisode = ep.episode_number;
       if (season === nextSeason && episode === nextEpisode) return;
+      triedServerIdsRef.current = new Set();
       resolvedRef.current = false;
       setSource(null);
       setNoSource(false);
@@ -212,7 +297,11 @@ export const PlayerScreen = ({
   if (source) {
     return (
       <PlayerCore
-        key={type === 'tv' ? `${season}-${episode}` : 'movie'}
+        // Server id is included so a switch (manual or automatic failover)
+        // always mounts a fresh `<Video>` against the newly-resolved source
+        // — `source` already transits through `null` on every switch (see
+        // `switchToServer`), but the explicit id keeps this key legible.
+        key={`${type === 'tv' ? `${season}-${episode}` : 'movie'}-${activeServer.id}`}
         source={source}
         title={title}
         subtitle={subtitle}
@@ -222,13 +311,15 @@ export const PlayerScreen = ({
         resumeFrom={effectiveResumeFrom}
         onBack={() => navigation.goBack()}
         onSelectEpisode={type === 'tv' ? handleSelectEpisode : undefined}
+        onSelectServer={localForCurrent ? undefined : handleSelectServer}
+        onPlaybackFailed={localForCurrent ? undefined : handlePlaybackFailed}
       />
     );
   }
 
-  // Scrape failed / timed out. Instead of silently loading a sample video,
-  // let the user know nothing is playable from the current server and give
-  // them a way back to the previous screen.
+  // Scrape (or playback) failed on every configured server. Instead of
+  // silently loading a sample video, let the user know nothing is playable
+  // and give them a way back to the previous screen.
   if (noSource) {
     return (
       <Box className="flex-1 bg-black">
@@ -243,8 +334,9 @@ export const PlayerScreen = ({
             No video available
           </Text>
           <Text size="sm" className="mt-2 text-center text-muted-foreground">
-            We couldn&apos;t find a playable stream from the current server.
-            Try a different server from Settings.
+            {servers.length > 1
+              ? "We couldn't find a playable stream from any configured server."
+              : "We couldn't find a playable stream from the current server. Try a different server from Settings."}
           </Text>
         </Center>
         <Pressable
@@ -265,6 +357,7 @@ export const PlayerScreen = ({
         <WebViewScraper
           server={activeServer}
           tmdbId={item.id}
+          imdbId={imdbId}
           type={type}
           season={season}
           episode={episode}
@@ -278,6 +371,9 @@ export const PlayerScreen = ({
           timeoutSeconds={activeServer.scraperTimeoutSeconds}
         />
       )}
+      {/* Once a retry has kicked in (some earlier server already failed
+          this cycle), name the server currently being tried so a
+          multi-server failover isn't a silent, confusing wait. */}
       {scraperDebugEnabled ? (
         // Debug: keep the WebView visible/interactive — once a stream is
         // found we deliberately keep showing it (see `onExtracted`) instead
@@ -290,13 +386,17 @@ export const PlayerScreen = ({
           <Text size="xs" className="text-muted-foreground">
             {debugStreamFound
               ? 'Stream found — playing in WebView (debug)'
-              : 'Finding stream… (debug, no timeout)'}
+              : `Finding stream… (debug, no timeout)${triedServerIdsRef.current.size ? ` — trying ${activeServer.name}` : ''}`}
           </Text>
         </Center>
       ) : (
         <Center style={StyleSheet.absoluteFill} className="bg-black">
           <Spinner size="large" color="#E50914" />
-          <Text className="mt-4 text-muted-foreground">Finding stream…</Text>
+          <Text className="mt-4 text-muted-foreground">
+            {triedServerIdsRef.current.size
+              ? `Trying ${activeServer.name}…`
+              : 'Finding stream…'}
+          </Text>
         </Center>
       )}
       <Pressable

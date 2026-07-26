@@ -44,8 +44,10 @@ import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 // testing a server — "Test" only needs to confirm the server's pattern +
 // scraper pipeline resolves *a* stream, not any particular title. The title
 // is included (not just the id) so patterns using a `{slug}` placeholder
-// resolve to something real (e.g. "inception") instead of an empty string.
+// resolve to something real (e.g. "inception") instead of an empty string,
+// and the IMDb id covers patterns using `{imdbId}`.
 const TEST_TMDB_ID = 27205;
+const TEST_IMDB_ID = 'tt1375666';
 const TEST_TITLE = 'Inception';
 
 const formatScraperTimeout = (seconds: number): string =>
@@ -160,14 +162,21 @@ export const ServerSettingsScreen = () => {
           contentContainerStyle={{ paddingBottom: 40 }}
         >
           <Text size="sm" className="mb-4 text-muted-foreground">
-            Streams are resolved from the selected server using the pattern
+            Streams are resolved from the selected server using
             {'  '}
             <Text size="sm" className="text-foreground">
               {'{url}/{type}/{tmdbId}'}
             </Text>
             {'  '}
-            by default. Custom servers below can override the pattern, and
-            what &quot;movie&quot;/&quot;tv&quot; are called in the URL.
+            for movies and
+            {'  '}
+            <Text size="sm" className="text-foreground">
+              {'{url}/{type}/{tmdbId}/{season}/{episode}'}
+            </Text>
+            {'  '}
+            for TV shows by default. Custom servers below can override
+            either pattern, and what &quot;movie&quot;/&quot;tv&quot; are
+            called in the URL.
           </Text>
 
           <VStack space="sm" className="mb-4">
@@ -215,6 +224,7 @@ export const ServerSettingsScreen = () => {
           <WebViewScraper
             server={testTarget}
             tmdbId={TEST_TMDB_ID}
+            imdbId={TEST_IMDB_ID}
             type="movie"
             title={TEST_TITLE}
             onDataExtracted={onTestSuccess}
