@@ -38,6 +38,7 @@ import {
   useNextEpisode,
 } from '@/src/hooks/useNextEpisode';
 import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
+import { useServers } from '@/src/hooks/useServers';
 import { useSubtitles } from '@/src/hooks/useSubtitles';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
@@ -56,6 +57,20 @@ interface PlayerCoreProps {
   onBack: () => void;
   /** TV only: called when the user picks a different episode from the drawer. */
   onSelectEpisode?: (season: number, episode: Episode) => void;
+  /**
+   * Called when the user picks a different server from the Settings
+   * drawer, with the current playhead so `PlayerScreen` can resume near
+   * where playback was after re-resolving against the new server. Omit to
+   * hide the Server setting entirely (e.g. while playing a local download,
+   * where there's no scraper to re-run).
+   */
+  onSelectServer?: (serverId: string, resumeFrom: number) => void;
+  /**
+   * Called when the resolved stream fails to actually play (native
+   * `<Video>` error) with the current playhead, so `PlayerScreen` can fail
+   * over to another server instead of leaving the inline error card up.
+   */
+  onPlaybackFailed?: (resumeFrom: number) => void;
 }
 
 /** Android has no PiP concept below API 26; iOS/tvOS support it wherever the
@@ -103,8 +118,11 @@ export const PlayerCore = ({
   resumeFrom,
   onBack,
   onSelectEpisode,
+  onSelectServer,
+  onPlaybackFailed,
 }: PlayerCoreProps) => {
   const isFocused = useIsFocused();
+  const { servers, activeServer } = useServers();
   const { upsert, advanceEpisode } = useContinueWatching();
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
@@ -130,6 +148,16 @@ export const PlayerCore = ({
   const enterPip = useCallback(() => {
     videoRef.current?.enterPictureInPicture();
   }, []);
+
+  // The Settings drawer only needs to hand back a server id — the live
+  // playhead (for resuming near the same spot after the switch) is read
+  // from the ref `PlayerScreen` doesn't have access to.
+  const handleSelectServer = useCallback(
+    (id: string) => {
+      onSelectServer?.(id, currentTimeRef.current);
+    },
+    [onSelectServer],
+  );
 
   // "Up Next" autoplay, gated on `onSelectEpisode` being provided (the
   // caller opts a TV show into episode switching at all — see
@@ -464,16 +492,23 @@ export const PlayerCore = ({
     [resumeFrom],
   );
 
-  const onError = useCallback((e: OnVideoErrorData) => {
-    setStatus('error');
-    const err = e.error;
-    setErrorMessage(
-      err?.localizedDescription ||
-        err?.errorString ||
-        err?.error ||
-        'The source could not be loaded.',
-    );
-  }, []);
+  const onError = useCallback(
+    (e: OnVideoErrorData) => {
+      setStatus('error');
+      const err = e.error;
+      setErrorMessage(
+        err?.localizedDescription ||
+          err?.errorString ||
+          err?.error ||
+          'The source could not be loaded.',
+      );
+      // Let `PlayerScreen` fail over to another server — this inline error
+      // card gets unmounted anyway once it nulls `source` and remounts a
+      // fresh `PlayerCore` against the next one.
+      onPlaybackFailed?.(currentTimeRef.current);
+    },
+    [onPlaybackFailed],
+  );
 
   const onProgress = useCallback((e: OnProgressData) => {
     setCurrentTime(e.currentTime);
@@ -547,10 +582,21 @@ export const PlayerCore = ({
     settingsOpen || episodesOpen || showUpNext || seriesEnded;
 
   useTVRemote({
-    onSelect: overlayOpen ? undefined : toggle,
+    // The hidden-state fallback `Pressable` (focusable, hasTVPreferredFocus,
+    // onPress={show}) already covers "Select while hidden" on its own, and
+    // while visible, Select should only ever fire whichever button is
+    // currently focused (e.g. the Settings gear) — a global `toggle` here
+    // would flip the whole HUD's visibility on top of that in the same
+    // press. Always leave Select unhandled globally.
+    onSelect: undefined,
     onPlayPause: overlayOpen ? undefined : togglePlay,
-    onLeft: overlayOpen ? undefined : () => seekBy(-10),
-    onRight: overlayOpen ? undefined : () => seekBy(10),
+    // Only steal Left/Right for the seek shortcut while controls are
+    // hidden, where there's nothing else to focus horizontally anyway.
+    // Once visible, leave Left/Right to the native focus engine so D-pad
+    // can reach every top-bar/transport button (seeking is still available
+    // there via the focusable RotateCcw/RotateCw buttons).
+    onLeft: overlayOpen || visible ? undefined : () => seekBy(-10),
+    onRight: overlayOpen || visible ? undefined : () => seekBy(10),
     onUp: overlayOpen ? undefined : show,
     onDown: overlayOpen ? undefined : show,
   });
@@ -692,6 +738,9 @@ export const PlayerCore = ({
       <PlayerSettingsDrawer
         visible={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        servers={servers}
+        activeServerId={activeServer.id}
+        onSelectServer={onSelectServer ? handleSelectServer : undefined}
         variants={variants}
         selectedVariantUri={selectedVariantUri}
         onSelectQuality={onSelectQuality}

@@ -17,6 +17,9 @@ interface WebViewScraperProps {
   /** Playback server to scrape against — base URL + optional custom URL pattern/type label. */
   server: ServerUrlConfig;
   tmdbId: number;
+  /** IMDb id (e.g. "tt1375666") — fills the `{imdbId}` placeholder for
+   * servers that need it. */
+  imdbId?: string | null;
   type: 'movie' | 'tv';
   season?: number;
   episode?: number;
@@ -77,7 +80,12 @@ const log = (...args: unknown[]) => console.log(TAG, ...args);
 // loader, native <video> + MSE via fetch, etc.) issue segment/manifest
 // requests through `fetch` instead of `XMLHttpRequest`, so both are patched.
 // Also forwards debug logs (type: 'log') so they surface in devtools.
-const INJECTED_JAVASCRIPT = `
+//
+// `timeoutMs` (the same give-up timeout the component arms in
+// `handleLoadEnd`) is threaded in so the page-side center-click retry loop
+// below knows when to stop trying — `<= 0` means "no timeout" (retry
+// indefinitely, matching the component's own "wait indefinitely" semantics).
+const buildInjectedJavaScript = (timeoutMs: number) => `
 (function() {
   function post(p) {
     try {
@@ -87,9 +95,11 @@ const INJECTED_JAVASCRIPT = `
   function log(m) { post({ type: 'log', message: String(m), frame: location.href }); }
 
   var VIDEO_RE = /\\.(m3u8|mp4|webm|mkv)($|\\?)/i;
+  var streamFound = false;
 
   function reportIfVideo(url, source) {
     if (!url || !VIDEO_RE.test(url)) return;
+    streamFound = true;
     log(source + ' ' + url);
     post({
       type: 'video',
@@ -131,6 +141,183 @@ const INJECTED_JAVASCRIPT = `
       });
     };
   }
+
+  // Many embed players only start (and issue their video request) once
+  // their "play" overlay is clicked. Try to find and click that overlay via
+  // known selector patterns, falling back to a plain viewport-center click
+  // (elementFromPoint) if no known button is found. Retries on an interval
+  // (rather than a single attempt) since the overlay may not have rendered
+  // yet, or the first click may land on an ad/consent layer instead of the
+  // real button — keeps trying until a stream is found or \`timeoutMs\`
+  // elapses (matching the component's own give-up timeout).
+  var CENTER_CLICK_INTERVAL_MS = 3000;
+  var CENTER_CLICK_TIMEOUT_MS = ${timeoutMs};
+  var centerClickIntervalId = null;
+  var centerClickStartedAt = 0;
+
+  // Known play-button skins used by common embed/video players. Checked in
+  // order; first visible match wins. Custom-built players (e.g. Videasy's
+  // own React player) don't match any of these — findByText/
+  // findNearCenterClickable below, then the plain viewport-center click as
+  // a last resort, cover those.
+  var PLAY_BUTTON_SELECTORS = [
+    '.vjs-big-play-button',
+    '.jw-icon-playback',
+    '.jw-display-icon-container',
+    '.plyr__control--overlaid',
+    '.mejs-overlay-play',
+    '.mejs-overlay-button',
+    '.fluid_initial_play',
+    '.fluid_initial_play_button',
+    '.clappr-play-wrapper',
+    '.vjs-poster',
+    '[class*="play-button" i]',
+    '[class*="playbutton" i]',
+    '[class*="play_button" i]',
+    '[class*="play-btn" i]',
+    '[id*="play-button" i]',
+    '[aria-label*="play" i]',
+    '[title="Play" i]',
+  ];
+
+  // Short, exact-ish labels used by "click to start" buttons that don't use
+  // any of the class names above (icon+text custom buttons).
+  var PLAY_TEXT_RE = /^(play|play now|play video|watch now|start watching|tap to play|click to play)$/i;
+
+  function isVisible(el) {
+    var rect = el.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return false;
+    var style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
+    return true;
+  }
+
+  function findBySelector() {
+    for (var i = 0; i < PLAY_BUTTON_SELECTORS.length; i++) {
+      var matches = document.querySelectorAll(PLAY_BUTTON_SELECTORS[i]);
+      for (var j = 0; j < matches.length; j++) {
+        if (isVisible(matches[j])) return matches[j];
+      }
+    }
+    return null;
+  }
+
+  function findByText() {
+    var candidates = document.querySelectorAll('button, [role="button"], a, div, span');
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+      var text = (el.textContent || '').trim();
+      if (text && text.length <= 24 && PLAY_TEXT_RE.test(text) && isVisible(el)) return el;
+    }
+    return null;
+  }
+
+  // Fully custom/icon-only player skins (no recognizable class name or
+  // label — e.g. an SVG triangle in a plain <div>) fall back to a geometric
+  // guess: the smallest visibly-clickable (cursor: pointer) element close to
+  // the viewport center, excluding near-full-bleed backdrops/containers.
+  function findNearCenterClickable() {
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var cx = vw / 2;
+    var cy = vh / 2;
+    var maxDist = Math.min(vw, vh) * 0.4;
+    var candidates = document.querySelectorAll('button, [role="button"], a, div, span, svg, path, i, label');
+    var best = null;
+    var bestScore = Infinity;
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+      var rect = el.getBoundingClientRect();
+      if (rect.width < 16 || rect.height < 16) continue;
+      if (rect.width > vw * 0.7 && rect.height > vh * 0.7) continue;
+      var ex = rect.left + rect.width / 2;
+      var ey = rect.top + rect.height / 2;
+      var dist = Math.sqrt((ex - cx) * (ex - cx) + (ey - cy) * (ey - cy));
+      if (dist > maxDist) continue;
+      if (!isVisible(el)) continue;
+      var style = window.getComputedStyle(el);
+      if (style.cursor !== 'pointer') continue;
+      var score = dist + rect.width * rect.height * 0.02;
+      if (score < bestScore) {
+        bestScore = score;
+        best = el;
+      }
+    }
+    return best;
+  }
+
+  function findPlayButton() {
+    return findBySelector() || findByText() || findNearCenterClickable();
+  }
+
+  function dispatchClick(el, x, y) {
+    ['mousedown', 'mouseup', 'click'].forEach(function (type) {
+      el.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+      }));
+    });
+  }
+
+  function stopCenterClicking() {
+    if (centerClickIntervalId !== null) {
+      clearInterval(centerClickIntervalId);
+      centerClickIntervalId = null;
+    }
+  }
+
+  function clickCenter() {
+    if (streamFound) {
+      log('center click: stream already found, stopping retries');
+      stopCenterClicking();
+      return;
+    }
+    if (CENTER_CLICK_TIMEOUT_MS > 0 && (Date.now() - centerClickStartedAt) >= CENTER_CLICK_TIMEOUT_MS) {
+      log('center click: timeout reached, stopping retries');
+      stopCenterClicking();
+      return;
+    }
+    try {
+      var target = findPlayButton();
+      var x, y;
+      if (target) {
+        var rect = target.getBoundingClientRect();
+        x = Math.floor(rect.left + rect.width / 2);
+        y = Math.floor(rect.top + rect.height / 2);
+        log('found play button: ' + (target.className || target.tagName));
+      } else {
+        x = Math.floor(window.innerWidth / 2);
+        y = Math.floor(window.innerHeight / 2);
+        target = document.elementFromPoint(x, y);
+        log('no known play button matched, falling back to viewport center');
+      }
+      if (!target) { log('center click: nothing at ' + x + ',' + y); return; }
+      dispatchClick(target, x, y);
+      log('click dispatched on ' + (target.tagName || 'unknown'));
+    } catch (e) {
+      log('center click error: ' + e);
+    }
+  }
+
+  // Guard against the race where a (nested/fast-loading) frame's 'load'
+  // event has already fired by the time this script is injected into it —
+  // in that case addEventListener('load', ...) would never fire, and the
+  // click loop would silently never start.
+  function startCenterClickLoop() {
+    if (centerClickStartedAt !== 0) return;
+    centerClickStartedAt = Date.now();
+    clickCenter();
+    centerClickIntervalId = setInterval(clickCenter, CENTER_CLICK_INTERVAL_MS);
+  }
+
+  if (document.readyState === 'complete') {
+    startCenterClickLoop();
+  } else {
+    window.addEventListener('load', startCenterClickLoop);
+  }
 })();
 true;
 `;
@@ -154,6 +341,7 @@ true;
 export const WebViewScraper = ({
   server,
   tmdbId,
+  imdbId,
   type,
   season,
   episode,
@@ -172,18 +360,26 @@ export const WebViewScraper = ({
     (timeoutSeconds ?? DEFAULT_SCRAPER_TIMEOUT_SECONDS) * 1000;
 
   const embedUrl = useMemo(
-    () => buildEmbedUrl(server, { type, tmdbId, season, episode, title }),
+    () =>
+      buildEmbedUrl(server, { type, tmdbId, imdbId, season, episode, title }),
     [
       server.url,
-      server.urlPattern,
+      server.movieUrlPattern,
+      server.tvUrlPattern,
       server.movieTypeLabel,
       server.tvTypeLabel,
       type,
       tmdbId,
+      imdbId,
       season,
       episode,
       title,
     ],
+  );
+
+  const injectedJavaScript = useMemo(
+    () => buildInjectedJavaScript(timeoutMs),
+    [timeoutMs],
   );
 
   // Reset the WebView when the target changes.
@@ -282,7 +478,7 @@ export const WebViewScraper = ({
         // Present as a normal mobile browser so Cloudflare's JS challenge runs.
         userAgent={USER_AGENT}
         applicationNameForUserAgent="Chrome/126.0.0.0"
-        injectedJavaScript={INJECTED_JAVASCRIPT}
+        injectedJavaScript={injectedJavaScript}
         // Inject into nested (cross-origin) iframes too - the stream request
         // originates inside the embedded player frame, not the top document.
         injectedJavaScriptForMainFrameOnly={false}

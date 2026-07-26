@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Gauge,
   Ratio,
+  Server,
   Settings2,
   X,
 } from 'lucide-react-native';
@@ -17,6 +18,7 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { VStack } from '@/components/ui/vstack';
 import { Focusable } from '@/src/components/Focusable';
+import type { PlaybackServer } from '@/src/hooks/useServers';
 import {
   getAspectLabel,
   VIDEO_ASPECT_OPTIONS,
@@ -63,9 +65,10 @@ const formatBitrate = (bps: number): string => {
   return `${Math.round(bps / 1000)} kbps`;
 };
 
-type SettingsCategory = 'quality' | 'aspect' | 'speed' | 'subtitles';
+type SettingsCategory = 'server' | 'quality' | 'aspect' | 'speed' | 'subtitles';
 
 const CATEGORY_LABELS: Record<SettingsCategory, string> = {
+  server: 'Server',
   quality: 'Video quality',
   aspect: 'Aspect ratio',
   speed: 'Playback speed',
@@ -75,6 +78,12 @@ const CATEGORY_LABELS: Record<SettingsCategory, string> = {
 interface PlayerSettingsDrawerProps {
   visible: boolean;
   onClose: () => void;
+  servers: PlaybackServer[];
+  activeServerId: string;
+  /** Omit to hide the Server setting entirely (e.g. while playing a local
+   * download, where there's no scraper to re-run against a different
+   * server). */
+  onSelectServer?: (id: string) => void;
   variants: Variant[];
   /** `null` means "Auto" (master ABR). */
   selectedVariantUri: string | null;
@@ -117,6 +126,9 @@ interface PlayerSettingsDrawerProps {
 export const PlayerSettingsDrawer = ({
   visible,
   onClose,
+  servers,
+  activeServerId,
+  onSelectServer,
   variants,
   selectedVariantUri,
   onSelectQuality,
@@ -148,6 +160,8 @@ export const PlayerSettingsDrawer = ({
     onChangeSubtitleOffset(Math.min(OFFSET_MAX, Math.max(OFFSET_MIN, next)));
   };
 
+  const activeServerName =
+    servers.find((s) => s.id === activeServerId)?.name ?? 'Unknown';
   const qualityValue =
     selectedVariantUri == null
       ? 'Auto'
@@ -195,6 +209,17 @@ export const PlayerSettingsDrawer = ({
         <ScrollView className="flex-1 px-4 pb-6">
           {activeCategory == null && (
             <VStack space="lg">
+              {onSelectServer && servers.length > 1 && (
+                <SettingsSection title="Source">
+                  <SettingsMenuRow
+                    icon={Server}
+                    label="Server"
+                    value={activeServerName}
+                    onPress={() => setActiveCategory('server')}
+                  />
+                </SettingsSection>
+              )}
+
               <SettingsSection title="Video">
                 {variants.length > 1 && (
                   <SettingsMenuRow
@@ -229,6 +254,23 @@ export const PlayerSettingsDrawer = ({
                   onPress={() => setActiveCategory('speed')}
                 />
               </SettingsSection>
+            </VStack>
+          )}
+
+          {activeCategory === 'server' && (
+            <VStack space="xs">
+              {servers.map((s, idx) => (
+                <OptionRow
+                  key={s.id}
+                  label={s.name}
+                  active={s.id === activeServerId}
+                  hasTVPreferredFocus={idx === 0}
+                  onPress={() => {
+                    onSelectServer?.(s.id);
+                    setActiveCategory(null);
+                  }}
+                />
+              ))}
             </VStack>
           )}
 

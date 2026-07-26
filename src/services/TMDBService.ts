@@ -2,6 +2,7 @@ import { TMDB_CONFIG } from '@/src/config/env';
 import {
   ContentRatingsResponse,
   CreditsResponse,
+  ExternalIdsResponse,
   Genre,
   MediaImagesResponse,
   MediaItem,
@@ -169,6 +170,17 @@ class TMDBServiceImpl {
 
   getSeasonDetails(tvId: number, seasonNumber: number) {
     return this.request<SeasonDetails>(`/tv/${tvId}/season/${seasonNumber}`);
+  }
+
+  /** IMDb (+ other) external ids for a movie — used to fill a playback
+   * server's `{imdbId}` URL placeholder, see `streamUrl.ts`. */
+  getMovieExternalIds(id: number) {
+    return this.request<ExternalIdsResponse>(`/movie/${id}/external_ids`);
+  }
+
+  /** IMDb (+ other) external ids for a TV show — see `getMovieExternalIds`. */
+  getTVExternalIds(id: number) {
+    return this.request<ExternalIdsResponse>(`/tv/${id}/external_ids`);
   }
 
   getMovieGenres() {

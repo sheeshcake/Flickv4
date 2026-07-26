@@ -84,7 +84,7 @@ Three different places a new setting can live — pick based on what it's *about
 | Lives in | When to use | Examples |
 |---|---|---|
 | Local `useState` inside `PlayerCore` | Content-specific tweak that shouldn't outlive this one playback session | subtitle sync offset, playback speed |
-| `PlaybackServer` field in `useServers.tsx` (AsyncStorage-backed, per server) | Behavior of the *scraper* for a specific server | `urlPattern`, `movieTypeLabel`, `scraperTimeoutSeconds` |
+| `PlaybackServer` field in `useServers.tsx` (AsyncStorage-backed, per server) | Behavior of the *scraper* for a specific server | `movieUrlPattern`, `tvUrlPattern`, `movieTypeLabel`, `scraperTimeoutSeconds` |
 | Context + AsyncStorage hook (`useVideoAspect`, `useVideoQuality`, `useSubtitleSettings`, `usePlayerDebugSettings`) | Device/UX preference that should persist across every video and every server | aspect ratio, quality preference, subtitle appearance, debug toggle |
 
 Don't default to the persisted-Context pattern just because it's the most common one in this codebase — a setting tied to one specific piece of content (this video's audio sync) has no business surviving into the next video.

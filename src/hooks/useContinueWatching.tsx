@@ -46,12 +46,14 @@ interface ContinueWatchingContextValue {
     entry: Omit<ContinueWatchingEntry, 'updatedAt'> & { updatedAt?: number },
   ) => void;
   /**
-   * Re-point an existing show's Continue Watching entry at a new
-   * season/episode with progress reset to 0, WITHOUT going through
-   * `upsert`'s "position < 30 -> discard" rule. Used when autoplay advances
-   * to the next episode so the show never disappears from Continue
-   * Watching during the handoff — see `PlayerCore.playNextEpisode`. No-ops
-   * if there's no existing entry for the show (nothing to carry forward).
+   * Re-point a show's Continue Watching entry at a new season/episode with
+   * progress reset to 0, WITHOUT going through `upsert`'s "position < 30 ->
+   * discard" rule. Used when autoplay advances to the next episode so the
+   * show's row is immediately pointing at the new episode the instant
+   * autoplay hands off — see `PlayerCore.playNextEpisode`. Unconditionally
+   * upserts a fresh entry even if none existed yet (e.g. the previous
+   * episode's row was already deleted by the regular progress autosave's
+   * `ratio > 0.95` rule shortly before `onEnd`/autoplay fired).
    */
   advanceEpisode: (item: MediaItem, season: number, episode: number) => void;
   remove: (
@@ -172,14 +174,20 @@ export const ContinueWatchingProvider = ({
         const existing = prev.find(
           (e) => keyFor(e.item, e.season, e.episode) === k,
         );
-        if (!existing) return prev;
-        const next = prev
-          .map((e) =>
-            keyFor(e.item, e.season, e.episode) === k
-              ? { ...e, season, episode, position: 0, duration: 0, updatedAt: Date.now() }
-              : e,
-          )
-          .sort((a, b) => b.updatedAt - a.updatedAt);
+        // No existing row (e.g. the late `ratio > 0.95` autosave already
+        // deleted it just before autoplay fired) — build a fresh one
+        // instead of no-op'ing, so the show's Continue Watching row
+        // reappears immediately at the new episode rather than waiting for
+        // that episode's own autosave to first cross `position >= 30`.
+        const updated = existing
+          ? { ...existing, season, episode, position: 0, duration: 0, updatedAt: Date.now() }
+          : { item, season, episode, position: 0, duration: 0, updatedAt: Date.now() };
+        const next = [
+          updated,
+          ...prev.filter((e) => keyFor(e.item, e.season, e.episode) !== k),
+        ]
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, 20);
         AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {});
         return next;
       });

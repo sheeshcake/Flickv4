@@ -37,8 +37,10 @@ import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 // testing a server — "Test" only needs to confirm the server's pattern +
 // scraper pipeline resolves *a* stream, not any particular title. The title
 // is included (not just the id) so patterns using a `{slug}` placeholder
-// resolve to something real (e.g. "inception") instead of an empty string.
+// resolve to something real (e.g. "inception") instead of an empty string,
+// and the IMDb id covers patterns using `{imdbId}`.
 const TEST_TMDB_ID = 27205;
+const TEST_IMDB_ID = 'tt1375666';
 const TEST_TITLE = 'Inception';
 
 // `0` = no timeout (wait indefinitely — e.g. to manually solve a captcha via
@@ -82,14 +84,12 @@ export const ServerFormModal = ({
 
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [urlPattern, setUrlPattern] = useState('');
+  const [movieUrlPattern, setMovieUrlPattern] = useState('');
+  const [tvUrlPattern, setTvUrlPattern] = useState('');
   const [movieTypeLabel, setMovieTypeLabel] = useState('');
   const [tvTypeLabel, setTvTypeLabel] = useState('');
   const [scraperTimeoutSeconds, setScraperTimeoutSeconds] = useState(
     DEFAULT_SCRAPER_TIMEOUT_SECONDS,
-  );
-  const [draftPreviewType, setDraftPreviewType] = useState<'movie' | 'tv'>(
-    'movie',
   );
 
   // Seed the form fresh every time the modal opens — either blank (add) or
@@ -98,13 +98,13 @@ export const ServerFormModal = ({
     if (!visible) return;
     setName(server?.name ?? '');
     setUrl(server?.url ?? '');
-    setUrlPattern(server?.urlPattern ?? '');
+    setMovieUrlPattern(server?.movieUrlPattern ?? '');
+    setTvUrlPattern(server?.tvUrlPattern ?? '');
     setMovieTypeLabel(server?.movieTypeLabel ?? '');
     setTvTypeLabel(server?.tvTypeLabel ?? '');
     setScraperTimeoutSeconds(
       server?.scraperTimeoutSeconds ?? DEFAULT_SCRAPER_TIMEOUT_SECONDS,
     );
-    setDraftPreviewType('movie');
   }, [visible, server]);
 
   const canSubmit = name.trim().length > 0 && url.trim().length > 0;
@@ -127,7 +127,8 @@ export const ServerFormModal = ({
       id: '__draft__',
       name: name.trim() || 'New server',
       url: normalizeUrl(url),
-      urlPattern: urlPattern || undefined,
+      movieUrlPattern: movieUrlPattern || undefined,
+      tvUrlPattern: tvUrlPattern || undefined,
       movieTypeLabel: movieTypeLabel || undefined,
       tvTypeLabel: tvTypeLabel || undefined,
       scraperTimeoutSeconds,
@@ -136,7 +137,8 @@ export const ServerFormModal = ({
     testing,
     name,
     url,
-    urlPattern,
+    movieUrlPattern,
+    tvUrlPattern,
     movieTypeLabel,
     tvTypeLabel,
     scraperTimeoutSeconds,
@@ -180,15 +182,15 @@ export const ServerFormModal = ({
     [testTarget, finishTest, toast],
   );
 
-  const draftPreview = previewEmbedUrl(
-    {
-      url,
-      urlPattern: urlPattern || undefined,
-      movieTypeLabel: movieTypeLabel || undefined,
-      tvTypeLabel: tvTypeLabel || undefined,
-    },
-    draftPreviewType,
-  );
+  const draftServerConfig = {
+    url,
+    movieUrlPattern: movieUrlPattern || undefined,
+    tvUrlPattern: tvUrlPattern || undefined,
+    movieTypeLabel: movieTypeLabel || undefined,
+    tvTypeLabel: tvTypeLabel || undefined,
+  };
+  const draftMoviePreview = previewEmbedUrl(draftServerConfig, 'movie');
+  const draftTvPreview = previewEmbedUrl(draftServerConfig, 'tv');
 
   const handleClose = () => {
     finishTest();
@@ -198,7 +200,8 @@ export const ServerFormModal = ({
   const handleSubmit = () => {
     if (!canSubmit) return;
     onSubmit(name, url, {
-      urlPattern,
+      movieUrlPattern,
+      tvUrlPattern,
       movieTypeLabel,
       tvTypeLabel,
       scraperTimeoutSeconds,
@@ -239,14 +242,21 @@ export const ServerFormModal = ({
               contentContainerStyle={{ paddingBottom: 40 }}
             >
               <Text size="sm" className="mb-4 text-muted-foreground">
-                Streams are resolved from this server using the pattern
+                Streams are resolved using
                 {'  '}
                 <Text size="sm" className="text-foreground">
                   {'{url}/{type}/{tmdbId}'}
                 </Text>
                 {'  '}
-                by default. You can override the pattern, and what
-                &quot;movie&quot;/&quot;tv&quot; are called in the URL, below.
+                for movies and
+                {'  '}
+                <Text size="sm" className="text-foreground">
+                  {'{url}/{type}/{tmdbId}/{season}/{episode}'}
+                </Text>
+                {'  '}
+                for TV shows by default. You can override either pattern, and
+                what &quot;movie&quot;/&quot;tv&quot; are called in the URL,
+                below.
               </Text>
 
               <VStack space="md" className="pb-10">
@@ -275,9 +285,20 @@ export const ServerFormModal = ({
                 <VStack space="xs">
                   <Input className="h-12 rounded-md bg-card">
                     <InputField
-                      placeholder="URL pattern (optional, e.g. {url}/{type}?tmdb={tmdbId})"
-                      value={urlPattern}
-                      onChangeText={setUrlPattern}
+                      placeholder="Movie URL pattern (optional, e.g. {url}/{type}?tmdb={tmdbId})"
+                      value={movieUrlPattern}
+                      onChangeText={setMovieUrlPattern}
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      keyboardType="url"
+                      className="text-foreground"
+                    />
+                  </Input>
+                  <Input className="h-12 rounded-md bg-card">
+                    <InputField
+                      placeholder="TV URL pattern (optional, e.g. {url}/{type}/{tmdbId}/{season}/{episode})"
+                      value={tvUrlPattern}
+                      onChangeText={setTvUrlPattern}
                       autoCorrect={false}
                       autoCapitalize="none"
                       keyboardType="url"
@@ -285,17 +306,20 @@ export const ServerFormModal = ({
                     />
                   </Input>
                   <Text size="xs" className="text-muted-foreground">
-                    Leave blank to use the default path pattern. Placeholders:
+                    Leave either blank to use its default path pattern.
+                    Placeholders:
                     {' '}
-                    {'{url}'} {'{type}'} {'{tmdbId}'} {'{slug}'} {'{season}'}{' '}
-                    {'{episode}'}
+                    {'{url}'} {'{type}'} {'{tmdbId}'} {'{imdbId}'} {'{slug}'}{' '}
+                    {'{season}'} {'{episode}'}
                     {'  '}(
                     {'{slug}'} is the title turned into a URL-safe slug, e.g.
                     {' '}
                     <Text size="xs" className="text-foreground">
                       disclosure-day
                     </Text>
-                    )
+                    ; unlike the movie pattern, the TV default already
+                    includes {'{season}'}/{'{episode}'} — a custom TV
+                    pattern must include them explicitly if it needs them)
                   </Text>
                 </VStack>
 
@@ -377,27 +401,14 @@ export const ServerFormModal = ({
                   </Text>
                 </VStack>
 
-                <HStack space="sm" className="items-center">
+                <VStack space="xs">
                   <Text size="xs" className="text-muted-foreground">
-                    Preview as:
+                    Movie resolves to {draftMoviePreview}
                   </Text>
-                  <Focusable
-                    onPress={() =>
-                      setDraftPreviewType((t) =>
-                        t === 'movie' ? 'tv' : 'movie',
-                      )
-                    }
-                    className="rounded-full bg-card px-3 py-1"
-                    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
-                  >
-                    <Text size="xs" className="text-foreground">
-                      {draftPreviewType === 'movie' ? 'Movie' : 'TV show'}
-                    </Text>
-                  </Focusable>
-                </HStack>
-                <Text size="xs" className="text-muted-foreground">
-                  Resolves to {draftPreview}
-                </Text>
+                  <Text size="xs" className="text-muted-foreground">
+                    TV resolves to {draftTvPreview}
+                  </Text>
+                </VStack>
 
                 <HStack space="sm">
                   <Button
@@ -455,6 +466,7 @@ export const ServerFormModal = ({
             <WebViewScraper
               server={testTarget}
               tmdbId={TEST_TMDB_ID}
+              imdbId={TEST_IMDB_ID}
               type="movie"
               title={TEST_TITLE}
               onDataExtracted={onTestSuccess}
