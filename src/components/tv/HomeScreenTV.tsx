@@ -83,7 +83,7 @@ export const HomeScreenTV = ({
     <Box className="flex-1 bg-background" onLayout={onLayout}>
       {ready && (
         <ScrollView showsVerticalScrollIndicator={false}>
-          <HeroCarousel
+          {/* <HeroCarousel
             items={hero}
             deviceKind="tv"
             height={heroHeight}
@@ -102,9 +102,11 @@ export const HomeScreenTV = ({
                 onToggleList={common.onToggleList}
                 comingSoonLabel={common.comingSoonLabel}
                 sidebarRef={sidebarRef}
+                isFirst={common.isFirst}
+                onFocusChange={common.onFocusChange}
               />
             )}
-          />
+          /> */}
 
           <Box className="mt-6">
             {continueItems.length > 0 && (

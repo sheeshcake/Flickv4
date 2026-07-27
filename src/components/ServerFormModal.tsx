@@ -44,8 +44,8 @@ const TEST_IMDB_ID = 'tt1375666';
 const TEST_TITLE = 'Inception';
 
 // `0` = no timeout (wait indefinitely — e.g. to manually solve a captcha via
-// the Debug video player in Settings). Independent of that toggle; see
-// `WebViewScraper.tsx` / `useServers.tsx`.
+// this server's Debug video player toggle in Server Settings). Independent
+// of that toggle; see `WebViewScraper.tsx` / `useServers.tsx`.
 const SCRAPER_TIMEOUT_OPTIONS: { value: number; label: string }[] = [
   { value: 30, label: '30s' },
   { value: 60, label: '60s' },
@@ -393,11 +393,12 @@ export const ServerFormModal = ({
                   </Box>
                   <Text size="xs" className="text-muted-foreground">
                     How long to wait for a stream after the page loads before
-                    giving up. Independent of Settings &gt; Debug video
-                    player — pick &quot;No timeout&quot; on a server with a
-                    frequent captcha challenge so you have time to solve it by
-                    hand (turn on Debug video player to actually see/interact
-                    with it).
+                    giving up. Independent of this server&apos;s Debug video
+                    player toggle (Server Settings) — pick &quot;No
+                    timeout&quot; on a server with a frequent captcha
+                    challenge so you have time to solve it by hand (turn on
+                    that server&apos;s Debug video player to actually
+                    see/interact with it).
                   </Text>
                 </VStack>
 

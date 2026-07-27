@@ -16,13 +16,13 @@ import {
   useToast,
 } from '@/components/ui/toast';
 import { PlayerCore } from '@/src/components/player/PlayerCore';
+import { ServerLoadingSideNav } from '@/src/components/player/ServerLoadingSideNav';
 import {
   WebViewScraper,
   type ExtractedStream,
 } from '@/src/components/player/WebViewScraper';
 import { useServers } from '@/src/hooks/useServers';
 import { useDownloads } from '@/src/hooks/useDownloads';
-import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { TMDBService } from '@/src/services/TMDBService';
 import { forceLandscape, restoreOrientation } from '@/src/utils/orientation';
 import { originOf } from '@/src/utils/streamUrl';
@@ -52,10 +52,11 @@ export const PlayerScreen = ({
 
   const { servers, activeServer, setActive } = useServers();
   const { getLocalSource, getJobFor } = useDownloads();
-  // Settings > "Debug video player" — when on, render the stream-resolving
-  // WebViewScraper full-screen and interactive instead of invisible, so you
-  // can watch exactly what the embed page is doing.
-  const { scraperDebugEnabled } = usePlayerDebugSettings();
+  // Per-server "Debug video player" (Server Settings) — when on for the
+  // active server, render the stream-resolving WebViewScraper full-screen
+  // and interactive instead of invisible, so you can watch exactly what
+  // the embed page is doing.
+  const scraperDebugEnabled = activeServer.debugEnabled ?? false;
   const toast = useToast();
   const type: 'movie' | 'tv' = item.media_type === 'tv' ? 'tv' : 'movie';
 
@@ -87,8 +88,11 @@ export const PlayerScreen = ({
   // Servers already tried (and failed) for the CURRENT target — reset
   // whenever the target itself changes (item/episode) or the user
   // explicitly picks a server, so a fresh failover cycle can run each time.
-  // See `switchToServer`/`tryNextServer` below.
-  const triedServerIdsRef = useRef<Set<string>>(new Set());
+  // See `switchToServer`/`tryNextServer` below. State (not a ref) so
+  // `ServerLoadingSideNav` re-renders with each server's up-to-date status.
+  const [triedServerIds, setTriedServerIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Best-effort IMDb id lookup for the current item — fills a playback
   // server's `{imdbId}` URL placeholder, if its pattern uses one. Swallow
@@ -231,7 +235,7 @@ export const PlayerScreen = ({
   const handleSelectServer = useCallback(
     (id: string, resumeFromSeconds: number) => {
       if (id === activeServer.id) return;
-      triedServerIdsRef.current = new Set();
+      setTriedServerIds(new Set());
       switchToServer(id, resumeFromSeconds);
     },
     [activeServer.id, switchToServer],
@@ -242,15 +246,16 @@ export const PlayerScreen = ({
   // has failed, fall through to the "No video available" empty state.
   const tryNextServer = useCallback(
     (resumeFromSeconds: number) => {
-      triedServerIdsRef.current.add(activeServer.id);
-      const next = servers.find((s) => !triedServerIdsRef.current.has(s.id));
+      const updated = new Set(triedServerIds).add(activeServer.id);
+      const next = servers.find((s) => !updated.has(s.id));
+      setTriedServerIds(updated);
       if (!next) {
         setNoSource(true);
         return;
       }
       switchToServer(next.id, resumeFromSeconds);
     },
-    [servers, activeServer.id, switchToServer],
+    [servers, activeServer.id, triedServerIds, switchToServer],
   );
 
   // On scrape failure/timeout, try the next configured server before giving
@@ -280,7 +285,7 @@ export const PlayerScreen = ({
     (nextSeason: number, ep: Episode) => {
       const nextEpisode = ep.episode_number;
       if (season === nextSeason && episode === nextEpisode) return;
-      triedServerIdsRef.current = new Set();
+      setTriedServerIds(new Set());
       resolvedRef.current = false;
       setSource(null);
       setNoSource(false);
@@ -386,19 +391,25 @@ export const PlayerScreen = ({
           <Text size="xs" className="text-muted-foreground">
             {debugStreamFound
               ? 'Stream found — playing in WebView (debug)'
-              : `Finding stream… (debug, no timeout)${triedServerIdsRef.current.size ? ` — trying ${activeServer.name}` : ''}`}
+              : `Finding stream… (debug, no timeout)${triedServerIds.size ? ` — trying ${activeServer.name}` : ''}`}
           </Text>
         </Center>
       ) : (
         <Center style={StyleSheet.absoluteFill} className="bg-black">
           <Spinner size="large" color="#E50914" />
           <Text className="mt-4 text-muted-foreground">
-            {triedServerIdsRef.current.size
+            {triedServerIds.size
               ? `Trying ${activeServer.name}…`
               : 'Finding stream…'}
           </Text>
         </Center>
       )}
+      <ServerLoadingSideNav
+        servers={servers}
+        activeServerId={activeServer.id}
+        triedServerIds={triedServerIds}
+        onSelectServer={(id) => handleSelectServer(id, 0)}
+      />
       <Pressable
         onPress={() => navigation.goBack()}
         hitSlop={16}

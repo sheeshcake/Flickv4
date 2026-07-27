@@ -3,6 +3,7 @@ import { StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
   ArrowLeft,
+  Bug,
   Check,
   FlaskConical,
   Pencil,
@@ -55,8 +56,15 @@ const formatScraperTimeout = (seconds: number): string =>
 
 export const ServerSettingsScreen = () => {
   const navigation = useNavigation();
-  const { servers, activeId, addServer, updateServer, removeServer, setActive } =
-    useServers();
+  const {
+    servers,
+    activeId,
+    addServer,
+    updateServer,
+    removeServer,
+    setActive,
+    setServerDebugEnabled,
+  } = useServers();
   const toast = useToast();
 
   // Add/edit now happens in its own modal (`ServerFormModal`) — `null`
@@ -189,6 +197,9 @@ export const ServerSettingsScreen = () => {
                 onSelect={() => setActive(server.id)}
                 onTest={() => runTest(server.id, server)}
                 onCancelTest={finishTest}
+                onToggleDebug={() =>
+                  setServerDebugEnabled(server.id, !server.debugEnabled)
+                }
                 onEdit={
                   server.builtIn ? undefined : () => openEditModal(server)
                 }
@@ -227,6 +238,7 @@ export const ServerSettingsScreen = () => {
             imdbId={TEST_IMDB_ID}
             type="movie"
             title={TEST_TITLE}
+            debug={testTarget.debugEnabled}
             onDataExtracted={onTestSuccess}
             onError={onTestError}
             timeoutSeconds={testTarget.scraperTimeoutSeconds}
@@ -295,6 +307,7 @@ const ServerRow = ({
   onSelect,
   onTest,
   onCancelTest,
+  onToggleDebug,
   onEdit,
   onRemove,
 }: {
@@ -304,6 +317,7 @@ const ServerRow = ({
   onSelect: () => void;
   onTest: () => void;
   onCancelTest: () => void;
+  onToggleDebug: () => void;
   onEdit?: () => void;
   onRemove?: () => void;
 }) => (
@@ -329,10 +343,27 @@ const ServerRow = ({
           {formatScraperTimeout(
             server.scraperTimeoutSeconds ?? DEFAULT_SCRAPER_TIMEOUT_SECONDS,
           )}
+          {server.debugEnabled ? ' · Debug mode on' : ''}
         </Text>
       </VStack>
     </Focusable>
     {active ? <Icon as={Check} className="text-primary" /> : null}
+    {/* Available on every row regardless of `builtIn` — unlike Edit/Delete,
+        debug is a runtime override (`setServerDebugEnabled`), not an edit
+        to the server's own definition. */}
+    <Focusable
+      onPress={onToggleDebug}
+      hitSlop={12}
+      className="ml-3 rounded-full"
+      focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+    >
+      <Icon
+        as={Bug}
+        className={
+          server.debugEnabled ? 'text-primary' : 'text-muted-foreground'
+        }
+      />
+    </Focusable>
     {testing ? (
       <Focusable
         onPress={onCancelTest}

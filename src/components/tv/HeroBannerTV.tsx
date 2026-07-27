@@ -26,6 +26,13 @@ interface HeroBannerTVProps {
   comingSoonLabel?: string;
   /** Sidebar handle, so a dead-end D-pad "Left" can hand focus back to it. */
   sidebarRef?: RefObject<TVSideNavHandle | null>;
+  /** True only for the very first hero page — the only one allowed to claim
+   * initial TV focus, so later (auto-advanced) pages never introduce a
+   * second "highlighted" Play button. */
+  isFirst?: boolean;
+  /** Bubbles this page's hero-button focus state up to `HeroCarousel`, so
+   * auto-advance can pause while a hero button is actually focused. */
+  onFocusChange?: (focused: boolean) => void;
 }
 
 /**
@@ -42,6 +49,8 @@ export const HeroBannerTV = ({
   onToggleList,
   comingSoonLabel,
   sidebarRef,
+  isFirst,
+  onFocusChange,
 }: HeroBannerTVProps) => {
   const backdrop = TMDBService.getImageUrl(
     item.backdrop_path ?? item.poster_path,
@@ -54,6 +63,10 @@ export const HeroBannerTV = ({
   // focus, so we only ever hand off to the sidebar when Left is pressed
   // from *this* row (not, say, from a content row further down the page).
   const [heroFocused, setHeroFocused] = useState(false);
+  const handleFocusChange = (focused: boolean) => {
+    setHeroFocused(focused);
+    onFocusChange?.(focused);
+  };
 
   useTVRemote({
     // `useTVRemote`'s directional callbacks only fire when the native focus
@@ -127,8 +140,8 @@ export const HeroBannerTV = ({
             ) : (
               <Focusable
                 onPress={() => onPlay(item)}
-                hasTVPreferredFocus
-                onFocusChange={setHeroFocused}
+                hasTVPreferredFocus={isFirst}
+                onFocusChange={handleFocusChange}
                 className="w-56 items-center justify-center rounded-md bg-foreground px-6 py-3"
                 focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
               >
@@ -140,7 +153,7 @@ export const HeroBannerTV = ({
             )}
             <Focusable
               onPress={() => onToggleList(item)}
-              onFocusChange={setHeroFocused}
+              onFocusChange={handleFocusChange}
               className="w-16 items-center justify-center rounded-md bg-secondary px-6 py-3"
               focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
             >

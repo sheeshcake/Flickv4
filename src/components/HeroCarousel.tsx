@@ -20,6 +20,13 @@ export interface HeroBannerCommonProps {
   onToggleList: (item: MediaItem) => void;
   onPress: (item: MediaItem) => void;
   comingSoonLabel?: string;
+  /** True only for the very first page — the only one allowed to claim
+   * initial TV focus (`hasTVPreferredFocus`), so auto-advancing to later
+   * pages never introduces a second "highlighted" button. */
+  isFirst: boolean;
+  /** Bubbles this page's hero-button TV focus state up so the auto-advance
+   * timer can pause while the user is actually focused on a hero button. */
+  onFocusChange?: (focused: boolean) => void;
 }
 
 interface HeroCarouselProps {
@@ -63,6 +70,10 @@ export const HeroCarousel = ({
   const [index, setIndex] = useState(0);
   const indexRef = useRef(0);
   indexRef.current = index;
+  // Bubbled up from whichever page's hero button currently holds TV focus
+  // (see `HeroBannerCommonProps.onFocusChange`) — pauses auto-advance below
+  // so the visible page never changes out from under a focused button.
+  const [heroFocused, setHeroFocused] = useState(false);
 
   const scrollTo = useCallback(
     (next: number) => {
@@ -75,12 +86,12 @@ export const HeroCarousel = ({
   );
 
   useEffect(() => {
-    if (items.length < 2) return;
+    if (items.length < 2 || heroFocused) return;
     const timer = setInterval(() => {
       scrollTo(indexRef.current + 1);
     }, AUTO_ADVANCE_MS);
     return () => clearInterval(timer);
-  }, [items.length, scrollTo]);
+  }, [items.length, scrollTo, heroFocused]);
 
   const onMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const next = Math.round(e.nativeEvent.contentOffset.x / width);
@@ -115,7 +126,7 @@ export const HeroCarousel = ({
         onMomentumScrollEnd={onMomentumEnd}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
-        renderItem={({ item }) => {
+        renderItem={({ item, index: itemIndex }) => {
           const common: HeroBannerCommonProps = {
             deviceKind,
             height,
@@ -124,6 +135,8 @@ export const HeroCarousel = ({
             onToggleList,
             onPress,
             comingSoonLabel: getComingSoonLabel?.(item),
+            isFirst: itemIndex === 0,
+            onFocusChange: setHeroFocused,
           };
           return (
             <Box style={{ width, height }}>

@@ -84,8 +84,8 @@ Three different places a new setting can live — pick based on what it's *about
 | Lives in | When to use | Examples |
 |---|---|---|
 | Local `useState` inside `PlayerCore` | Content-specific tweak that shouldn't outlive this one playback session | subtitle sync offset, playback speed |
-| `PlaybackServer` field in `useServers.tsx` (AsyncStorage-backed, per server) | Behavior of the *scraper* for a specific server | `movieUrlPattern`, `tvUrlPattern`, `movieTypeLabel`, `scraperTimeoutSeconds` |
-| Context + AsyncStorage hook (`useVideoAspect`, `useVideoQuality`, `useSubtitleSettings`, `usePlayerDebugSettings`) | Device/UX preference that should persist across every video and every server | aspect ratio, quality preference, subtitle appearance, debug toggle |
+| `PlaybackServer` field in `useServers.tsx` (AsyncStorage-backed, per server) | Behavior of the *scraper* for a specific server | `movieUrlPattern`, `tvUrlPattern`, `movieTypeLabel`, `scraperTimeoutSeconds`, `debugEnabled` |
+| Context + AsyncStorage hook (`useVideoAspect`, `useVideoQuality`, `useSubtitleSettings`) | Device/UX preference that should persist across every video and every server | aspect ratio, quality preference, subtitle appearance |
 
 Don't default to the persisted-Context pattern just because it's the most common one in this codebase — a setting tied to one specific piece of content (this video's audio sync) has no business surviving into the next video.
 
@@ -99,7 +99,7 @@ Don't default to the persisted-Context pattern just because it's the most common
 
 `WebViewScraper.tsx` resolves a stream by loading a server's embed page in a hidden (or, in debug mode, visible) WebView and intercepting the video request. Two independent knobs control it, passed in from `PlayerScreen.tsx`:
 
-- `debug` (from the global `usePlayerDebugSettings` Context) — **visibility/interactivity only**: full-screen + interactive WebView (so a captcha challenge can be solved by hand) vs. fully hidden. Global, not per-server.
+- `debug` (from the active `PlaybackServer.debugEnabled`, `useServers.tsx`) — **visibility/interactivity only**: full-screen + interactive WebView (so a captcha challenge can be solved by hand) vs. fully hidden. Per-server: a built-in server's default comes from the remote server list's `debug` field (`mapRemoteServer`); any server (built-in or custom) can be flipped at runtime via `setServerDebugEnabled` (toggle icon on its row in Server Settings), persisted as a local override on top of that default.
 - `timeoutSeconds` (from the active `PlaybackServer.scraperTimeoutSeconds`, `useServers.tsx`) — **give-up duration only**: how long after page-load to wait for a stream request before erroring out. `0` means wait indefinitely. Per-server, because different servers need very different amounts of time (some never show a challenge, some show one on nearly every load).
 
 These two used to be conflated (`debug` also disabled the timeout entirely) — keep them orthogonal going forward. Once a stream is found, `PlayerScreen.onExtracted` hands off to the native `PlayerCore` only when `debug` is off; while `debug` is on it deliberately keeps playing inside the WebView itself (some streams that fail in `react-native-video` play fine in a real browser context).

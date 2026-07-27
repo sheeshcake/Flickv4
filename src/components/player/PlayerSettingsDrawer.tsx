@@ -49,8 +49,8 @@ export interface SubtitleTrackOption {
 }
 
 const OFFSET_STEP = 0.25;
-const OFFSET_MIN = -10;
-const OFFSET_MAX = 10;
+const OFFSET_MIN = -1000;
+const OFFSET_MAX = 1000;
 
 const formatOffset = (seconds: number): string => {
   if (seconds === 0) return 'In sync';

@@ -128,7 +128,7 @@ export const PlayerControls = ({
         {onOpenSettings && (
           <Focusable
             onPress={onOpenSettings}
-            className={`rounded-full p-2 ${settingsActive ? 'bg-primary' : 'bg-background/40'}`}
+            className={`rounded-full p-2 bg-background/40`}
             focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon as={Settings2} size="lg" className="text-foreground" />

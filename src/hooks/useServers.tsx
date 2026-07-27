@@ -49,12 +49,23 @@ export interface PlaybackServer {
   /**
    * Seconds to wait for a stream after the embed page finishes loading,
    * before `WebViewScraper` gives up. `0` means no timeout — wait
-   * indefinitely, e.g. to manually solve a captcha via the Debug video
-   * player (Settings). Omitted/`undefined` falls back to
-   * `DEFAULT_SCRAPER_TIMEOUT_SECONDS`. Deliberately independent of the
-   * Debug video player toggle, which only controls WebView visibility.
+   * indefinitely, e.g. to manually solve a captcha via this server's
+   * Debug video player toggle (Server Settings). Omitted/`undefined` falls
+   * back to `DEFAULT_SCRAPER_TIMEOUT_SECONDS`. Deliberately independent of
+   * `debugEnabled`, which only controls WebView visibility.
    */
   scraperTimeoutSeconds?: number;
+  /**
+   * When enabled, `PlayerScreen` renders this server's stream-resolving
+   * `WebViewScraper` full-screen and interactive (instead of invisible) so
+   * you can watch exactly what the embed page is doing while a stream is
+   * being resolved — useful when a server fails to play, or needs a
+   * captcha solved by hand. Per-server (unlike the old global toggle this
+   * replaced): a built-in server's default comes from the remote server
+   * list's `debug` field (`mapRemoteServer`); any server's value can be
+   * flipped at runtime via `setServerDebugEnabled` (Server Settings).
+   */
+  debugEnabled?: boolean;
 }
 
 export interface AddServerOptions {
@@ -90,6 +101,16 @@ const BUILT_IN_SERVERS_CACHE_KEY = 'flick.servers.builtInCache';
 const BUILT_IN_SERVERS_FETCH_TIMEOUT_MS = 10000;
 
 /**
+ * Per-server runtime overrides of `debugEnabled`, keyed by server id —
+ * `Record<string, boolean>`. Separate from both `STORAGE_KEY` (custom
+ * servers aren't the only thing this can override — built-ins are too) and
+ * `BUILT_IN_SERVERS_CACHE_KEY` (that's just a cache of the upstream
+ * response; this is the user's own local override on top of it). See
+ * `setServerDebugEnabled`.
+ */
+const DEBUG_OVERRIDES_KEY = 'flick.serverDebugOverrides';
+
+/**
  * Raw shape of an entry in the remote built-in server list. Currently a
  * single `url_pattern` (shared by movie+tv, same convention as the legacy
  * custom-server `urlPattern` migrated below) — `movie_url_pattern` /
@@ -106,6 +127,9 @@ interface RemoteServerJson {
   tv_url_pattern?: string | null;
   movie_alias?: string | null;
   tv_alias?: string | null;
+  /** Default for `PlaybackServer.debugEnabled` on this built-in server —
+   * see `mapRemoteServer`. Absent/`false` means off by default. */
+  debug?: boolean | null;
 }
 
 const slugifyId = (name: string): string =>
@@ -123,6 +147,7 @@ const mapRemoteServer = (s: RemoteServerJson): PlaybackServer => {
     name: s.name,
     url: s.url,
     builtIn: true,
+    debugEnabled: !!s.debug,
     ...(moviePattern ? { movieUrlPattern: moviePattern } : {}),
     ...(tvPattern ? { tvUrlPattern: tvPattern } : {}),
     ...(s.movie_alias ? { movieTypeLabel: s.movie_alias } : {}),
@@ -159,6 +184,9 @@ interface ServersContextValue {
   ) => void;
   removeServer: (id: string) => void;
   setActive: (id: string) => void;
+  /** Flips `debugEnabled` for ANY server (built-in or custom), persisted
+   * locally — see `DEBUG_OVERRIDES_KEY`. */
+  setServerDebugEnabled: (id: string, next: boolean) => void;
 }
 
 const ServersContext = createContext<ServersContextValue>({
@@ -170,6 +198,7 @@ const ServersContext = createContext<ServersContextValue>({
   updateServer: () => {},
   removeServer: () => {},
   setActive: () => {},
+  setServerDebugEnabled: () => {},
 });
 
 export const normalizeUrl = (url: string): string => {
@@ -188,6 +217,14 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
   const [customServers, setCustomServers] = useState<PlaybackServer[]>([]);
   const [activeId, setActiveId] = useState('');
   const [customLoaded, setCustomLoaded] = useState(false);
+
+  // Runtime debug overrides — orthogonal to both built-in and custom
+  // servers, so it gets its own state/storage rather than living inside
+  // either. See `DEBUG_OVERRIDES_KEY`.
+  const [debugOverrides, setDebugOverrides] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [debugOverridesLoaded, setDebugOverridesLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,6 +300,16 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       })
       .catch(() => {})
       .finally(() => setCustomLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem(DEBUG_OVERRIDES_KEY)
+      .then((raw) => {
+        if (!raw) return;
+        setDebugOverrides(JSON.parse(raw) as Record<string, boolean>);
+      })
+      .catch(() => {})
+      .finally(() => setDebugOverridesLoaded(true));
   }, []);
 
   const persist = useCallback(
@@ -369,9 +416,24 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
     [customServers, persist],
   );
 
+  const setServerDebugEnabled = useCallback((id: string, next: boolean) => {
+    setDebugOverrides((prev) => {
+      const nextMap = { ...prev, [id]: next };
+      AsyncStorage.setItem(
+        DEBUG_OVERRIDES_KEY,
+        JSON.stringify(nextMap),
+      ).catch(() => {});
+      return nextMap;
+    });
+  }, []);
+
   const servers = useMemo(
-    () => [...builtInServers, ...customServers],
-    [builtInServers, customServers],
+    () =>
+      [...builtInServers, ...customServers].map((s) => ({
+        ...s,
+        debugEnabled: debugOverrides[s.id] ?? s.debugEnabled ?? false,
+      })),
+    [builtInServers, customServers, debugOverrides],
   );
 
   const activeServer = useMemo(
@@ -379,11 +441,11 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
     [servers, activeId],
   );
 
-  // True once we've made a first attempt at resolving BOTH the custom
-  // servers/activeId storage AND the built-in list (from cache, network, or
-  // neither) — so consumers don't hang forever if the fetch fails and
-  // there's no cache yet.
-  const loaded = customLoaded && builtInAttempted;
+  // True once we've made a first attempt at resolving custom
+  // servers/activeId storage, the debug-overrides storage, AND the
+  // built-in list (from cache, network, or neither) — so consumers don't
+  // hang forever if the fetch fails and there's no cache yet.
+  const loaded = customLoaded && debugOverridesLoaded && builtInAttempted;
 
   const value = useMemo(
     () => ({
@@ -395,6 +457,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       updateServer,
       removeServer,
       setActive,
+      setServerDebugEnabled,
     }),
     [
       servers,
@@ -405,6 +468,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       updateServer,
       removeServer,
       setActive,
+      setServerDebugEnabled,
     ],
   );
 

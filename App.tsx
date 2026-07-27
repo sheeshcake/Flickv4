@@ -12,7 +12,6 @@ import { ServersProvider } from '@/src/hooks/useServers';
 import { MyListProvider } from '@/src/hooks/useMyList';
 import { VideoQualityProvider } from '@/src/hooks/useVideoQuality';
 import { VideoAspectProvider } from '@/src/hooks/useVideoAspect';
-import { PlayerDebugSettingsProvider } from '@/src/hooks/usePlayerDebugSettings';
 import { PlaybackSettingsProvider } from '@/src/hooks/usePlaybackSettings';
 import { DownloadsProvider } from '@/src/hooks/useDownloads';
 import { DownloadResolverHost } from '@/src/components/DownloadResolverHost';
@@ -40,20 +39,18 @@ export default function App() {
               <SubtitleSettingsProvider>
                 <VideoQualityProvider>
                   <VideoAspectProvider>
-                    <PlayerDebugSettingsProvider>
-                      <PlaybackSettingsProvider>
-                        <FinishedMoviesProvider>
-                          <ContinueWatchingProvider>
-                            <DownloadsProvider>
-                              <StatusBar style="light" />
-                              <AppNavigator />
-                              <DownloadResolverHost />
-                              <UpdateChecker />
-                            </DownloadsProvider>
-                          </ContinueWatchingProvider>
-                        </FinishedMoviesProvider>
-                      </PlaybackSettingsProvider>
-                    </PlayerDebugSettingsProvider>
+                    <PlaybackSettingsProvider>
+                      <FinishedMoviesProvider>
+                        <ContinueWatchingProvider>
+                          <DownloadsProvider>
+                            <StatusBar style="light" />
+                            <AppNavigator />
+                            <DownloadResolverHost />
+                            <UpdateChecker />
+                          </DownloadsProvider>
+                        </ContinueWatchingProvider>
+                      </FinishedMoviesProvider>
+                    </PlaybackSettingsProvider>
                   </VideoAspectProvider>
                 </VideoQualityProvider>
               </SubtitleSettingsProvider>
