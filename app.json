@@ -2,7 +2,7 @@
   "expo": {
     "name": "Flick",
     "slug": "flick",
-    "version": "2.1.3",
+    "version": "2.1.4",
     "orientation": "default",
     "icon": "./assets/applogo/ic_launcher.png",
     "userInterfaceStyle": "dark",

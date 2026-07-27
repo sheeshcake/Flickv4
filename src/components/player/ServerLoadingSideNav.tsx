@@ -2,6 +2,7 @@ import { X } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
+import { ScrollView } from '@/components/ui/scroll-view';
 import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
 import { VStack } from '@/components/ui/vstack';
@@ -44,44 +45,46 @@ export const ServerLoadingSideNav = ({
       >
         Servers
       </Text>
-      <VStack space="xs" className="p-2">
-        {servers.map((s) => {
-          const active = s.id === activeServerId;
-          const failed = !active && triedServerIds.has(s.id);
-          return (
-            <Focusable
-              key={s.id}
-              onPress={() => !active && onSelectServer(s.id)}
-              hasTVPreferredFocus={active}
-              className={`rounded-md px-3 py-3 ${active ? 'bg-primary/20' : ''}`}
-              focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
-            >
-              <HStack className="items-center justify-between">
-                <Text
-                  numberOfLines={1}
-                  className={
-                    active
-                      ? 'flex-1 font-semibold text-foreground'
-                      : 'flex-1 text-muted-foreground'
-                  }
-                >
-                  {s.name}
-                </Text>
-                {active ? (
-                  <Spinner size="small" color="#E50914" />
-                ) : failed ? (
-                  <HStack space="xs" className="items-center">
-                    <Icon as={X} size="xs" className="text-muted-foreground" />
-                    <Text size="2xs" className="text-muted-foreground">
-                      Failed
-                    </Text>
-                  </HStack>
-                ) : null}
-              </HStack>
-            </Focusable>
-          );
-        })}
-      </VStack>
+      <ScrollView>
+        <VStack space="xs" className="p-2">
+          {servers.map((s) => {
+            const active = s.id === activeServerId;
+            const failed = !active && triedServerIds.has(s.id);
+            return (
+              <Focusable
+                key={s.id}
+                onPress={() => !active && onSelectServer(s.id)}
+                hasTVPreferredFocus={active}
+                className={`rounded-md px-3 py-3 ${active ? 'bg-primary/20' : ''}`}
+                focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+              >
+                <HStack className="items-center justify-between">
+                  <Text
+                    numberOfLines={1}
+                    className={
+                      active
+                        ? 'flex-1 font-semibold text-foreground'
+                        : 'flex-1 text-muted-foreground'
+                    }
+                  >
+                    {s.name}
+                  </Text>
+                  {active ? (
+                    <Spinner size="small" color="#E50914" />
+                  ) : failed ? (
+                    <HStack space="xs" className="items-center">
+                      <Icon as={X} size="xs" className="text-muted-foreground" />
+                      <Text size="2xs" className="text-muted-foreground">
+                        Failed
+                      </Text>
+                    </HStack>
+                  ) : null}
+                </HStack>
+              </Focusable>
+            );
+          })}
+        </VStack>
+      </ScrollView>
     </Box>
   );
 };

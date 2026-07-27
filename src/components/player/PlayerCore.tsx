@@ -423,16 +423,27 @@ export const PlayerCore = ({
 
   // Swap the current stream URI while preserving the play head. Called by
   // both the initial-preference effect and the user-facing quality picker.
+  // The initial-preference effect can fire before the very first `onLoad`
+  // has had a chance to apply `resumeFrom` — at that point `currentTimeRef`
+  // is still its stale initial `0`, so blindly capturing it here would
+  // stamp `pendingSeekRef` with 0 and have `onLoad` seek there instead of
+  // resuming. Seed from `resumeFrom` in that case instead, and mark resume
+  // as already applied so `onLoad` doesn't try to seek a second time.
   const swapToUri = useCallback(
     (nextUri: string) => {
       if (!sourceObj) return;
-      pendingSeekRef.current = currentTimeRef.current;
+      const shouldResume =
+        !didResumeRef.current && resumeFrom != null && resumeFrom > 0;
+      pendingSeekRef.current = shouldResume
+        ? resumeFrom
+        : currentTimeRef.current;
+      if (shouldResume) didResumeRef.current = true;
       activeUriRef.current = nextUri;
       videoRef.current?.setSource(
         buildSource(nextUri, activeTextTracksRef.current),
       );
     },
-    [sourceObj, buildSource],
+    [sourceObj, buildSource, resumeFrom],
   );
 
   // Apply the persisted preferred quality once variants land. `pickInitial`

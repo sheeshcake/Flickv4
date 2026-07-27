@@ -217,7 +217,11 @@ export const PlayerScreen = ({
   // automatic failover below: resets resolution state and points `useServers`
   // at a different server, re-arming `WebViewScraper` to resolve against it.
   // `resumeFromSeconds` re-seeds `effectiveResumeFrom` so a switch resumes
-  // near wherever playback was, instead of restarting from 0.
+  // near wherever playback was, instead of restarting from 0. Callers that
+  // haven't actually started playing yet (scrape error, picking a server
+  // from the loading side nav) must pass the *current* `effectiveResumeFrom`
+  // through unchanged rather than hardcoding 0, or they'd wipe out the
+  // original continue-watching position before it ever got used.
   const switchToServer = useCallback(
     (id: string, resumeFromSeconds: number) => {
       setActive(id);
@@ -263,10 +267,12 @@ export const PlayerScreen = ({
   // pre-resolved stream should push `Player` with a `localSourceId` (for
   // downloads) instead.
   const onScrapeError = useCallback(() => {
-    // Nothing has played yet at the resolution stage, so there's no
-    // position worth preserving.
-    tryNextServer(0);
-  }, [tryNextServer]);
+    // Nothing has played yet at the resolution stage — carry forward
+    // whatever resume position was already queued (continue-watching's
+    // original position, or one queued by a prior switch this cycle)
+    // instead of clobbering it with 0.
+    tryNextServer(effectiveResumeFrom ?? 0);
+  }, [tryNextServer, effectiveResumeFrom]);
 
   // A stream that DID resolve but then failed to actually play (403,
   // decoder/DRM issue, etc.) — reported by `PlayerCore`'s native `<Video>`
@@ -408,7 +414,9 @@ export const PlayerScreen = ({
         servers={servers}
         activeServerId={activeServer.id}
         triedServerIds={triedServerIds}
-        onSelectServer={(id) => handleSelectServer(id, 0)}
+        onSelectServer={(id) =>
+          handleSelectServer(id, effectiveResumeFrom ?? 0)
+        }
       />
       <Pressable
         onPress={() => navigation.goBack()}
