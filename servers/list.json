@@ -16,5 +16,14 @@
         "tv_url_pattern": null,
         "movie_alias": null,
         "tv_alias": null
+    },
+    {
+        "id": "cineby",
+        "name": "CineBy",
+        "url": "https://cineby.at",
+        "movie_url_pattern": "{url}/{type}/{tmdbId}?play=true",
+        "tv_url_pattern": "{url}/{type}/{tmdbId}/{season}/{episode}?play=true",
+        "movie_alias": null,
+        "tv_alias": null
     }
 ]
