@@ -25,5 +25,14 @@
         "tv_url_pattern": "{url}/{type}/{tmdbId}/{season}/{episode}?play=true",
         "movie_alias": null,
         "tv_alias": null
+    },
+    {
+        "id": "videasy",
+        "name": "Videasy",
+        "url": "https://player.videasy.to",
+        "movie_url_pattern": "{url}/{type}/{tmdbId}",
+        "tv_url_pattern": "{url}/{type}/{tmdbId}/{season}/{episode}",
+        "movie_alias": null,
+        "tv_alias": null
     }
 ]
