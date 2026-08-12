@@ -1,5 +1,14 @@
 [
     {
+        "id": "cinejoy",
+        "name": "CineJoy",
+        "url": "https://cinejoy.to"
+        "movie_url_pattern": "{url}/watch/{type}/{tmdbId}",
+        "tv_url_pattern": "{url}/watch/{type}/{tmdbId}/{season}/{episode}",
+        "movie_alias": "movie",
+        "tv_alias": "tv"
+    }
+    {
         "id": "vidfast",
         "name": "VidFast",
         "url": "https://vidfast.vc",
