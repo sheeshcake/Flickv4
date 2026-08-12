@@ -7,7 +7,7 @@
         "tv_url_pattern": "{url}/watch/{type}/{tmdbId}/{season}/{episode}",
         "movie_alias": "movie",
         "tv_alias": "tv"
-    }
+    },
     {
         "id": "vidfast",
         "name": "VidFast",
