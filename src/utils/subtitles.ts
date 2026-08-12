@@ -58,6 +58,58 @@ export const parseSubtitleText = (raw: string): SubtitleCue[] => {
   return cues.sort((a, b) => a.start - b.start);
 };
 
+/** Convert SRT (or already-VTT) text into a WebVTT document for native sidecars. */
+export const toWebVtt = (raw: string): string => {
+  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (normalized.toUpperCase().startsWith('WEBVTT')) return normalized;
+  // SRT uses comma decimals; WebVTT uses dots.
+  const body = normalized.replace(
+    /(\d{2}:\d{2}:\d{2}),(\d{3})/g,
+    '$1.$2',
+  );
+  return `WEBVTT\n\n${body}\n`;
+};
+
+/** Shift cue times by `offsetSeconds` (positive = captions appear later). */
+export const shiftSubtitleCues = (
+  cues: SubtitleCue[],
+  offsetSeconds: number,
+): SubtitleCue[] => {
+  if (offsetSeconds === 0) return cues;
+  return cues
+    .map((c) => ({
+      ...c,
+      start: c.start + offsetSeconds,
+      end: c.end + offsetSeconds,
+    }))
+    .filter((c) => c.end > 0)
+    .map((c) => ({
+      ...c,
+      start: Math.max(0, c.start),
+    }));
+};
+
+const formatVttTimestamp = (seconds: number): string => {
+  const clamped = Math.max(0, seconds);
+  const h = Math.floor(clamped / 3600);
+  const m = Math.floor((clamped % 3600) / 60);
+  const s = clamped % 60;
+  const whole = Math.floor(s);
+  const ms = Math.round((s - whole) * 1000);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(whole).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+};
+
+/** Serialize cues to a minimal WebVTT document. */
+export const cuesToWebVtt = (cues: SubtitleCue[]): string => {
+  const body = cues
+    .map(
+      (c, i) =>
+        `${i + 1}\n${formatVttTimestamp(c.start)} --> ${formatVttTimestamp(c.end)}\n${c.text}`,
+    )
+    .join('\n\n');
+  return `WEBVTT\n\n${body}\n`;
+};
+
 export const findCueAt = (
   cues: SubtitleCue[],
   time: number,

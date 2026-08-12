@@ -6,6 +6,12 @@
       "sourceType": "github",
       "skillPath": ".agents/skills/gluestack-ui-v5/SKILL.md",
       "computedHash": "2d7e2ed985d31d2d058d62d3e14c56e3e159c4417d12afc0b22f0ce9702fa0a1"
+    },
+    "react-native-video": {
+      "source": "TheWidlarzGroup/react-native-video",
+      "sourceType": "github",
+      "skillPath": "skills/react-native-video/SKILL.md",
+      "computedHash": "0d9f348f9b520e083dd0c8fe7ad56e2416ed2b6a0dc882358c0b8ee22d369302"
     }
   }
 }

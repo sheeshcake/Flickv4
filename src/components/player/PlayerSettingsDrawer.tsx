@@ -100,10 +100,8 @@ interface PlayerSettingsDrawerProps {
    * once a track is selected. */
   subtitleOffsetSeconds: number;
   /**
-   * Omit entirely (leave `undefined`) to show a hint instead of steppers —
-   * used when native/sidecar rendering is active, since the OS renderer's
-   * timing can't be shifted from here (see `useNativeSidecar` in
-   * `PlayerCore`).
+   * Sync steppers callback. Component mode shifts cue lookup; native mode
+   * rewrites the local VTT sidecar timestamps in `PlayerCore`.
    */
   onChangeSubtitleOffset?: (next: number) => void;
 }
@@ -383,9 +381,7 @@ export const PlayerSettingsDrawer = ({
                     </HStack>
                   ) : (
                     <Text size="xs" className="mt-1 text-muted-foreground">
-                      Native captions are controlled by your device — switch
-                      to App captions in Settings &gt; Subtitles to adjust
-                      sync.
+                      Sync is unavailable for this stream.
                     </Text>
                   )}
                 </Box>

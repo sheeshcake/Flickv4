@@ -37,6 +37,7 @@ import {
 import { CastSheet } from '@/src/components/CastSheet';
 import { useDownloads } from '@/src/hooks/useDownloads';
 import { useServers } from '@/src/hooks/useServers';
+import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { DownloadService } from '@/src/services/DownloadService';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
 import { originOf } from '@/src/utils/streamUrl';
@@ -111,6 +112,7 @@ export const DetailScreen = ({
   const { isInList, toggle } = useMyList();
   const { activeServer } = useServers();
   const { enqueue, getJobFor, resume, remove, pause } = useDownloads();
+  const { settings: subtitleSettings } = useSubtitleSettings();
 
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   // TV has no "Trailers & More" tab (see DetailScreenTV), so a TV movie
@@ -275,6 +277,7 @@ export const DetailScreen = ({
               episode: opts.episode,
               title: opts.title,
               streamUri,
+              subtitleLanguage: subtitleSettings.defaultLanguage || undefined,
             });
           },
         });
@@ -288,7 +291,14 @@ export const DetailScreen = ({
         setResolvingEpisodeKey(null);
       }
     },
-    [resolvingDownload, activeServer.url, item, movie, enqueue],
+    [
+      resolvingDownload,
+      activeServer.url,
+      item,
+      movie,
+      enqueue,
+      subtitleSettings.defaultLanguage,
+    ],
   );
 
   const onDownloadMovie = useCallback(() => {

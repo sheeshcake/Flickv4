@@ -1,6 +1,6 @@
 {
   "name": "flick",
-  "version": "2.1.2",
+  "version": "2.1.5",
   "main": "index.ts",
   "dependencies": {
     "@expo/html-elements": "^0.12.5",
@@ -15,6 +15,8 @@
     "@react-navigation/native-stack": "^7.18.5",
     "babel-preset-expo": "~57.0.0",
     "expo": "~57.0.7",
+    "expo-application": "~57.0.2",
+    "expo-brightness": "~57.0.1",
     "expo-device": "~57.0.1",
     "expo-file-system": "~57.0.1",
     "expo-intent-launcher": "~57.0.1",
@@ -47,6 +49,7 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@types/react": "~19.2.2",
     "babel-plugin-module-resolver": "^5.0.3",
+    "patch-package": "^8.0.1",
     "sharp": "^0.35.3",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3"
@@ -54,8 +57,10 @@
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
+    "android:apk": "expo run:android --variant release",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "postinstall": "patch-package"
   },
   "private": true,
   "overrides": {

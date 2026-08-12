@@ -9,6 +9,8 @@ import {
   RotateCcw,
   RotateCw,
   Settings2,
+  Sun,
+  Volume2,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { HStack } from '@/components/ui/hstack';
@@ -19,6 +21,7 @@ import { Icon } from '@/components/ui/icon';
 import { Center } from '@/components/ui/center';
 import { Focusable } from '@/src/components/Focusable';
 import { ProgressBar } from '@/src/components/player/ProgressBar';
+import { VerticalSlider } from '@/src/components/player/VerticalSlider';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import { formatTime } from '@/src/components/player/useTVRemote';
 
@@ -46,6 +49,15 @@ interface PlayerControlsProps {
   settingsActive?: boolean;
   /** When provided, shows a Picture-in-Picture button. */
   onEnterPip?: () => void;
+  /** Session volume 0..1. */
+  volume: number;
+  onVolumeChange: (value: number) => void;
+  /**
+   * Session brightness 0..1. When omitted (API unavailable), the brightness
+   * slider is hidden.
+   */
+  brightness?: number;
+  onBrightnessChange?: (value: number) => void;
 }
 
 const ControlButton = ({
@@ -86,8 +98,14 @@ export const PlayerControls = ({
   onOpenSettings,
   settingsActive,
   onEnterPip,
+  volume,
+  onVolumeChange,
+  brightness,
+  onBrightnessChange,
 }: PlayerControlsProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
+  const showBrightness =
+    brightness != null && typeof onBrightnessChange === 'function';
 
   return (
     <Box className="absolute inset-0">
@@ -128,7 +146,7 @@ export const PlayerControls = ({
         {onOpenSettings && (
           <Focusable
             onPress={onOpenSettings}
-            className={`rounded-full p-2 ${settingsActive ? 'bg-primary' : 'bg-background/40'}`}
+            className={`rounded-full p-2 bg-background/40`}
             focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
           >
             <Icon as={Settings2} size="lg" className="text-foreground" />
@@ -160,6 +178,24 @@ export const PlayerControls = ({
           <ControlButton icon={RotateCw} onPress={() => onSeekBy(10)} />
         </HStack>
       </Center>
+
+      {showBrightness && (
+        <Box className="absolute bottom-30 left-12 z-10" pointerEvents="box-none">
+          <VerticalSlider
+            value={brightness}
+            onChange={onBrightnessChange}
+            icon={Sun}
+          />
+        </Box>
+      )}
+
+      <Box className="absolute bottom-30 right-12 z-10" pointerEvents="box-none">
+        <VerticalSlider
+          value={volume}
+          onChange={onVolumeChange}
+          icon={Volume2}
+        />
+      </Box>
 
       <VStack className="px-10 pb-1">
         <ProgressBar

@@ -16,6 +16,7 @@ import {
   useToast,
 } from '@/components/ui/toast';
 import { PlayerCore } from '@/src/components/player/PlayerCore';
+import { ServerLoadingSideNav } from '@/src/components/player/ServerLoadingSideNav';
 import {
   WebViewScraper,
   type ExtractedStream,
@@ -51,7 +52,7 @@ export const PlayerScreen = ({
   useKeepAwake('flick-player');
 
   const { servers, activeServer, setActive } = useServers();
-  const { getLocalSource, getJobFor } = useDownloads();
+  const { jobs, getLocalSource, getJob, getJobFor } = useDownloads();
   // Settings > "Debug video player" — when on, render the stream-resolving
   // WebViewScraper full-screen and interactive instead of invisible, so you
   // can watch exactly what the embed page is doing.
@@ -87,8 +88,11 @@ export const PlayerScreen = ({
   // Servers already tried (and failed) for the CURRENT target — reset
   // whenever the target itself changes (item/episode) or the user
   // explicitly picks a server, so a fresh failover cycle can run each time.
-  // See `switchToServer`/`tryNextServer` below.
-  const triedServerIdsRef = useRef<Set<string>>(new Set());
+  // See `switchToServer`/`tryNextServer` below. State (not a ref) so
+  // `ServerLoadingSideNav` re-renders with each server's up-to-date status.
+  const [triedServerIds, setTriedServerIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Best-effort IMDb id lookup for the current item — fills a playback
   // server's `{imdbId}` URL placeholder, if its pattern uses one. Swallow
@@ -137,11 +141,24 @@ export const PlayerScreen = ({
   // Downloads screen), otherwise best-effort lookup by the current item +
   // season/episode. This lets Home "Continue Watching", Detail Play, and
   // Downloads all seamlessly reuse a completed download.
+  // Depend on `jobs` so subtitle sidecars written after video completion
+  // re-render into PlayerCore without remounting.
+  const localJob = useMemo(() => {
+    if (localSourceId) return getJob(localSourceId);
+    return getJobFor(item, season, episode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- jobs triggers refresh
+  }, [localSourceId, getJob, getJobFor, item, season, episode, jobs]);
+
   const localForCurrent = useMemo<ReactVideoSource | null>(() => {
-    const id = localSourceId ?? getJobFor(item, season, episode)?.id;
+    const id = localJob?.id;
     if (!id) return null;
     return getLocalSource(id) ?? null;
-  }, [localSourceId, getJobFor, getLocalSource, item, season, episode]);
+  }, [localJob?.id, getLocalSource]);
+
+  const localSubtitles =
+    localForCurrent && localJob?.status === 'completed'
+      ? localJob.subtitles
+      : undefined;
 
   // Track which episode key we've already toasted about, so switching
   // between episodes shows the "data saving" toast at most once each.
@@ -231,7 +248,7 @@ export const PlayerScreen = ({
   const handleSelectServer = useCallback(
     (id: string, resumeFromSeconds: number) => {
       if (id === activeServer.id) return;
-      triedServerIdsRef.current = new Set();
+      setTriedServerIds(new Set());
       switchToServer(id, resumeFromSeconds);
     },
     [activeServer.id, switchToServer],
@@ -242,15 +259,16 @@ export const PlayerScreen = ({
   // has failed, fall through to the "No video available" empty state.
   const tryNextServer = useCallback(
     (resumeFromSeconds: number) => {
-      triedServerIdsRef.current.add(activeServer.id);
-      const next = servers.find((s) => !triedServerIdsRef.current.has(s.id));
+      const updated = new Set(triedServerIds).add(activeServer.id);
+      const next = servers.find((s) => !updated.has(s.id));
+      setTriedServerIds(updated);
       if (!next) {
         setNoSource(true);
         return;
       }
       switchToServer(next.id, resumeFromSeconds);
     },
-    [servers, activeServer.id, switchToServer],
+    [servers, activeServer.id, triedServerIds, switchToServer],
   );
 
   // On scrape failure/timeout, try the next configured server before giving
@@ -258,10 +276,12 @@ export const PlayerScreen = ({
   // pre-resolved stream should push `Player` with a `localSourceId` (for
   // downloads) instead.
   const onScrapeError = useCallback(() => {
-    // Nothing has played yet at the resolution stage, so there's no
-    // position worth preserving.
-    tryNextServer(0);
-  }, [tryNextServer]);
+    // Nothing has played yet at the resolution stage — carry forward
+    // whatever resume position was already queued (continue-watching's
+    // original position, or one queued by a prior switch this cycle)
+    // instead of clobbering it with 0.
+    tryNextServer(effectiveResumeFrom ?? 0);
+  }, [tryNextServer, effectiveResumeFrom]);
 
   // A stream that DID resolve but then failed to actually play (403,
   // decoder/DRM issue, etc.) — reported by `PlayerCore`'s native `<Video>`
@@ -280,7 +300,7 @@ export const PlayerScreen = ({
     (nextSeason: number, ep: Episode) => {
       const nextEpisode = ep.episode_number;
       if (season === nextSeason && episode === nextEpisode) return;
-      triedServerIdsRef.current = new Set();
+      setTriedServerIds(new Set());
       resolvedRef.current = false;
       setSource(null);
       setNoSource(false);
@@ -313,6 +333,7 @@ export const PlayerScreen = ({
         onSelectEpisode={type === 'tv' ? handleSelectEpisode : undefined}
         onSelectServer={localForCurrent ? undefined : handleSelectServer}
         onPlaybackFailed={localForCurrent ? undefined : handlePlaybackFailed}
+        localSubtitles={localSubtitles}
       />
     );
   }
@@ -386,18 +407,28 @@ export const PlayerScreen = ({
           <Text size="xs" className="text-muted-foreground">
             {debugStreamFound
               ? 'Stream found — playing in WebView (debug)'
-              : `Finding stream… (debug, no timeout)${triedServerIdsRef.current.size ? ` — trying ${activeServer.name}` : ''}`}
+              : `Finding stream… (debug, no timeout)${triedServerIds.size ? ` — trying ${activeServer.name}` : ''}`}
           </Text>
         </Center>
       ) : (
         <Center style={StyleSheet.absoluteFill} className="bg-black">
           <Spinner size="large" color="#E50914" />
           <Text className="mt-4 text-muted-foreground">
-            {triedServerIdsRef.current.size
+            {triedServerIds.size
               ? `Trying ${activeServer.name}…`
               : 'Finding stream…'}
           </Text>
         </Center>
+      )}
+      {!localForCurrent && (
+        <ServerLoadingSideNav
+          servers={servers}
+          activeServerId={activeServer.id}
+          triedServerIds={triedServerIds}
+          onSelectServer={(id) =>
+            handleSelectServer(id, effectiveResumeFrom ?? 0)
+          }
+        />
       )}
       <Pressable
         onPress={() => navigation.goBack()}

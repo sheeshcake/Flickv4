@@ -22,6 +22,7 @@ import {
   ensureChannel as ensureNotifChannel,
   publishJobNotification,
 } from './DownloadNotifier';
+import { WyzieService } from './WyzieService';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,6 +35,15 @@ export type DownloadStatus =
   | 'paused'
   | 'completed'
   | 'failed';
+
+/** Local subtitle sidecar bundled with a completed download. */
+export interface LocalDownloadedSubtitle {
+  id: string;
+  language: string;
+  display: string;
+  localUri: string;
+  isHearingImpaired?: boolean;
+}
 
 export interface DownloadJob {
   id: string;
@@ -65,6 +75,13 @@ export interface DownloadJob {
   localDir: string;
   /** Local playable URI once the job completes. */
   localUri?: string;
+  /**
+   * ISO 639-1 language requested for offline captions at enqueue time.
+   * Empty/undefined means no subtitle download was requested.
+   */
+  subtitleLanguage?: string;
+  /** Local subtitle files written next to the video (default language). */
+  subtitles?: LocalDownloadedSubtitle[];
   headers: Record<string, string>;
   error?: string;
   createdAt: number;
@@ -100,6 +117,11 @@ export interface EnqueueOptions {
    * resulting URL here so we skip the redundant second resolve.
    */
   streamUri?: string;
+  /**
+   * ISO 639-1 code for the offline subtitle language to bundle (typically
+   * the user's Settings default). Empty/undefined skips subtitle download.
+   */
+  subtitleLanguage?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +374,7 @@ class DownloadServiceImpl {
       bytesWritten: 0,
       totalBytes: 0,
       localDir,
+      subtitleLanguage: opts.subtitleLanguage?.trim() || undefined,
       headers: buildHeaders(opts.serverUrl),
       createdAt: now,
       updatedAt: now,
@@ -416,6 +439,7 @@ class DownloadServiceImpl {
       season: job.season,
       episode: job.episode,
       title: job.title,
+      subtitleLanguage: job.subtitleLanguage,
     }).catch((e) => log('resume: process failed', e));
   }
 
@@ -510,6 +534,73 @@ class DownloadServiceImpl {
       await this.downloadSingleFile(id, streamUri, opts.qualityLabel);
     } else {
       await this.downloadHls(id, streamUri, opts.qualityHeight);
+    }
+
+    // 3) Soft-fail subtitle sidecar — video is already playable offline even
+    // if Wyzie is unreachable or has no track for the requested language.
+    const after = this.jobs.get(id);
+    if (after?.status === 'completed') {
+      const lang = opts.subtitleLanguage?.trim() || after.subtitleLanguage;
+      if (lang) {
+        await this.downloadDefaultSubtitle(id, lang);
+      }
+    }
+  }
+
+  /**
+   * Fetch the user's preferred Wyzie language and write it next to the video
+   * as `subs/{lang}.srt`. Never fails the job — offline video still works
+   * without captions.
+   */
+  private async downloadDefaultSubtitle(
+    id: string,
+    language: string,
+  ): Promise<void> {
+    const job = this.jobs.get(id);
+    if (!job) return;
+
+    try {
+      // Prefer WebVTT so offline native sidecars work on iOS (VTT-only) and
+      // Android; our cue parser also accepts VTT for App captions mode.
+      const results = await WyzieService.searchSubtitles({
+        tmdbId: job.item.id,
+        season: job.season,
+        episode: job.episode,
+        language,
+        format: 'vtt',
+      });
+      if (!results.length) {
+        log('no Wyzie tracks for', id, language);
+        return;
+      }
+      const track =
+        results.find((r) => !r.isHearingImpaired) ?? results[0];
+
+      const text = await WyzieService.fetchSubtitleText(track.url);
+      const subsDirUri = `${job.localDir}/subs`;
+      try {
+        new Directory(subsDirUri).create({ intermediates: true });
+      } catch {
+        /* exists */
+      }
+
+      const fileName = `${language}.vtt`;
+      const dest = new File(subsDirUri, fileName);
+      if (dest.exists) dest.delete();
+      dest.create();
+      dest.write(text);
+
+      const entry: LocalDownloadedSubtitle = {
+        id: track.id,
+        language: track.language || language,
+        display: track.display,
+        localUri: dest.uri,
+        isHearingImpaired: track.isHearingImpaired,
+      };
+      this.updateJob(id, { subtitles: [entry] });
+      log('wrote offline subtitle', id, dest.uri);
+    } catch (e) {
+      log('subtitle download soft-failed for', id, e);
     }
   }
 
