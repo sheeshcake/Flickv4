@@ -1,7 +1,9 @@
-import { StyleSheet } from 'react-native';
 import { Box } from '@/components/ui/box';
 import { Text } from '@/components/ui/text';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
+
+/** Compact caption size for Android activity-level PiP (shared with native). */
+export const PIP_SUBTITLE_FONT_SIZE = 2;
 
 interface SubtitleOverlayProps {
   text: string | null;
@@ -34,9 +36,13 @@ export const SubtitleOverlay = ({
   const backgroundColor = `${settings.backgroundColor}${bgAlpha}`;
 
   // In PiP the window is tiny and there are no controls to sit above, so
-  // hug the bottom with a small padding. Otherwise, respect controls.
+  // hug the bottom with a small padding and a compact font. Otherwise,
+  // respect controls + the user's size setting.
   const bottom = pipActive ? 8 : controlsVisible ? 96 : 40;
   const horizontalPadding = pipActive ? 'px-2' : 'px-8';
+  const fontSize = pipActive
+    ? Math.min(PIP_SUBTITLE_FONT_SIZE, settings.fontSize)
+    : settings.fontSize;
 
   return (
     <Box
@@ -45,16 +51,22 @@ export const SubtitleOverlay = ({
       style={{ bottom }}
     >
       <Box
-        className="max-w-full rounded-md px-3 py-1.5"
+        className={`max-w-full rounded-md ${pipActive ? 'px-1.5 py-0.5' : 'px-3 py-1.5'}`}
         style={{ backgroundColor }}
       >
         <Text
           className="text-center"
           style={{
             color: settings.textColor,
-            fontSize: settings.fontSize,
+            fontSize,
             fontWeight: settings.bold ? '700' : '400',
-            ...StyleSheet.flatten({}),
+            ...(settings.textShadow
+              ? {
+                  textShadowColor: 'rgba(0,0,0,0.85)',
+                  textShadowOffset: { width: 0, height: 1 },
+                  textShadowRadius: pipActive ? 1 : 3,
+                }
+              : null),
           }}
         >
           {text}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StatusBar, StyleSheet } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
+import * as Brightness from 'expo-brightness';
 import Video, {
   SelectedTrackType,
   TextTrackType,
@@ -25,7 +26,10 @@ import {
   PlayerSettingsDrawer,
   type PlaybackSpeed,
 } from '@/src/components/player/PlayerSettingsDrawer';
-import { SubtitleOverlay } from '@/src/components/player/SubtitleOverlay';
+import {
+  PIP_SUBTITLE_FONT_SIZE,
+  SubtitleOverlay,
+} from '@/src/components/player/SubtitleOverlay';
 import {
   SeriesEndOverlay,
   UpNextOverlay,
@@ -43,7 +47,11 @@ import { useSubtitles } from '@/src/hooks/useSubtitles';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
 import { useVideoQuality } from '@/src/hooks/useVideoQuality';
+import { File } from 'expo-file-system';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
+import { writeNativeVttCache } from '@/src/utils/nativeSubtitleCache';
+import { WyzieService } from '@/src/services/WyzieService';
+import type { LocalDownloadedSubtitle } from '@/src/services/DownloadService';
 import type { Episode, MediaItem } from '@/src/types';
 
 interface PlayerCoreProps {
@@ -71,6 +79,11 @@ interface PlayerCoreProps {
    * over to another server instead of leaving the inline error card up.
    */
   onPlaybackFailed?: (resumeFrom: number) => void;
+  /**
+   * Offline captions bundled with a completed download. When present,
+   * `useSubtitles` skips the Wyzie network search and loads these files.
+   */
+  localSubtitles?: LocalDownloadedSubtitle[];
 }
 
 /** Android has no PiP concept below API 26; iOS/tvOS support it wherever the
@@ -120,6 +133,7 @@ export const PlayerCore = ({
   onSelectEpisode,
   onSelectServer,
   onPlaybackFailed,
+  localSubtitles,
 }: PlayerCoreProps) => {
   const isFocused = useIsFocused();
   const { servers, activeServer } = useServers();
@@ -141,6 +155,42 @@ export const PlayerCore = ({
   // rather than persisting app-wide — see the flick-player-controls skill's
   // "session-only vs per-server vs persisted" table.
   const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(1);
+  // Session-only volume / brightness — leave the device brightness restored
+  // on unmount so exiting the player doesn't leave the screen dimmed.
+  const [volume, setVolume] = useState(1);
+  const [brightness, setBrightness] = useState<number | undefined>(undefined);
+  const initialBrightnessRef = useRef<number | null>(null);
+  const brightnessSupportedRef = useRef(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const current = await Brightness.getBrightnessAsync();
+        if (cancelled) return;
+        initialBrightnessRef.current = current;
+        setBrightness(current);
+      } catch {
+        brightnessSupportedRef.current = false;
+        if (!cancelled) setBrightness(undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const restore = initialBrightnessRef.current;
+      if (restore != null && brightnessSupportedRef.current) {
+        void Brightness.setBrightnessAsync(restore).catch(() => {});
+      }
+    };
+  }, []);
+
+  const handleBrightnessChange = useCallback((value: number) => {
+    setBrightness(value);
+    void Brightness.setBrightnessAsync(value).catch(() => {
+      brightnessSupportedRef.current = false;
+      setBrightness(undefined);
+    });
+  }, []);
   const { aspect, setAspect } = useVideoAspect();
   const videoRef = useRef<VideoRef>(null);
   const isTVShow = item.media_type === 'tv';
@@ -219,12 +269,14 @@ export const PlayerCore = ({
   const useNativeSidecar =
     nativeSubtitlesEnabled && !(Platform.OS === 'ios' && isHls);
 
-  // Wyzie search always runs now — it drives the picker list either way.
-  // Only the cue text fetch/parse is skipped when the sidecar path will
-  // hand the track's URL straight to the native player instead.
+  // Online: Wyzie SRT search drives the picker (format=vtt often returns an
+  // empty list). Offline: `localSubtitles` skips the network. Cue parse is
+  // skipped in native mode — we convert the selected SRT to a local VTT
+  // file instead and hand that to RNV (same pattern as the working sample).
   const {
     tracks: wyzieTracks,
     selectedId: wyzieSelectedId,
+    selectedTrack: selectedWyzieTrack,
     selectTrack: selectWyzieTrack,
     cueAt,
     loading: loadingWyzieTracks,
@@ -234,16 +286,27 @@ export const PlayerCore = ({
     episode,
     loadCues: !useNativeSidecar,
     defaultLanguage: subtitleSettings.defaultLanguage,
+    localTracks: localSubtitles,
+    format: 'srt',
   });
 
-  // The picker list is identical in both render modes now.
+  // The picker list is identical in both render modes.
   const subtitleTrackOptions = wyzieTracks.map((t) => ({
     id: t.id,
     label: `${t.display}${t.isHearingImpaired ? ' (CC)' : ''}`,
   }));
-  const selectedWyzieTrack =
-    wyzieTracks.find((t) => t.id === wyzieSelectedId) ?? null;
   const subtitlesActive = wyzieSelectedId != null;
+
+  // Stable ids for native sidecar effects — avoid refetch/cancel races when
+  // the track object identity changes but the selection did not.
+  const selectedWyzieTrackId = selectedWyzieTrack?.id ?? null;
+  const selectedWyzieIsLocal =
+    selectedWyzieTrack != null && 'localUri' in selectedWyzieTrack;
+  const selectedWyzieSourceUri = selectedWyzieTrack
+    ? selectedWyzieIsLocal
+      ? selectedWyzieTrack.localUri
+      : selectedWyzieTrack.url
+    : null;
 
   // Drives the consolidated Settings button's "something's customized"
   // highlight (see `PlayerSettingsDrawer`) now that quality/aspect/speed/
@@ -255,9 +318,9 @@ export const PlayerCore = ({
     selectedVariantUri != null ||
     aspect !== 'contain';
 
-  // Session-only sync offset (seconds) for the currently selected track —
-  // only meaningful in component-render mode, where we control the cue
-  // lookup ourselves (see `activeCue` below). Reset whenever the selected
+  // Session-only sync offset (seconds) for the currently selected track.
+  // Component mode applies it in cue lookup; native mode rewrites the local
+  // VTT sidecar timestamps (see effects below). Reset whenever the selected
   // track changes, since a different track's natural sync is unrelated to
   // whatever offset fixed the previous one.
   const [subtitleOffsetSeconds, setSubtitleOffsetSeconds] = useState(0);
@@ -265,30 +328,128 @@ export const PlayerCore = ({
     setSubtitleOffsetSeconds(0);
   }, [wyzieSelectedId]);
 
-  // Sidecar text tracks handed straight to react-native-video: Wyzie serves
-  // `.srt` files directly from a hosted URL, so no fetch/parse is needed on
-  // our side at all for this path.
-  const sidecarTextTracks = useMemo<TextTracks | undefined>(() => {
-    if (!useNativeSidecar || !wyzieTracks.length) return undefined;
-    return wyzieTracks.map((t) => ({
-      title: t.display,
-      language: t.language as ISO639_1,
-      type: TextTrackType.SUBRIP,
-      uri: t.url,
-    }));
-  }, [useNativeSidecar, wyzieTracks]);
+  // Local WebVTT URI for the currently selected native track (converted
+  // from Wyzie/offline SRT/VTT). Raw text is kept so sync offset changes can
+  // rewrite the sidecar without re-fetching.
+  const [nativeRawText, setNativeRawText] = useState<string | null>(null);
+  const [nativeVttUri, setNativeVttUri] = useState<string | null>(null);
+  const [nativeVttTrackId, setNativeVttTrackId] = useState<string | null>(null);
 
-  const selectedTextTrack: SelectedTrack | undefined = useNativeSidecar
-    ? selectedWyzieTrack
-      ? { type: SelectedTrackType.TITLE, value: selectedWyzieTrack.display }
-      : { type: SelectedTrackType.DISABLED }
-    : undefined;
+  useEffect(() => {
+    if (!useNativeSidecar || !selectedWyzieTrackId || !selectedWyzieSourceUri) {
+      setNativeRawText(null);
+      setNativeVttUri(null);
+      setNativeVttTrackId(null);
+      return;
+    }
+
+    const trackId = selectedWyzieTrackId;
+    const sourceUri = selectedWyzieSourceUri;
+    const isLocal = selectedWyzieIsLocal;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const raw = isLocal
+          ? await new File(sourceUri).text()
+          : await WyzieService.fetchSubtitleText(sourceUri);
+        if (cancelled) return;
+        setNativeRawText(raw);
+        setNativeVttTrackId(trackId);
+      } catch {
+        if (!cancelled) {
+          setNativeRawText(null);
+          setNativeVttUri(null);
+          setNativeVttTrackId(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    useNativeSidecar,
+    selectedWyzieTrackId,
+    selectedWyzieSourceUri,
+    selectedWyzieIsLocal,
+  ]);
+
+  // Rewrite the local VTT whenever raw text or sync offset changes so ExoPlayer
+  // loads a new sidecar URI (filename includes the offset). Debounce offset
+  // bumps so rapid +/- taps coalesce into one setSource.
+  useEffect(() => {
+    if (
+      !useNativeSidecar ||
+      !selectedWyzieTrackId ||
+      !nativeRawText ||
+      nativeVttTrackId !== selectedWyzieTrackId
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const uri = await writeNativeVttCache(
+            selectedWyzieTrackId,
+            nativeRawText,
+            subtitleOffsetSeconds,
+          );
+          if (!cancelled) setNativeVttUri(uri);
+        } catch {
+          if (!cancelled) setNativeVttUri(null);
+        }
+      })();
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    useNativeSidecar,
+    selectedWyzieTrackId,
+    nativeRawText,
+    nativeVttTrackId,
+    subtitleOffsetSeconds,
+  ]);
+
+  // Single local VTT sidecar — matches the probe that rendered successfully.
+  const sidecarTextTracks = useMemo<TextTracks | undefined>(() => {
+    if (!useNativeSidecar || !nativeVttUri || !selectedWyzieTrack) {
+      return undefined;
+    }
+    // Only apply once the cache matches the currently selected track.
+    if (nativeVttTrackId !== selectedWyzieTrack.id) return undefined;
+    return [
+      {
+        title: selectedWyzieTrack.display,
+        language: selectedWyzieTrack.language as ISO639_1,
+        type: TextTrackType.VTT,
+        uri: nativeVttUri,
+      },
+    ];
+  }, [useNativeSidecar, nativeVttUri, nativeVttTrackId, selectedWyzieTrack]);
+
+  const selectedTextTrack: SelectedTrack | undefined = useMemo(() => {
+    if (!useNativeSidecar) return undefined;
+    if (!selectedWyzieTrack || !sidecarTextTracks?.length) {
+      return { type: SelectedTrackType.DISABLED };
+    }
+    return { type: SelectedTrackType.INDEX, value: 0 };
+  }, [useNativeSidecar, selectedWyzieTrack, sidecarTextTracks]);
 
   // -------------------------------------------------------------------------
   // Player state (mirrors what expo-video's `useEvent`/`player.*` used to
   // expose, now derived from react-native-video's declarative props/events).
   // -------------------------------------------------------------------------
   const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
   const isPlaying = !paused;
   const [status, setStatus] = useState<PlaybackStatus>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -406,6 +567,11 @@ export const PlayerCore = ({
   const activeUriRef = useRef<string | null>(masterUri);
   const activeTextTracksRef = useRef<TextTracks | undefined>(undefined);
   const pendingSeekRef = useRef<number | null>(null);
+  // Native sync/offset sidecar reloads call setSource and briefly jump to 0 —
+  // freeze the real playhead here so onProgress cannot clobber it.
+  const sidecarReloadInFlightRef = useRef(false);
+  const sidecarResumeSecRef = useRef<number | null>(null);
+  const sidecarWasPlayingRef = useRef(false);
 
   const buildSource = useCallback(
     (uri: string, textTracks: TextTracks | undefined): ReactVideoSource => ({
@@ -457,39 +623,90 @@ export const PlayerCore = ({
     [masterUri, swapToUri],
   );
 
-  // Apply the sidecar text-track list once Wyzie's search resolves (it
-  // arrives shortly after mount, asynchronously). Applied only once per
-  // mount/track-list — if the user later changes render mode there's no
-  // live re-apply, matching how quality/aspect settings already only take
-  // effect at player-creation time.
-  const didApplySidecarTracksRef = useRef(false);
+  const finishSidecarResume = useCallback(() => {
+    const resumeAt =
+      sidecarResumeSecRef.current ?? pendingSeekRef.current ?? null;
+    if (resumeAt != null && resumeAt > 0) {
+      videoRef.current?.seek(resumeAt);
+      currentTimeRef.current = resumeAt;
+      setCurrentTime(resumeAt);
+    }
+    pendingSeekRef.current = null;
+    sidecarResumeSecRef.current = null;
+    if (sidecarReloadInFlightRef.current) {
+      sidecarReloadInFlightRef.current = false;
+      if (sidecarWasPlayingRef.current) {
+        setPaused(false);
+      }
+      sidecarWasPlayingRef.current = false;
+    }
+  }, []);
+
+  // Apply (or clear) the local-VTT sidecar whenever the converted file is
+  // ready or the user turns captions Off / changes sync offset. Preserve
+  // playhead across setSource so native sync does not jump to 0.
+  const lastSidecarKeyRef = useRef<string>('');
   useEffect(() => {
     if (!useNativeSidecar) return;
-    if (didApplySidecarTracksRef.current) return;
-    if (!sidecarTextTracks || !sidecarTextTracks.length) return;
-    didApplySidecarTracksRef.current = true;
-    activeTextTracksRef.current = sidecarTextTracks;
-    if (activeUriRef.current) {
-      videoRef.current?.setSource(
-        buildSource(activeUriRef.current, sidecarTextTracks),
-      );
-    }
+    const tracks =
+      sidecarTextTracks && sidecarTextTracks.length
+        ? sidecarTextTracks
+        : undefined;
+    const key = tracks?.map((t) => t.uri).join('|') ?? '__none__';
+    if (key === lastSidecarKeyRef.current) return;
+    lastSidecarKeyRef.current = key;
+    activeTextTracksRef.current = tracks;
+    const uri = activeUriRef.current;
+    if (!uri) return;
+
+    let cancelled = false;
+    void (async () => {
+      let resumeAt = currentTimeRef.current;
+      try {
+        const pos = await videoRef.current?.getCurrentPosition?.();
+        if (typeof pos === 'number' && Number.isFinite(pos) && pos > 0) {
+          resumeAt = pos;
+        }
+      } catch {
+        // Keep currentTimeRef snapshot.
+      }
+      if (cancelled) return;
+
+      // Mid-playback reload (sync offset / track swap) — freeze playhead.
+      // First attach near 0 leaves resumeFrom / pendingSeek alone.
+      if (resumeAt > 1) {
+        sidecarReloadInFlightRef.current = true;
+        sidecarResumeSecRef.current = resumeAt;
+        sidecarWasPlayingRef.current = !pausedRef.current;
+        pendingSeekRef.current = resumeAt;
+        currentTimeRef.current = resumeAt;
+        setCurrentTime(resumeAt);
+        setPaused(true);
+      }
+
+      videoRef.current?.setSource(buildSource(uri, tracks));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [useNativeSidecar, sidecarTextTracks, buildSource]);
 
   const onLoad = useCallback(
     (e: OnLoadData) => {
       setStatus('ready');
       setDuration(e.duration);
-      if (pendingSeekRef.current != null) {
-        const seekTo = pendingSeekRef.current;
-        pendingSeekRef.current = null;
-        videoRef.current?.seek(seekTo);
+      if (
+        sidecarReloadInFlightRef.current ||
+        pendingSeekRef.current != null
+      ) {
+        finishSidecarResume();
       } else if (!didResumeRef.current && resumeFrom != null && resumeFrom > 0) {
         didResumeRef.current = true;
         videoRef.current?.seek(resumeFrom);
       }
     },
-    [resumeFrom],
+    [resumeFrom, finishSidecarResume],
   );
 
   const onError = useCallback(
@@ -510,10 +727,27 @@ export const PlayerCore = ({
     [onPlaybackFailed],
   );
 
-  const onProgress = useCallback((e: OnProgressData) => {
-    setCurrentTime(e.currentTime);
-    setPlayableDuration(e.playableDuration);
-  }, []);
+  const onProgress = useCallback(
+    (e: OnProgressData) => {
+      setPlayableDuration(e.playableDuration);
+      if (sidecarReloadInFlightRef.current) {
+        const resumeAt = sidecarResumeSecRef.current;
+        // Backup seek if onLoad missed and we're still at the reload origin.
+        if (resumeAt != null && resumeAt > 1 && e.currentTime < 1) {
+          videoRef.current?.seek(resumeAt);
+          return;
+        }
+        if (resumeAt != null && Math.abs(e.currentTime - resumeAt) < 1.5) {
+          finishSidecarResume();
+          return;
+        }
+        // Keep scrubber frozen at the resume target while reloading.
+        return;
+      }
+      setCurrentTime(e.currentTime);
+    },
+    [finishSidecarResume],
+  );
 
   const onPipStatusChanged = useCallback(
     (e: OnPictureInPictureStatusChangedData) => {
@@ -618,6 +852,7 @@ export const PlayerCore = ({
           pointerEvents="none"
           paused={paused}
           rate={playbackRate}
+          volume={volume}
           progressUpdateInterval={500}
           preferredForwardBufferDuration={
             Platform.OS === 'ios'
@@ -625,6 +860,37 @@ export const PlayerCore = ({
               : undefined
           }
           selectedTextTrack={selectedTextTrack}
+          subtitleStyle={{
+            // PiP window is tiny — force a small caption size so native
+            // SubtitleView doesn't dominate the mini player (Android).
+            fontSize: pipActive
+              ? Math.min(PIP_SUBTITLE_FONT_SIZE, subtitleSettings.fontSize)
+              : subtitleSettings.fontSize,
+            // RNV sets SubtitleView to GONE when opacity === 0. App-caption
+            // "background opacity" of 0% must not hide native cues. iOS only
+            // honors 0/1 — always fully visible there.
+            opacity:
+              Platform.OS === 'ios'
+                ? 1
+                : Math.min(
+                    1,
+                    Math.max(0.2, subtitleSettings.backgroundOpacity || 1),
+                  ),
+            // Lift cues above the control bar when it's visible; hug the
+            // bottom edge in PiP where there are no controls.
+            paddingBottom: pipActive
+              ? 8
+              : Platform.OS === 'android'
+                ? visible
+                  ? 96
+                  : 40
+                : visible
+                  ? 72
+                  : 24,
+            // Cover/fill crop the video frame — keep captions on the player
+            // bounds instead (requires the ExoPlayerView patch).
+            subtitlesFollowVideo: aspect === 'contain',
+          }}
           enterPictureInPictureOnLeave
           onLoadStart={() => setStatus('loading')}
           onLoad={onLoad}
@@ -717,6 +983,12 @@ export const PlayerCore = ({
               show();
             }}
             settingsActive={settingsActive}
+            volume={volume}
+            onVolumeChange={setVolume}
+            brightness={brightness}
+            onBrightnessChange={
+              brightness != null ? handleBrightnessChange : undefined
+            }
             onEnterPip={pipSupported ? enterPip : undefined}
           />
         ) : (
@@ -753,9 +1025,7 @@ export const PlayerCore = ({
         subtitlesLoading={loadingWyzieTracks}
         onSelectSubtitle={selectWyzieTrack}
         subtitleOffsetSeconds={subtitleOffsetSeconds}
-        onChangeSubtitleOffset={
-          useNativeSidecar ? undefined : setSubtitleOffsetSeconds
-        }
+        onChangeSubtitleOffset={setSubtitleOffsetSeconds}
       />
 
       {isTVShow && onSelectEpisode && (

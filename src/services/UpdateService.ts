@@ -6,8 +6,11 @@ import {
   type DownloadTask,
 } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { version as currentVersion } from '../../package.json';
 import { UPDATE_CONFIG } from '@/src/config/env';
+import {
+  getAppVersion,
+  getInstalledAppVersion,
+} from '@/src/utils/appVersion';
 
 /**
  * Lightweight in-app updater that polls a GitHub repository for its latest
@@ -22,8 +25,8 @@ import { UPDATE_CONFIG } from '@/src/config/env';
  *   `expo-intent-launcher`'s `INSTALL_PACKAGE` intent, using the file's
  *   built-in Android `contentUri`) instead of routing through the system
  *   browser — see `downloadApk`/`installApk` below.
- * - Reads the current app version from `package.json`, which is kept in
- *   lockstep with `app.json`'s `expo.version`.
+ * - UI "current version" comes from `APP_VERSION` (`.env` → `app.config.js`).
+ * - Update detection compares against the installed native binary version.
  */
 
 export interface ReleaseAsset {
@@ -84,17 +87,20 @@ export const compareVersions = (a: string, b: string): number => {
   return 0;
 };
 
-const EMPTY_INFO = (): UpdateInfo => ({
-  hasUpdate: false,
-  currentVersion,
-  latestVersion: currentVersion,
-  releaseNotes: '',
-  releaseName: '',
-  releaseDate: '',
-  downloadUrl: null,
-  releaseUrl: '',
-  assetSize: null,
-});
+const EMPTY_INFO = (): UpdateInfo => {
+  const currentVersion = getAppVersion();
+  return {
+    hasUpdate: false,
+    currentVersion,
+    latestVersion: currentVersion,
+    releaseNotes: '',
+    releaseName: '',
+    releaseDate: '',
+    downloadUrl: null,
+    releaseUrl: '',
+    assetSize: null,
+  };
+};
 
 /**
  * Find the "best" APK asset in a release: prefer release/universal builds,
@@ -124,7 +130,7 @@ class UpdateService {
   private activeDownload: DownloadTask | null = null;
 
   getCurrentVersion(): string {
-    return currentVersion;
+    return getAppVersion();
   }
 
   compareVersions(a: string, b: string): number {
@@ -165,8 +171,12 @@ class UpdateService {
     const latestRelease = await this.getLatestRelease();
     if (!latestRelease) return EMPTY_INFO();
 
+    // Shown in the UI (env-backed). Compared against the installed binary
+    // so an `.env` bump alone cannot mask a real APK update.
+    const currentVersion = getAppVersion();
+    const installedVersion = getInstalledAppVersion();
     const latestVersion = latestRelease.tag_name.replace(/^v/, '');
-    const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+    const hasUpdate = compareVersions(latestVersion, installedVersion) > 0;
 
     let downloadUrl: string | null = null;
     let assetSize: number | null = null;

@@ -17,14 +17,12 @@ const STORAGE_KEY = 'flick.subtitleSettings';
  * regardless of what a given scraped stream actually contains.
  *
  * `'native'`: the same Wyzie-searched subtitle tracks are handed to
- * `react-native-video` as a sidecar `source.textTracks` entry (Wyzie serves
- * `.srt` directly, so no extra parsing is needed) and rendered by the OS's
- * own caption renderer via `selectedTextTrack`, instead of our
- * `SubtitleOverlay`. This works on Android for any stream, but NOT on iOS
- * when the source is HLS (AVFoundation only supports sidecar text tracks
- * for individual files, not `.m3u8` playlists) — since scraped streams here
- * are virtually always HLS, iOS transparently falls back to the
- * `'component'` rendering path in that case (see `PlayerCore.tsx`).
+ * `react-native-video` as a sidecar `source.textTracks` entry (requested as
+ * WebVTT) and rendered by the OS caption renderer via `selectedTextTrack`,
+ * instead of our `SubtitleOverlay`. Works on Android for any stream; on iOS
+ * sidecar text tracks are NOT supported for HLS (`.m3u8`), so iOS
+ * transparently falls back to the `'component'` path for those streams
+ * (see `PlayerCore.tsx`).
  */
 export type SubtitleRenderMode = 'component' | 'native';
 
@@ -32,8 +30,17 @@ export interface SubtitleSettings {
   fontSize: number;
   textColor: string;
   backgroundColor: string;
+  /**
+   * App captions: cue box alpha. Native captions (Android): mapped to
+   * react-native-video `subtitleStyle.opacity`.
+   */
   backgroundOpacity: number;
   bold: boolean;
+  /**
+   * Soft drop shadow behind cue text for readability over bright scenes.
+   * Only applies to App captions (`SubtitleOverlay`).
+   */
+  textShadow: boolean;
   /** ISO 639-1 code for the preferred subtitle language. `''` = None. */
   defaultLanguage: string;
   /** Which engine renders subtitles during playback. @default 'component' */
@@ -46,6 +53,7 @@ export const DEFAULT_SUBTITLE_SETTINGS: SubtitleSettings = {
   backgroundColor: '#000000',
   backgroundOpacity: 0.6,
   bold: false,
+  textShadow: true,
   defaultLanguage: 'en',
   renderMode: 'component',
 };

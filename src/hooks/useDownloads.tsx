@@ -14,6 +14,7 @@ import type { MediaItem } from '@/src/types';
 
 interface DownloadsContextValue {
   jobs: DownloadJob[];
+  getJob: typeof DownloadService.getJob;
   getJobFor: (
     item: Pick<MediaItem, 'id' | 'media_type'>,
     season?: number,
@@ -42,6 +43,7 @@ export const DownloadsProvider = ({ children }: { children: ReactNode }) => {
   const value = useMemo<DownloadsContextValue>(
     () => ({
       jobs,
+      getJob: DownloadService.getJob.bind(DownloadService),
       getJobFor: (item, season, episode) =>
         DownloadService.getJobFor(item, season, episode),
       enqueue: DownloadService.enqueue.bind(DownloadService),

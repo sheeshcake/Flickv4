@@ -2,7 +2,7 @@
   "expo": {
     "name": "Flick",
     "slug": "flick",
-    "version": "2.1.2",
+    "version": "0.0.0",
     "orientation": "default",
     "icon": "./assets/applogo/ic_launcher.png",
     "userInterfaceStyle": "dark",
@@ -27,7 +27,8 @@
         "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
       "predictiveBackGestureEnabled": true,
-      "package": "com.flickv4"
+      "package": "com.flickv4",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"

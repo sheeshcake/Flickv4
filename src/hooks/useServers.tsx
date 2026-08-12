@@ -106,6 +106,11 @@ interface RemoteServerJson {
   tv_url_pattern?: string | null;
   movie_alias?: string | null;
   tv_alias?: string | null;
+  /**
+   * Seconds to wait for a stream after the embed page loads. `0` = no
+   * timeout. Omitted/null → app default (`DEFAULT_SCRAPER_TIMEOUT_SECONDS`).
+   */
+  scraper_timeout_seconds?: number | null;
 }
 
 const slugifyId = (name: string): string =>
@@ -118,6 +123,11 @@ const slugifyId = (name: string): string =>
 const mapRemoteServer = (s: RemoteServerJson): PlaybackServer => {
   const moviePattern = s.movie_url_pattern ?? s.url_pattern;
   const tvPattern = s.tv_url_pattern ?? s.url_pattern;
+  const timeoutRaw = s.scraper_timeout_seconds;
+  const scraperTimeoutSeconds =
+    typeof timeoutRaw === 'number' && Number.isFinite(timeoutRaw)
+      ? Math.max(0, Math.round(timeoutRaw))
+      : undefined;
   return {
     id: s.id?.trim() || slugifyId(s.name),
     name: s.name,
@@ -127,6 +137,9 @@ const mapRemoteServer = (s: RemoteServerJson): PlaybackServer => {
     ...(tvPattern ? { tvUrlPattern: tvPattern } : {}),
     ...(s.movie_alias ? { movieTypeLabel: s.movie_alias } : {}),
     ...(s.tv_alias ? { tvTypeLabel: s.tv_alias } : {}),
+    ...(scraperTimeoutSeconds != null
+      ? { scraperTimeoutSeconds }
+      : {}),
   };
 };
 
@@ -149,6 +162,12 @@ interface ServersContextValue {
   activeId: string;
   activeServer: PlaybackServer;
   loaded: boolean;
+  /**
+   * Re-fetch the built-in server list (cache first, then network). Resolves
+   * once the network attempt finishes (success or failure) so Splash can
+   * await it without hanging forever.
+   */
+  refreshBuiltInServers: () => Promise<void>;
   addServer: (name: string, url: string, options?: AddServerOptions) => void;
   /** Edits a custom (non-built-in) server's fields in place. No-op for built-ins. */
   updateServer: (
@@ -166,6 +185,7 @@ const ServersContext = createContext<ServersContextValue>({
   activeId: '',
   activeServer: EMPTY_SERVER,
   loaded: false,
+  refreshBuiltInServers: async () => {},
   addServer: () => {},
   updateServer: () => {},
   removeServer: () => {},
@@ -189,52 +209,54 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
   const [activeId, setActiveId] = useState('');
   const [customLoaded, setCustomLoaded] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshBuiltInServers = useCallback(async () => {
+    // Cache first: instant, offline-friendly render using whatever was last
+    // successfully fetched (if anything yet).
+    try {
+      const raw = await AsyncStorage.getItem(BUILT_IN_SERVERS_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as RemoteServerJson[];
+        if (Array.isArray(parsed)) {
+          setBuiltInServers(parsed.map(mapRemoteServer));
+        }
+      }
+    } catch {
+      /* ignore corrupt cache */
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
       BUILT_IN_SERVERS_FETCH_TIMEOUT_MS,
     );
 
-    // Cache first: instant, offline-friendly render using whatever was last
-    // successfully fetched (if anything yet).
-    AsyncStorage.getItem(BUILT_IN_SERVERS_CACHE_KEY)
-      .then((raw) => {
-        if (cancelled || !raw) return;
-        const parsed = JSON.parse(raw) as RemoteServerJson[];
-        setBuiltInServers(parsed.map(mapRemoteServer));
-      })
-      .catch(() => {});
-
     // Then always try the network, so the list can change without an app
     // release. Silently keep whatever's already set (cache or empty) on any
     // failure — no user-facing error for what's a background refresh.
-    fetch(BUILT_IN_SERVERS_URL, { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((json: RemoteServerJson[]) => {
-        if (cancelled || !Array.isArray(json)) return;
+    try {
+      const res = await fetch(BUILT_IN_SERVERS_URL, {
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as RemoteServerJson[];
+      if (Array.isArray(json)) {
         setBuiltInServers(json.map(mapRemoteServer));
         AsyncStorage.setItem(
           BUILT_IN_SERVERS_CACHE_KEY,
           JSON.stringify(json),
         ).catch(() => {});
-      })
-      .catch(() => {})
-      .finally(() => {
-        clearTimeout(timeout);
-        if (!cancelled) setBuiltInAttempted(true);
-      });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
+      }
+    } catch {
+      /* keep cache / empty */
+    } finally {
       clearTimeout(timeout);
-    };
+      setBuiltInAttempted(true);
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshBuiltInServers();
+  }, [refreshBuiltInServers]);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
@@ -391,6 +413,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       activeId,
       activeServer,
       loaded,
+      refreshBuiltInServers,
       addServer,
       updateServer,
       removeServer,
@@ -401,6 +424,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       activeId,
       activeServer,
       loaded,
+      refreshBuiltInServers,
       addServer,
       updateServer,
       removeServer,

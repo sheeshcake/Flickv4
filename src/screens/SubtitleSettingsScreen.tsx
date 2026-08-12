@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
+import { Alert, Linking, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as IntentLauncher from 'expo-intent-launcher';
 import { ArrowLeft } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { VStack } from '@/components/ui/vstack';
@@ -17,6 +19,30 @@ import {
 } from '@/src/hooks/useSubtitleSettings';
 import { SUBTITLE_LANGUAGES } from '@/src/constants/languages';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
+
+/** Open the OS caption / accessibility screen where native subtitle style lives. */
+const openDeviceCaptionSettings = async () => {
+  try {
+    if (Platform.OS === 'android') {
+      await IntentLauncher.startActivityAsync(
+        IntentLauncher.ActivityAction.CAPTIONING_SETTINGS,
+      );
+      return;
+    }
+    // iOS has no public deep link into Captioning Preferences — open the
+    // app Settings page; users can jump to Accessibility → Subtitles from there.
+    await Linking.openSettings();
+  } catch {
+    try {
+      await Linking.openSettings();
+    } catch {
+      Alert.alert(
+        'Unable to open settings',
+        'Open your device Settings and look for Captions / Accessibility to change native subtitle style.',
+      );
+    }
+  }
+};
 
 const FONT_STEPS = [14, 16, 18, 20, 24, 28, 32];
 const TEXT_COLORS = ['#FFFFFF', '#FFE66D', '#00E5FF', '#FF6B6B', '#B8F2E6'];
@@ -96,6 +122,13 @@ export const SubtitleSettingsScreen = () => {
                   color: settings.textColor,
                   fontSize: settings.fontSize,
                   fontWeight: settings.bold ? '700' : '400',
+                  ...(settings.textShadow
+                    ? {
+                        textShadowColor: 'rgba(0,0,0,0.85)',
+                        textShadowOffset: { width: 0, height: 1 },
+                        textShadowRadius: 3,
+                      }
+                    : null),
                 }}
               >
                 Sample subtitle preview
@@ -254,12 +287,93 @@ export const SubtitleSettingsScreen = () => {
                   </ButtonText>
                 </Button>
               </SettingRow>
+
+              <SettingRow label="Text shadow">
+                <Button
+                  size="sm"
+                  variant={settings.textShadow ? 'default' : 'outline'}
+                  className={settings.textShadow ? 'bg-primary' : undefined}
+                  onPress={() => update({ textShadow: !settings.textShadow })}
+                >
+                  <ButtonText
+                    className={
+                      settings.textShadow
+                        ? 'text-primary-foreground'
+                        : 'text-foreground'
+                    }
+                  >
+                    {settings.textShadow ? 'On' : 'Off'}
+                  </ButtonText>
+                </Button>
+              </SettingRow>
             </>
           ) : (
-            <Text size="sm" className="text-muted-foreground">
-              Native captions are styled by your device, not by Flick — these
-              appearance options only apply to App captions.
-            </Text>
+            <VStack space="md">
+              <Text size="sm" className="text-muted-foreground">
+                Font size and opacity apply in-app on Android. Color, background,
+                and edge style still come from your device caption settings.
+              </Text>
+
+              <SettingRow label="Font size">
+                <HStack space="md" className="items-center">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={() => bumpFont(-1)}
+                  >
+                    <ButtonText>A-</ButtonText>
+                  </Button>
+                  <Text className="min-w-10 text-center text-foreground">
+                    {settings.fontSize}
+                  </Text>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={() => bumpFont(1)}
+                  >
+                    <ButtonText>A+</ButtonText>
+                  </Button>
+                </HStack>
+              </SettingRow>
+
+              <SettingRow label="Opacity">
+                <HStack space="md" className="items-center">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={() => bumpOpacity(-1)}
+                  >
+                    <ButtonText>-</ButtonText>
+                  </Button>
+                  <Text className="min-w-12 text-center text-foreground">
+                    {Math.round(settings.backgroundOpacity * 100)}%
+                  </Text>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onPress={() => bumpOpacity(1)}
+                  >
+                    <ButtonText>+</ButtonText>
+                  </Button>
+                </HStack>
+              </SettingRow>
+
+              <SettingRow label="Device caption style">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onPress={() => {
+                    void openDeviceCaptionSettings();
+                  }}
+                >
+                  <ButtonText className="text-foreground">
+                    {Platform.OS === 'android'
+                      ? 'Open caption settings'
+                      : 'Open device settings'}
+                  </ButtonText>
+                </Button>
+              </SettingRow>
+            </VStack>
           )}
 
           <Button variant="outline" onPress={reset} className="mt-4">

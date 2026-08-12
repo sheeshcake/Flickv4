@@ -9,10 +9,8 @@ import Animated, {
   useAnimatedStyle,
   type SharedValue,
 } from 'react-native-reanimated';
-// Same source `UpdateService` compares against for update checks, so the
-// header always shows the exact version that ships (`app.json`'s
-// `expo.version` is kept in lockstep, see UpdateService's header comment).
-import { version as APP_VERSION } from '../../package.json';
+// Display version from `APP_VERSION` in `.env` (via app.config → expoConfig).
+import { getAppVersion } from '@/src/utils/appVersion';
 
 interface AppHeaderProps {
   right?: ReactNode;
@@ -93,15 +91,13 @@ export const AppHeader = ({
           style={logoStyle}
         />
         <HStack space="sm" className="items-center">
-          {!!APP_VERSION && (
-            <AnimatedText
-              size="xs"
-              className="text-muted-foreground"
-              style={versionStyle}
-            >
-              v{APP_VERSION}
-            </AnimatedText>
-          )}
+          <AnimatedText
+            size="xs"
+            className="text-muted-foreground"
+            style={versionStyle}
+          >
+            v{getAppVersion()}
+          </AnimatedText>
           <Box>{right}</Box>
         </HStack>
       </HStack>
