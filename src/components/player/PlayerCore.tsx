@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StatusBar, StyleSheet } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
-import * as Brightness from 'expo-brightness';
 import Video, {
   SelectedTrackType,
   TextTrackType,
@@ -22,6 +21,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
 import { PlayerControls } from '@/src/components/player/PlayerControls';
 import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer';
+import { PlayerPartyDrawer } from '@/src/components/party/PlayerPartyDrawer';
 import {
   PlayerSettingsDrawer,
   type PlaybackSpeed,
@@ -37,6 +37,14 @@ import {
 import { useControlsVisibility } from '@/src/components/player/useControlsVisibility';
 import { useTVRemote } from '@/src/components/player/useTVRemote';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
+import { useWatchParty } from '@/src/hooks/useWatchParty';
+import { useDevicePlaybackLevels } from '@/src/hooks/useDevicePlaybackLevels';
+import {
+  PARTY_URI_MAX,
+  isPartyStreamUri,
+  partySourceKind,
+  predictedHostTime,
+} from '@/src/party/protocol';
 import {
   UP_NEXT_LEAD_SECONDS,
   useNextEpisode,
@@ -49,6 +57,7 @@ import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
 import { useVideoQuality } from '@/src/hooks/useVideoQuality';
 import { File } from 'expo-file-system';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
+import { originOf } from '@/src/utils/streamUrl';
 import { writeNativeVttCache } from '@/src/utils/nativeSubtitleCache';
 import { WyzieService } from '@/src/services/WyzieService';
 import type { LocalDownloadedSubtitle } from '@/src/services/DownloadService';
@@ -138,6 +147,16 @@ export const PlayerCore = ({
   const isFocused = useIsFocused();
   const { servers, activeServer } = useServers();
   const { upsert, advanceEpisode } = useContinueWatching();
+  const {
+    role: partyRole,
+    room: partyRoom,
+    memberId: partyMemberId,
+    send: sendParty,
+    subscribe: subscribeParty,
+    leaveRoom,
+  } = useWatchParty();
+  const [partyOpen, setPartyOpen] = useState(false);
+  const waitingForGuestsRef = useRef(false);
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
   // Set right before autoplay hands off to the next episode. Guards the
@@ -155,42 +174,13 @@ export const PlayerCore = ({
   // rather than persisting app-wide — see the flick-player-controls skill's
   // "session-only vs per-server vs persisted" table.
   const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(1);
-  // Session-only volume / brightness — leave the device brightness restored
-  // on unmount so exiting the player doesn't leave the screen dimmed.
-  const [volume, setVolume] = useState(1);
-  const [brightness, setBrightness] = useState<number | undefined>(undefined);
-  const initialBrightnessRef = useRef<number | null>(null);
-  const brightnessSupportedRef = useRef(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const current = await Brightness.getBrightnessAsync();
-        if (cancelled) return;
-        initialBrightnessRef.current = current;
-        setBrightness(current);
-      } catch {
-        brightnessSupportedRef.current = false;
-        if (!cancelled) setBrightness(undefined);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      const restore = initialBrightnessRef.current;
-      if (restore != null && brightnessSupportedRef.current) {
-        void Brightness.setBrightnessAsync(restore).catch(() => {});
-      }
-    };
-  }, []);
-
-  const handleBrightnessChange = useCallback((value: number) => {
-    setBrightness(value);
-    void Brightness.setBrightnessAsync(value).catch(() => {
-      brightnessSupportedRef.current = false;
-      setBrightness(undefined);
-    });
-  }, []);
+  const {
+    volume,
+    setVolume,
+    brightness,
+    onBrightnessChange: handleBrightnessChange,
+    videoVolume,
+  } = useDevicePlaybackLevels();
   const { aspect, setAspect } = useVideoAspect();
   const videoRef = useRef<VideoRef>(null);
   const isTVShow = item.media_type === 'tv';
@@ -328,6 +318,42 @@ export const PlayerCore = ({
     setSubtitleOffsetSeconds(0);
   }, [wyzieSelectedId]);
 
+  useEffect(() => {
+    if (partyRole !== 'host') return;
+    const uri = selectedVariantUri ?? masterUri;
+    if (!uri || !isPartyStreamUri(uri)) return;
+    sendParty({
+      type: 'source',
+      uri: uri.slice(0, PARTY_URI_MAX),
+      kind: partySourceKind(uri),
+      referer: `${activeServer.url}/`.slice(0, PARTY_URI_MAX),
+      origin: originOf(activeServer.url).slice(0, PARTY_URI_MAX),
+    });
+  }, [partyRole, selectedVariantUri, masterUri, sendParty, activeServer.url]);
+
+  useEffect(() => {
+    if (partyRole !== 'host') return;
+    if (!selectedWyzieTrack || selectedWyzieIsLocal) {
+      sendParty({ type: 'subtitles', subtitles: null });
+      return;
+    }
+    sendParty({
+      type: 'subtitles',
+      subtitles: {
+        url: selectedWyzieTrack.url.slice(0, PARTY_URI_MAX),
+        language: selectedWyzieTrack.language,
+        display: selectedWyzieTrack.display,
+        offsetSeconds: subtitleOffsetSeconds,
+      },
+    });
+  }, [
+    partyRole,
+    selectedWyzieTrack,
+    selectedWyzieIsLocal,
+    subtitleOffsetSeconds,
+    sendParty,
+  ]);
+
   // Local WebVTT URI for the currently selected native track (converted
   // from Wyzie/offline SRT/VTT). Raw text is kept so sync offset changes can
   // rewrite the sidecar without re-fetching.
@@ -445,7 +471,7 @@ export const PlayerCore = ({
   // Player state (mirrors what expo-video's `useEvent`/`player.*` used to
   // expose, now derived from react-native-video's declarative props/events).
   // -------------------------------------------------------------------------
-  const [paused, setPaused] = useState(false);
+  const [paused, setPaused] = useState(partyRole === 'guest');
   const pausedRef = useRef(false);
   useEffect(() => {
     pausedRef.current = paused;
@@ -783,23 +809,102 @@ export const PlayerCore = ({
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
-    setPaused((p) => !p);
+    if (partyRole === 'guest') return;
+    setPaused((p) => {
+      const next = !p;
+      if (partyRole === 'host') {
+        sendParty({ type: next ? 'pause' : 'play' });
+      }
+      return next;
+    });
     show();
-  }, [show]);
+  }, [show, partyRole, sendParty]);
 
   const seekBy = useCallback(
     (seconds: number) => {
-      videoRef.current?.seek(currentTimeRef.current + seconds);
+      if (partyRole === 'guest') return;
+      const next = Math.max(0, currentTimeRef.current + seconds);
+      videoRef.current?.seek(next);
+      if (partyRole === 'host') {
+        sendParty({ type: 'seek', positionSeconds: next });
+      }
       show();
     },
-    [show],
+    [show, partyRole, sendParty],
   );
 
   const seekToFraction = useCallback(
     (value: number) => {
-      if (duration > 0) videoRef.current?.seek(value * duration);
+      if (partyRole === 'guest') return;
+      if (duration > 0) {
+        const next = value * duration;
+        videoRef.current?.seek(next);
+        if (partyRole === 'host') {
+          sendParty({ type: 'seek', positionSeconds: next });
+        }
+      }
     },
-    [duration],
+    [duration, partyRole, sendParty],
+  );
+
+  useEffect(() => {
+    if (partyRole !== 'host') return;
+    const id = setInterval(() => {
+      sendParty({
+        type: 'heartbeat',
+        positionSeconds: currentTimeRef.current,
+        paused: pausedRef.current,
+      });
+    }, 2000);
+    return () => clearInterval(id);
+  }, [partyRole, sendParty]);
+
+  useEffect(() => {
+    return subscribeParty((msg) => {
+      if (msg.type === 'clock' && partyRole === 'guest') {
+        setPaused(msg.clock.paused);
+        const target = predictedHostTime(msg.clock);
+        if (Math.abs(currentTimeRef.current - target) > 1.5) {
+          videoRef.current?.seek(target);
+        }
+      }
+      if (msg.type === 'control' && partyRole === 'host') {
+        if (msg.action === 'play') {
+          setPaused(false);
+          sendParty({ type: 'play' });
+        } else if (msg.action === 'pause') {
+          setPaused(true);
+          sendParty({ type: 'pause' });
+        } else if (msg.action === 'seek' && msg.positionSeconds != null) {
+          videoRef.current?.seek(msg.positionSeconds);
+          sendParty({ type: 'seek', positionSeconds: msg.positionSeconds });
+        }
+      }
+    });
+  }, [subscribeParty, partyRole, sendParty]);
+
+  useEffect(() => {
+    if (partyRole !== 'host' || !partyRoom) return;
+    const waiting = partyRoom.members.some(
+      (m) => m.buffering && m.id !== partyMemberId,
+    );
+    if (waiting && !pausedRef.current) {
+      waitingForGuestsRef.current = true;
+      setPaused(true);
+      sendParty({ type: 'pause' });
+    } else if (!waiting && waitingForGuestsRef.current) {
+      waitingForGuestsRef.current = false;
+      setPaused(false);
+      sendParty({ type: 'play' });
+    }
+  }, [partyRole, partyRoom, partyMemberId, sendParty]);
+
+  const onBuffer = useCallback(
+    (e: { isBuffering?: boolean }) => {
+      if (!partyRole) return;
+      sendParty({ type: 'buffering', buffering: !!e.isBuffering });
+    },
+    [partyRole, sendParty],
   );
 
   // On Android TV, `TVEventHandler`'s raw remote-event feed and the native
@@ -813,7 +918,7 @@ export const PlayerCore = ({
   // Select/Left/Right/Up/Down uncontested. The Up Next card and the
   // series-end state get the same treatment for the same reason.
   const overlayOpen =
-    settingsOpen || episodesOpen || showUpNext || seriesEnded;
+    settingsOpen || episodesOpen || partyOpen || showUpNext || seriesEnded;
 
   useTVRemote({
     // The hidden-state fallback `Pressable` (focusable, hasTVPreferredFocus,
@@ -852,7 +957,7 @@ export const PlayerCore = ({
           pointerEvents="none"
           paused={paused}
           rate={playbackRate}
-          volume={volume}
+          volume={videoVolume}
           progressUpdateInterval={500}
           preferredForwardBufferDuration={
             Platform.OS === 'ios'
@@ -897,6 +1002,7 @@ export const PlayerCore = ({
           onError={onError}
           onEnd={onEnd}
           onProgress={onProgress}
+          onBuffer={onBuffer}
           onPictureInPictureStatusChanged={onPipStatusChanged}
         />
       )}
@@ -990,6 +1096,16 @@ export const PlayerCore = ({
               brightness != null ? handleBrightnessChange : undefined
             }
             onEnterPip={pipSupported ? enterPip : undefined}
+            partyCode={partyRoom?.code}
+            partyLocked={partyRole === 'guest'}
+            onOpenParty={
+              partyRoom
+                ? () => {
+                    setPartyOpen(true);
+                    show();
+                  }
+                : undefined
+            }
           />
         ) : (
           // TV: keep a focusable owner mounted while controls are hidden.
@@ -1039,6 +1155,20 @@ export const PlayerCore = ({
             onSelectEpisode(s, ep);
           }}
           onClose={() => setEpisodesOpen(false)}
+        />
+      )}
+
+      {partyRoom && partyRole && (
+        <PlayerPartyDrawer
+          visible={partyOpen}
+          room={partyRoom}
+          role={partyRole}
+          onLeave={() => {
+            setPartyOpen(false);
+            leaveRoom();
+            onBack();
+          }}
+          onClose={() => setPartyOpen(false)}
         />
       )}
     </Box>

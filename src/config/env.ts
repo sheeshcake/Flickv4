@@ -36,6 +36,12 @@ export const SAMPLE_VIDEO_URL =
 
 // GitHub repository the in-app updater polls for the latest release. Override
 // via `.env` if you fork the project into your own repo.
+// Watch-party WebSocket, e.g. wss://flick-party.up.railway.app
+export const WATCH_PARTY_CONFIG = {
+  url: process.env.EXPO_PUBLIC_WATCH_PARTY_URL?.trim() || '',
+  enabled: Boolean(process.env.EXPO_PUBLIC_WATCH_PARTY_URL?.trim()),
+} as const;
+
 export const UPDATE_CONFIG = {
   OWNER: process.env.EXPO_PUBLIC_UPDATE_REPO_OWNER || 'sheeshcake',
   REPO: process.env.EXPO_PUBLIC_UPDATE_REPO_NAME || 'Flickv4',

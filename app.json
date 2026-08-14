@@ -7,6 +7,7 @@
     "icon": "./assets/applogo/ic_launcher.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
+    "scheme": "flick",
     "ios": {
       "supportsTablet": true,
       "icon": "./assets/applogo/ic_launcher.png",

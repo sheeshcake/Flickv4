@@ -14,6 +14,8 @@ import { CreditsScreen } from '@/src/screens/CreditsScreen';
 import { FinishedMoviesScreen } from '@/src/screens/FinishedMoviesScreen';
 import { TabNavigator } from './TabNavigator';
 import { TVNavigator } from './TVNavigator';
+import { JoinPartyScreen } from '@/src/screens/JoinPartyScreen';
+import { PartyLinkHandler } from '@/src/components/party/PartyLinkHandler';
 import { isTVLayout } from '@/src/utils/tv';
 import { isTablet } from '@/src/utils/responsive';
 import type { RootStackParamList } from './types';
@@ -43,6 +45,7 @@ const navTheme = {
 export const AppNavigator = () => {
   return (
     <NavigationContainer theme={navTheme}>
+      <PartyLinkHandler />
       <Stack.Navigator
         initialRouteName="Splash"
         screenOptions={{
@@ -86,6 +89,7 @@ export const AppNavigator = () => {
         <Stack.Screen name="Disclaimer" component={DisclaimerScreen} />
         <Stack.Screen name="Credits" component={CreditsScreen} />
         <Stack.Screen name="FinishedMovies" component={FinishedMoviesScreen} />
+        <Stack.Screen name="JoinParty" component={JoinPartyScreen} />
         <Stack.Screen
           name="Player"
           component={PlayerScreen}

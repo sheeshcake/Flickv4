@@ -1,0 +1,17 @@
+{
+  "name": "flick-party-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix web ci && npm --prefix web run build",
+    "start": "node server.mjs",
+    "dev:web": "npm --prefix web run dev"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

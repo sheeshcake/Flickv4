@@ -26,9 +26,15 @@ import { useDownloads } from '@/src/hooks/useDownloads';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { TMDBService } from '@/src/services/TMDBService';
 import { forceLandscape, restoreOrientation } from '@/src/utils/orientation';
-import { originOf } from '@/src/utils/streamUrl';
+import { originOf, buildEmbedUrl } from '@/src/utils/streamUrl';
 import { getTitle, type Episode } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
+import { useWatchParty } from '@/src/hooks/useWatchParty';
+import {
+  PARTY_URI_MAX,
+  isPartyStreamUri,
+  partySourceKind,
+} from '@/src/party/protocol';
 
 export const PlayerScreen = ({
   route,
@@ -53,6 +59,7 @@ export const PlayerScreen = ({
 
   const { servers, activeServer, setActive } = useServers();
   const { jobs, getLocalSource, getJob, getJobFor } = useDownloads();
+  const { role, send, subscribe, leaveRoom } = useWatchParty();
   // Settings > "Debug video player" — when on, render the stream-resolving
   // WebViewScraper full-screen and interactive instead of invisible, so you
   // can watch exactly what the embed page is doing.
@@ -135,6 +142,42 @@ export const PlayerScreen = ({
     resolvedRef.current = true;
     setSource(s);
   }, []);
+
+  const publishHostSource = useCallback(
+    (url: string) => {
+      if (role !== 'host') return;
+      // Only the scraped media URL — never the embed/page link.
+      if (!isPartyStreamUri(url)) return;
+      send({
+        type: 'source',
+        uri: url.slice(0, PARTY_URI_MAX),
+        kind: partySourceKind(url),
+        referer: `${activeServer.url}/`.slice(0, PARTY_URI_MAX),
+        origin: originOf(activeServer.url).slice(0, PARTY_URI_MAX),
+        embedUrl: buildEmbedUrl(activeServer, {
+          type,
+          tmdbId: item.id,
+          imdbId,
+          season,
+          episode,
+          title: getTitle(item),
+        }).slice(0, PARTY_URI_MAX),
+      });
+    },
+    [role, send, activeServer, type, item, imdbId, season, episode],
+  );
+
+  // Late-joining web clients read the last source off the room; re-publish
+  // when PlayerCore is already up (source resolved before the party, or
+  // remount) so the companion page is not stuck on "waiting".
+  useEffect(() => {
+    const uri =
+      typeof source === 'object' && source && typeof source.uri === 'string'
+        ? source.uri
+        : null;
+    if (!uri) return;
+    publishHostSource(uri);
+  }, [source, publishHostSource]);
 
   // Resolve a downloaded local copy for whatever we're currently trying to
   // play. Priority: explicit `localSourceId` from the caller (e.g. the
@@ -222,8 +265,9 @@ export const PlayerScreen = ({
           Origin: originOf(activeServer.url),
         },
       });
+      publishHostSource(url);
     },
-    [finish, activeServer.url, scraperDebugEnabled],
+    [finish, activeServer, scraperDebugEnabled, publishHostSource],
   );
 
   // Shared by manual server switching (Settings > Server, in-player) and
@@ -310,9 +354,48 @@ export const PlayerScreen = ({
       setEpisode(nextEpisode);
       setTitle(`${getTitle(item)} — ${ep.name}`);
       setSubtitle(`S${nextSeason} E${nextEpisode}`);
+      if (role === 'host') {
+        send({ type: 'episode', season: nextSeason, episode: nextEpisode });
+      }
+    },
+    [item, season, episode, role, send],
+  );
+
+  const applyPartyEpisode = useCallback(
+    (nextSeason: number, nextEpisode: number) => {
+      if (season === nextSeason && episode === nextEpisode) return;
+      setTriedServerIds(new Set());
+      resolvedRef.current = false;
+      setSource(null);
+      setNoSource(false);
+      setDebugStreamFound(false);
+      setEffectiveResumeFrom(undefined);
+      setSeason(nextSeason);
+      setEpisode(nextEpisode);
+      setTitle(`${getTitle(item)} — S${nextSeason} E${nextEpisode}`);
+      setSubtitle(`S${nextSeason} E${nextEpisode}`);
     },
     [item, season, episode],
   );
+
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === 'episode' && role === 'guest') {
+        applyPartyEpisode(msg.season, msg.episode);
+      }
+      if (msg.type === 'ended' && role) {
+        navigation.goBack();
+      }
+    });
+  }, [subscribe, role, applyPartyEpisode, navigation]);
+
+  useEffect(() => {
+    return () => {
+      if (role) leaveRoom();
+    };
+    // Leave only when this screen unmounts, not when role identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (source) {
     return (
@@ -330,7 +413,9 @@ export const PlayerScreen = ({
         episode={episode}
         resumeFrom={effectiveResumeFrom}
         onBack={() => navigation.goBack()}
-        onSelectEpisode={type === 'tv' ? handleSelectEpisode : undefined}
+        onSelectEpisode={
+          type === 'tv' && role !== 'guest' ? handleSelectEpisode : undefined
+        }
         onSelectServer={localForCurrent ? undefined : handleSelectServer}
         onPlaybackFailed={localForCurrent ? undefined : handlePlaybackFailed}
         localSubtitles={localSubtitles}
