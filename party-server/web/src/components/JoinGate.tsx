@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import logo from '@/assets/logo.png';
 
 interface JoinGateProps {
   initialCode: string;
@@ -15,7 +16,12 @@ export const JoinGate = ({ initialCode, error, onJoin }: JoinGateProps) => {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-10">
-      <h1 className="mb-2 text-3xl font-bold">Flick Watch Party</h1>
+      <img
+        src={logo}
+        alt="Flick"
+        className="mx-auto mb-4 h-14 w-auto"
+      />
+      <h1 className="mb-2 text-center text-3xl font-bold">Flick Watch Party</h1>
       <p className="mb-8 text-sm leading-relaxed text-muted-foreground">
         Video plays in this browser when the host’s stream allows it. Captions
         follow the host. If the stream is blocked, we try the embed page, then

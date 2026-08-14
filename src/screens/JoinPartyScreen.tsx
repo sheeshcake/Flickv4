@@ -13,6 +13,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Input, InputField } from '@/components/ui/input';
 import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
 import { Focusable } from '@/src/components/Focusable';
+import { WatchPartyIntroModal } from '@/src/components/party/WatchPartyIntroModal';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
 import { mediaItemFromPartyContent } from '@/src/party/content';
 import { getTitle } from '@/src/types';
@@ -30,6 +31,7 @@ export const JoinPartyScreen = ({
   const [code, setCode] = useState(route.params?.code ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [introDone, setIntroDone] = useState(false);
 
   const goToPlayer = useCallback(
     async (rawCode: string) => {
@@ -77,11 +79,12 @@ export const JoinPartyScreen = ({
   );
 
   useEffect(() => {
+    if (!introDone) return;
     const initial = route.params?.code;
     if (initial) void goToPlayer(initial);
-    // Only auto-join from the incoming deep-link param.
+    // Only auto-join from the incoming deep-link param after the intro.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.params?.code]);
+  }, [introDone, route.params?.code]);
 
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -99,47 +102,55 @@ export const JoinPartyScreen = ({
         </Heading>
       </HStack>
 
-      <VStack space="lg" className="px-4 pt-4">
-        <HStack space="sm" className="items-center">
-          <Icon as={Users} className="text-primary" />
-          <Text className="flex-1 text-muted-foreground">
-            Enter the code from the host. You will play the same title on this
-            device, in sync.
-          </Text>
-        </HStack>
+      {introDone ? (
+        <VStack space="lg" className="px-4 pt-4">
+          <HStack space="sm" className="items-center">
+            <Icon as={Users} className="text-primary" />
+            <Text className="flex-1 text-muted-foreground">
+              Enter the code from the host. You will play the same title on this
+              device, in sync.
+            </Text>
+          </HStack>
 
-        <Input>
-          <InputField
-            value={code}
-            onChangeText={(t) => setCode(t.toUpperCase())}
-            placeholder="AB12C"
-            autoCapitalize="characters"
-            autoCorrect={false}
-            maxLength={6}
-            editable={!busy}
-          />
-        </Input>
+          <Input>
+            <InputField
+              value={code}
+              onChangeText={(t) => setCode(t.toUpperCase())}
+              placeholder="AB12C"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={6}
+              editable={!busy}
+            />
+          </Input>
 
-        {!!error && (
-          <Text size="sm" className="text-destructive">
-            {error}
-          </Text>
-        )}
+          {!!error && (
+            <Text size="sm" className="text-destructive">
+              {error}
+            </Text>
+          )}
 
-        <Button
-          onPress={() => void goToPlayer(code)}
-          isDisabled={busy || !enabled}
-        >
-          {busy ? <ButtonSpinner /> : null}
-          <ButtonText>{busy ? 'Joining…' : 'Join'}</ButtonText>
-        </Button>
+          <Button
+            onPress={() => void goToPlayer(code)}
+            isDisabled={busy || !enabled}
+          >
+            {busy ? <ButtonSpinner /> : null}
+            <ButtonText>{busy ? 'Joining…' : 'Join'}</ButtonText>
+          </Button>
 
-        {busy && (
-          <Box className="items-center pt-4">
-            <Spinner size="large" color="#E50914" />
-          </Box>
-        )}
-      </VStack>
+          {busy && (
+            <Box className="items-center pt-4">
+              <Spinner size="large" color="#E50914" />
+            </Box>
+          )}
+        </VStack>
+      ) : null}
+
+      <WatchPartyIntroModal
+        visible={!introDone}
+        onContinue={() => setIntroDone(true)}
+        onDismiss={() => navigation.goBack()}
+      />
     </Box>
   );
 };

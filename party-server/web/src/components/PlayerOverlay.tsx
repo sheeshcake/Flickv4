@@ -2,6 +2,7 @@ import { ArrowLeft, Maximize, MessageCircle, Minimize, Pause, Play, RotateCcw, R
 import { Button } from '@/components/ui/button';
 import { formatTime } from '@/lib/party';
 import { cn } from '@/lib/utils';
+import logo from '@/assets/logo.png';
 
 interface PlayerOverlayProps {
   visible: boolean;
@@ -72,6 +73,7 @@ export const PlayerOverlay = ({
         >
           <ArrowLeft className="size-5" />
         </Button>
+        <img src={logo} alt="Flick" className="h-8 w-auto shrink-0" />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-lg font-bold">{title}</h2>
           {subtitle ? (

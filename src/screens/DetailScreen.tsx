@@ -81,6 +81,7 @@ import {
   type VideoResult,
 } from '@/src/types';
 import { PartyLobbyModal } from '@/src/components/party/PartyLobbyModal';
+import { WatchPartyIntroModal } from '@/src/components/party/WatchPartyIntroModal';
 import { partyContentFromItem } from '@/src/party/content';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
 import type { RootStackScreenProps } from '@/src/navigation/types';
@@ -120,6 +121,7 @@ export const DetailScreen = ({
 
   const { enabled: partyEnabled } = useWatchParty();
   const [partyOpen, setPartyOpen] = useState(false);
+  const [partyIntroOpen, setPartyIntroOpen] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   // TV has no "Trailers & More" tab (see DetailScreenTV), so a TV movie
   // defaults straight to "More Like This" instead of a tab that doesn't
@@ -548,7 +550,7 @@ export const DetailScreen = ({
         onBack={() => navigation.goBack()}
         onPlay={play}
         onShare={onShare}
-        onStartParty={partyEnabled && !coming.comingSoon ? () => setPartyOpen(true) : undefined}
+        onStartParty={partyEnabled && !coming.comingSoon ? () => setPartyIntroOpen(true) : undefined}
         isInList={isInList}
         onToggleList={toggle}
         movieJob={movieJob}
@@ -577,6 +579,14 @@ export const DetailScreen = ({
         onPressSimilar={(picked) => navigation.push('Detail', { item: picked })}
         qualitySheet={qualitySheet}
         onCloseQualitySheet={() => setQualitySheet(null)}
+      />
+      <WatchPartyIntroModal
+        visible={partyIntroOpen}
+        onContinue={() => {
+          setPartyIntroOpen(false);
+          setPartyOpen(true);
+        }}
+        onDismiss={() => setPartyIntroOpen(false)}
       />
       <PartyLobbyModal
         visible={partyOpen}
@@ -787,7 +797,7 @@ export const DetailScreen = ({
               <ActionIcon
                 icon={Users}
                 label="Watch party"
-                onPress={() => setPartyOpen(true)}
+                onPress={() => setPartyIntroOpen(true)}
               />
             )}
           </HStack>
@@ -945,6 +955,14 @@ export const DetailScreen = ({
         visible={castSheetOpen}
         cast={cast}
         onClose={() => setCastSheetOpen(false)}
+      />
+      <WatchPartyIntroModal
+        visible={partyIntroOpen}
+        onContinue={() => {
+          setPartyIntroOpen(false);
+          setPartyOpen(true);
+        }}
+        onDismiss={() => setPartyIntroOpen(false)}
       />
       <PartyLobbyModal
         visible={partyOpen}
