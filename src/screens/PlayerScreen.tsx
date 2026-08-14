@@ -26,10 +26,11 @@ import { useDownloads } from '@/src/hooks/useDownloads';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { TMDBService } from '@/src/services/TMDBService';
 import { forceLandscape, restoreOrientation } from '@/src/utils/orientation';
-import { originOf } from '@/src/utils/streamUrl';
+import { originOf, buildEmbedUrl } from '@/src/utils/streamUrl';
 import { getTitle, type Episode } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
+import { PARTY_URI_MAX } from '@/src/party/protocol';
 
 export const PlayerScreen = ({
   route,
@@ -138,6 +139,39 @@ export const PlayerScreen = ({
     setSource(s);
   }, []);
 
+  const publishHostSource = useCallback(
+    (url: string) => {
+      if (role !== 'host') return;
+      if (!/^https?:\/\//i.test(url)) return;
+      send({
+        type: 'source',
+        uri: url.slice(0, PARTY_URI_MAX),
+        kind: url.includes('.m3u8') ? 'hls' : 'file',
+        embedUrl: buildEmbedUrl(activeServer, {
+          type,
+          tmdbId: item.id,
+          imdbId,
+          season,
+          episode,
+          title: getTitle(item),
+        }).slice(0, PARTY_URI_MAX),
+      });
+    },
+    [role, send, activeServer, type, item, imdbId, season, episode],
+  );
+
+  // Late-joining web clients read the last source off the room; re-publish
+  // when PlayerCore is already up (source resolved before the party, or
+  // remount) so the companion page is not stuck on "waiting".
+  useEffect(() => {
+    const uri =
+      typeof source === 'object' && source && typeof source.uri === 'string'
+        ? source.uri
+        : null;
+    if (!uri) return;
+    publishHostSource(uri);
+  }, [source, publishHostSource]);
+
   // Resolve a downloaded local copy for whatever we're currently trying to
   // play. Priority: explicit `localSourceId` from the caller (e.g. the
   // Downloads screen), otherwise best-effort lookup by the current item +
@@ -224,8 +258,9 @@ export const PlayerScreen = ({
           Origin: originOf(activeServer.url),
         },
       });
+      publishHostSource(url);
     },
-    [finish, activeServer.url, scraperDebugEnabled],
+    [finish, activeServer, scraperDebugEnabled, publishHostSource],
   );
 
   // Shared by manual server switching (Settings > Server, in-player) and

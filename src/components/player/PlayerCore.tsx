@@ -39,7 +39,7 @@ import { useControlsVisibility } from '@/src/components/player/useControlsVisibi
 import { useTVRemote } from '@/src/components/player/useTVRemote';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
-import { predictedHostTime } from '@/src/party/protocol';
+import { PARTY_URI_MAX, predictedHostTime } from '@/src/party/protocol';
 import {
   UP_NEXT_LEAD_SECONDS,
   useNextEpisode,
@@ -340,6 +340,29 @@ export const PlayerCore = ({
   useEffect(() => {
     setSubtitleOffsetSeconds(0);
   }, [wyzieSelectedId]);
+
+  useEffect(() => {
+    if (partyRole !== 'host') return;
+    if (!selectedWyzieTrack || selectedWyzieIsLocal) {
+      sendParty({ type: 'subtitles', subtitles: null });
+      return;
+    }
+    sendParty({
+      type: 'subtitles',
+      subtitles: {
+        url: selectedWyzieTrack.url.slice(0, PARTY_URI_MAX),
+        language: selectedWyzieTrack.language,
+        display: selectedWyzieTrack.display,
+        offsetSeconds: subtitleOffsetSeconds,
+      },
+    });
+  }, [
+    partyRole,
+    selectedWyzieTrack,
+    selectedWyzieIsLocal,
+    subtitleOffsetSeconds,
+    sendParty,
+  ]);
 
   // Local WebVTT URI for the currently selected native track (converted
   // from Wyzie/offline SRT/VTT). Raw text is kept so sync offset changes can
@@ -873,10 +896,7 @@ export const PlayerCore = ({
   useEffect(() => {
     if (partyRole !== 'host' || !partyRoom) return;
     const waiting = partyRoom.members.some(
-      (m) =>
-        m.kind === 'player' &&
-        m.buffering &&
-        m.id !== partyMemberId,
+      (m) => m.buffering && m.id !== partyMemberId,
     );
     if (waiting && !pausedRef.current) {
       waitingForGuestsRef.current = true;

@@ -114,7 +114,20 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
               season: msg.season,
               episode: msg.episode,
             },
+            source: null,
+            embedUrl: null,
+            subtitles: null,
           });
+        }
+        if (msg.type === 'source' && roomRef.current) {
+          setRoom({
+            ...roomRef.current,
+            source: msg.source,
+            embedUrl: msg.embedUrl,
+          });
+        }
+        if (msg.type === 'subtitles' && roomRef.current) {
+          setRoom({ ...roomRef.current, subtitles: msg.subtitles });
         }
         if (msg.type === 'ended') {
           setRoom(null);

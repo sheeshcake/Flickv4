@@ -1,7 +1,10 @@
 /**
  * Watch-party wire protocol. Keep in sync with `party-server/server.mjs`.
- * Rooms carry content identity + a host clock only — never a stream URL.
+ * Rooms carry content identity, a host clock, and optional host-published
+ * stream/subtitle URLs (JSON only — the server never fetches video).
  */
+
+export const PARTY_URI_MAX = 2000;
 
 export const PARTY_CODE_LENGTH = 5;
 export const PARTY_MAX_MEMBERS = 8;
@@ -33,12 +36,27 @@ export interface PartyMember {
   buffering: boolean;
 }
 
+export interface PartySource {
+  uri: string;
+  kind: 'hls' | 'file';
+}
+
+export interface PartySubtitles {
+  url: string;
+  language: string;
+  display: string;
+  offsetSeconds: number;
+}
+
 export interface PartyRoom {
   code: string;
   hostId: string;
   content: PartyContent;
   clock: PartyClock;
   members: PartyMember[];
+  source?: PartySource | null;
+  embedUrl?: string | null;
+  subtitles?: PartySubtitles | null;
 }
 
 export type ClientMessage =
@@ -50,6 +68,13 @@ export type ClientMessage =
   | { type: 'episode'; season: number; episode: number }
   | { type: 'heartbeat'; positionSeconds: number; paused: boolean }
   | { type: 'buffering'; buffering: boolean }
+  | {
+      type: 'source';
+      uri: string;
+      kind: 'hls' | 'file';
+      embedUrl?: string;
+    }
+  | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'control'; action: 'play' | 'pause' | 'seek'; positionSeconds?: number }
   | { type: 'chat'; text: string }
   | { type: 'leave' };
@@ -60,6 +85,8 @@ export type ServerMessage =
   | { type: 'state'; room: PartyRoom }
   | { type: 'clock'; clock: PartyClock }
   | { type: 'episode'; season: number; episode: number }
+  | { type: 'source'; source: PartySource | null; embedUrl?: string | null }
+  | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'control'; action: 'play' | 'pause' | 'seek'; positionSeconds?: number }
   | { type: 'chat'; from: string; text: string; at: number }
   | { type: 'error'; message: string }

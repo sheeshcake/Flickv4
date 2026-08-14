@@ -27,7 +27,7 @@ export const PlayerPartyDrawer = ({
 }: PlayerPartyDrawerProps) => {
   if (!visible) return null;
 
-  const waiting = room.members.filter((m) => m.buffering && m.kind === 'player');
+  const waiting = room.members.filter((m) => m.buffering);
 
   return (
     <Box style={StyleSheet.absoluteFill} className="z-50">

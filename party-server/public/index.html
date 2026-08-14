@@ -15,26 +15,50 @@
       }
       * { box-sizing: border-box; }
       html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
-      body { display: flex; justify-content: center; padding: 24px 16px 48px; }
-      .wrap { width: 100%; max-width: 420px; }
-      h1 { font-size: 28px; margin: 0 0 8px; }
-      p { color: var(--muted); margin: 0 0 20px; line-height: 1.45; }
+      body { padding: 16px; }
+      .wrap { width: 100%; max-width: 1100px; margin: 0 auto; }
+      h1 { font-size: 24px; margin: 0 0 6px; }
+      .lede { color: var(--muted); margin: 0 0 16px; line-height: 1.45; font-size: 14px; }
       label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
       input, button, textarea {
         width: 100%; border-radius: 8px; border: 1px solid var(--border); background: #0a0a0a;
         color: var(--fg); font: inherit; padding: 12px 14px;
       }
-      input { letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; }
-      textarea { min-height: 64px; resize: vertical; letter-spacing: 0; font-weight: 400; }
+      #code { letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; }
+      textarea { min-height: 64px; resize: vertical; }
       button {
         background: var(--primary); border-color: var(--primary); font-weight: 700; cursor: pointer;
       }
-      button.ghost { background: transparent; color: var(--fg); margin-top: 8px; }
+      button.ghost { background: transparent; color: var(--fg); }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
       .row { display: flex; gap: 8px; margin-top: 10px; }
       .row button { flex: 1; }
-      .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; margin-top: 16px; }
-      .code { font-size: 32px; letter-spacing: 0.28em; font-weight: 800; text-align: center; margin: 8px 0 16px; }
+      .layout { display: grid; gap: 16px; }
+      @media (min-width: 900px) {
+        .layout { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+      }
+      .player {
+        position: relative; width: 100%; aspect-ratio: 16 / 9; background: #0a0a0a;
+        border-radius: 12px; overflow: hidden; border: 1px solid var(--border);
+      }
+      .player video, .player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
+      .player iframe[hidden], .player video[hidden] { display: none; }
+      .overlay {
+        position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between;
+        background: linear-gradient(to bottom, rgba(0,0,0,.55), transparent 30%, transparent 70%, rgba(0,0,0,.75));
+        opacity: 0; transition: opacity .2s;
+      }
+      .player:hover .overlay, .overlay.show { opacity: 1; }
+      .overlay-top, .overlay-bottom { padding: 12px 14px; }
+      .cue {
+        position: absolute; left: 8%; right: 8%; bottom: 18%; text-align: center;
+        font-size: 18px; font-weight: 700; text-shadow: 0 1px 4px #000; pointer-events: none; white-space: pre-wrap;
+      }
+      .bar { height: 6px; background: #333; border-radius: 99px; cursor: pointer; }
+      .bar > span { display: block; height: 100%; background: var(--primary); border-radius: 99px; width: 0; }
+      .times { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 6px; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
+      .code { font-size: 28px; letter-spacing: 0.24em; font-weight: 800; text-align: center; margin: 0 0 12px; }
       .title { font-weight: 700; margin-bottom: 4px; }
       .status { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
       .members { list-style: none; padding: 0; margin: 0 0 12px; }
@@ -43,6 +67,10 @@
       .chat { max-height: 180px; overflow: auto; font-size: 14px; margin-bottom: 8px; }
       .chat div { margin: 4px 0; }
       .err { color: #f87171; font-size: 14px; margin-top: 10px; }
+      .waiting {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        text-align: center; padding: 24px; color: var(--muted); background: #000;
+      }
       a.open {
         display: block; text-align: center; margin-top: 12px; color: var(--fg); text-decoration: none;
         border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-weight: 700;
@@ -52,43 +80,69 @@
   <body>
     <div class="wrap">
       <h1>Flick Watch Party</h1>
-      <p>This page is a lobby and remote. The movie plays in the Flick app on each phone or TV — not here.</p>
+      <p class="lede">
+        Video plays in this browser when the host’s stream allows it. Captions follow the host.
+        If the stream is blocked, we try the embed page, then Open in Flick.
+      </p>
 
       <div id="gate">
         <label for="code">Room code</label>
         <input id="code" maxlength="6" autocomplete="off" placeholder="AB12C" />
         <label for="name" style="margin-top:12px">Your name</label>
-        <input id="name" maxlength="32" placeholder="Alex" style="letter-spacing:0;text-transform:none;font-weight:600" />
+        <input id="name" maxlength="32" placeholder="Alex" />
         <button id="join" style="margin-top:14px">Join room</button>
         <div class="err" id="gateErr"></div>
       </div>
 
       <div id="room" hidden>
         <div class="code" id="roomCode"></div>
-        <div class="card">
-          <div class="title" id="title">—</div>
-          <div class="status" id="status">Connecting…</div>
-          <ul class="members" id="members"></ul>
-          <div class="row">
-            <button id="play">Play</button>
-            <button id="pause">Pause</button>
+        <div class="layout">
+          <div>
+            <div class="player" id="stage">
+              <div class="waiting" id="waiting">Waiting for the host’s stream…</div>
+              <video id="video" playsinline hidden></video>
+              <iframe id="frame" hidden title="Embed player" allow="autoplay; fullscreen"></iframe>
+              <div class="cue" id="cue"></div>
+              <div class="overlay show" id="overlay">
+                <div class="overlay-top">
+                  <div class="title" id="title">—</div>
+                  <div class="status" id="status">Connecting…</div>
+                </div>
+                <div class="overlay-bottom">
+                  <div class="row" style="margin:0 0 10px">
+                    <button id="back" class="ghost">−10s</button>
+                    <button id="play">Play</button>
+                    <button id="pause">Pause</button>
+                    <button id="fwd" class="ghost">+10s</button>
+                  </div>
+                  <div class="bar" id="scrub"><span id="fill"></span></div>
+                  <div class="times">
+                    <span id="tcur">0:00</span>
+                    <span id="tdur">0:00</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <a class="open" id="openApp" href="#">Open in Flick</a>
           </div>
-          <div class="row">
-            <button id="back" class="ghost">−10s</button>
-            <button id="fwd" class="ghost">+10s</button>
+          <div>
+            <div class="card">
+              <div class="title">Watching</div>
+              <ul class="members" id="members"></ul>
+            </div>
+            <div class="card" style="margin-top:12px">
+              <div class="title">Chat</div>
+              <div class="chat" id="chat"></div>
+              <textarea id="chatInput" maxlength="200" placeholder="Say something"></textarea>
+              <button id="send" style="margin-top:8px">Send</button>
+            </div>
+            <button class="ghost" id="leave" style="margin-top:12px">Leave</button>
+            <div class="err" id="roomErr"></div>
           </div>
-          <a class="open" id="openApp" href="#">Open in Flick</a>
         </div>
-        <div class="card">
-          <div class="title">Chat</div>
-          <div class="chat" id="chat"></div>
-          <textarea id="chatInput" maxlength="200" placeholder="Say something"></textarea>
-          <button id="send" style="margin-top:8px">Send</button>
-        </div>
-        <button class="ghost" id="leave">Leave</button>
-        <div class="err" id="roomErr"></div>
       </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js"></script>
     <script>
       const gate = document.getElementById('gate');
       const roomEl = document.getElementById('room');
@@ -102,6 +156,14 @@
       const statusEl = document.getElementById('status');
       const roomCodeEl = document.getElementById('roomCode');
       const openApp = document.getElementById('openApp');
+      const video = document.getElementById('video');
+      const frame = document.getElementById('frame');
+      const waiting = document.getElementById('waiting');
+      const cueEl = document.getElementById('cue');
+      const fill = document.getElementById('fill');
+      const tcur = document.getElementById('tcur');
+      const tdur = document.getElementById('tdur');
+      const overlay = document.getElementById('overlay');
 
       const pathCode = (location.pathname.match(/\/p\/([A-Za-z0-9]+)/i) || [])[1];
       if (pathCode) codeInput.value = pathCode.toUpperCase();
@@ -109,6 +171,17 @@
       let ws;
       let room;
       let clock = { positionSeconds: 0, paused: true, updatedAt: Date.now() };
+      let hls;
+      let mode = 'none';
+      let lastSourceKey = '';
+      let failedSourceKey = '';
+      let lastSubUrl = '';
+      let cues = [];
+      let subOffset = 0;
+
+      const send = (obj) => {
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+      };
 
       const predicted = () => {
         if (!clock) return 0;
@@ -117,10 +190,184 @@
       };
 
       const fmt = (s) => {
-        s = Math.max(0, Math.floor(s));
+        s = Math.max(0, Math.floor(s || 0));
         const m = Math.floor(s / 60);
         const r = s % 60;
         return m + ':' + String(r).padStart(2, '0');
+      };
+
+      const escapeHtml = (s) =>
+        String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+
+      const parseTimestamp = (raw) => {
+        const cleaned = raw.trim().replace(',', '.');
+        const parts = cleaned.split(':');
+        if (parts.length < 3) return 0;
+        return (Number(parts[0]) || 0) * 3600 + (Number(parts[1]) || 0) * 60 + (Number(parts[2]) || 0);
+      };
+
+      const parseSubtitleText = (raw) => {
+        const normalized = String(raw).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const blocks = normalized.split(/\n\n+/);
+        const out = [];
+        for (const block of blocks) {
+          const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
+          if (!lines.length || lines[0].toUpperCase().startsWith('WEBVTT')) continue;
+          const timeLineIndex = lines.findIndex((l) => l.includes('-->'));
+          if (timeLineIndex < 0) continue;
+          const [startRaw, endRaw] = lines[timeLineIndex].split('-->').map((s) => s.trim());
+          if (!startRaw || !endRaw) continue;
+          const start = parseTimestamp(startRaw.split(' ')[0]);
+          const end = parseTimestamp(endRaw.split(' ')[0]);
+          const text = lines
+            .slice(timeLineIndex + 1)
+            .map((t) => t.replace(/<[^>]+>/g, '').replace(/\{[^}]+\}/g, '').trim())
+            .filter(Boolean)
+            .join('\n');
+          if (text && end > start) out.push({ start, end, text });
+        }
+        return out.sort((a, b) => a.start - b.start);
+      };
+
+      const cueAt = (t) => {
+        for (const c of cues) {
+          if (t >= c.start && t < c.end) return c;
+        }
+        return null;
+      };
+
+      const destroyHls = () => {
+        if (hls) {
+          hls.destroy();
+          hls = null;
+        }
+      };
+
+      const showWaiting = (text) => {
+        waiting.hidden = false;
+        waiting.textContent = text;
+        video.hidden = true;
+        frame.hidden = true;
+        mode = 'none';
+        send({ type: 'buffering', buffering: false });
+      };
+
+      const useVideo = () => {
+        waiting.hidden = true;
+        frame.hidden = true;
+        video.hidden = false;
+        mode = 'video';
+        overlay.style.pointerEvents = 'auto';
+      };
+
+      const setBuffering = (on) => {
+        if (mode !== 'video') return;
+        send({ type: 'buffering', buffering: !!on });
+      };
+
+      const useIframe = (url) => {
+        destroyHls();
+        video.removeAttribute('src');
+        video.load();
+        waiting.hidden = true;
+        video.hidden = true;
+        frame.hidden = false;
+        frame.src = url;
+        mode = 'iframe';
+        cues = [];
+        cueEl.textContent = '';
+        overlay.style.pointerEvents = 'auto';
+        statusEl.textContent = 'Embed fallback — seek sync is limited';
+        send({ type: 'buffering', buffering: false });
+      };
+
+      const applyClock = () => {
+        if (mode !== 'video') return;
+        const target = predicted();
+        if (clock.paused) {
+          if (!video.paused) video.pause();
+        } else if (video.paused) {
+          video.play().catch(() => {});
+        }
+        if (Number.isFinite(video.currentTime) && Math.abs(video.currentTime - target) > 1.5) {
+          video.currentTime = target;
+        }
+      };
+
+      const loadSource = (source, embedUrl) => {
+        if (!source || !source.uri) {
+          lastSourceKey = '';
+          failedSourceKey = '';
+          destroyHls();
+          showWaiting('Waiting for the host’s stream…');
+          return;
+        }
+        const key = source.kind + '|' + source.uri;
+        if (key === lastSourceKey && mode === 'video') {
+          applyClock();
+          return;
+        }
+        if (key === failedSourceKey && mode === 'iframe') return;
+        lastSourceKey = key;
+        destroyHls();
+        const onFail = () => {
+          failedSourceKey = key;
+          if (embedUrl) useIframe(embedUrl);
+          else {
+            showWaiting('Stream blocked in this browser — Open in Flick.');
+            roomErr.textContent = 'This CDN blocked the browser (CORS or Referer).';
+          }
+        };
+        video.onerror = onFail;
+        if (source.kind === 'hls' && window.Hls && Hls.isSupported()) {
+          hls = new Hls({ enableWorker: true });
+          hls.loadSource(source.uri);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            useVideo();
+            applyClock();
+          });
+          hls.on(Hls.Events.ERROR, (_e, data) => {
+            if (data && data.fatal) onFail();
+          });
+        } else if (source.kind === 'hls' && video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = source.uri;
+          useVideo();
+        } else {
+          video.src = source.uri;
+          useVideo();
+        }
+        video.onloadedmetadata = () => applyClock();
+      };
+
+      const loadSubtitles = async (sub) => {
+        if (!sub || !sub.url || mode === 'iframe') {
+          lastSubUrl = '';
+          cues = [];
+          cueEl.textContent = '';
+          subOffset = 0;
+          return;
+        }
+        subOffset = Number(sub.offsetSeconds) || 0;
+        if (sub.url === lastSubUrl) return;
+        lastSubUrl = sub.url;
+        cues = [];
+        cueEl.textContent = '';
+        const tryUrls = [sub.url, '/subtitle/' + room.code];
+        for (const href of tryUrls) {
+          try {
+            const res = await fetch(href);
+            if (!res.ok) continue;
+            const text = await res.text();
+            cues = parseSubtitleText(text);
+            return;
+          } catch {
+            // CORS or network — try the party-server caption fetch next
+          }
+        }
       };
 
       const render = () => {
@@ -131,8 +378,13 @@
           room.content?.mediaType === 'tv' && room.content.season != null
             ? ' · S' + room.content.season + ' E' + room.content.episode
             : '';
+        const t = mode === 'video' ? video.currentTime : predicted();
         statusEl.textContent =
-          (clock.paused ? 'Paused' : 'Playing') + ' · ' + fmt(predicted()) + ep;
+          (clock.paused ? 'Paused' : 'Playing') +
+          ' · ' +
+          fmt(t) +
+          ep +
+          (room.subtitles ? ' · ' + room.subtitles.display : '');
         membersEl.innerHTML = room.members
           .map(
             (m) =>
@@ -146,13 +398,13 @@
           )
           .join('');
         openApp.href = 'flick://party/' + room.code;
+        const dur = video.duration || 0;
+        fill.style.width = dur > 0 ? (100 * t) / dur + '%' : '0%';
+        tcur.textContent = fmt(t);
+        tdur.textContent = fmt(dur);
+        const cue = cueAt(t - subOffset);
+        cueEl.textContent = mode === 'video' && cue ? cue.text : '';
       };
-
-      const escapeHtml = (s) =>
-        String(s)
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;');
 
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = proto + '//' + location.host;
@@ -166,6 +418,8 @@
               type: 'join',
               code,
               displayName: name || 'Web',
+              // Companion so play/pause/seek still remote the host. Buffering
+              // events still fire in video mode so the host can wait.
               kind: 'companion',
             }),
           );
@@ -181,18 +435,47 @@
             clock = msg.room.clock;
             gate.hidden = true;
             roomEl.hidden = false;
+            loadSource(room.source, room.embedUrl);
+            void loadSubtitles(room.subtitles);
             render();
             return;
           }
           if (msg.type === 'state') {
             room = msg.room;
             clock = msg.room.clock;
+            loadSource(room.source, room.embedUrl);
             render();
             return;
           }
           if (msg.type === 'clock') {
             clock = msg.clock;
+            applyClock();
             render();
+            return;
+          }
+          if (msg.type === 'source') {
+            if (room) {
+              room.source = msg.source;
+              room.embedUrl = msg.embedUrl;
+            }
+            loadSource(msg.source, msg.embedUrl);
+            render();
+            return;
+          }
+          if (msg.type === 'subtitles') {
+            if (room) room.subtitles = msg.subtitles;
+            void loadSubtitles(msg.subtitles);
+            render();
+            return;
+          }
+          if (msg.type === 'episode') {
+            lastSourceKey = '';
+            failedSourceKey = '';
+            lastSubUrl = '';
+            cues = [];
+            cueEl.textContent = '';
+            destroyHls();
+            showWaiting('Host switched episode — waiting for stream…');
             return;
           }
           if (msg.type === 'chat') {
@@ -205,6 +488,7 @@
           }
           if (msg.type === 'ended') {
             roomErr.textContent = msg.reason || 'Room ended';
+            showWaiting(msg.reason || 'Room ended');
           }
         };
         ws.onerror = () => {
@@ -221,16 +505,19 @@
         connect(code, nameInput.value.trim());
       };
 
-      const send = (obj) => {
-        if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
-      };
-
       document.getElementById('play').onclick = () => send({ type: 'control', action: 'play' });
       document.getElementById('pause').onclick = () => send({ type: 'control', action: 'pause' });
       document.getElementById('back').onclick = () =>
         send({ type: 'control', action: 'seek', positionSeconds: Math.max(0, predicted() - 10) });
       document.getElementById('fwd').onclick = () =>
         send({ type: 'control', action: 'seek', positionSeconds: predicted() + 10 });
+      document.getElementById('scrub').onclick = (e) => {
+        const dur = video.duration || 0;
+        if (!dur) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+        send({ type: 'control', action: 'seek', positionSeconds: frac * dur });
+      };
       document.getElementById('send').onclick = () => {
         const text = document.getElementById('chatInput').value.trim();
         if (!text) return;
@@ -242,9 +529,13 @@
         location.href = '/';
       };
 
+      video.addEventListener('waiting', () => setBuffering(true));
+      video.addEventListener('playing', () => setBuffering(false));
+      video.addEventListener('canplay', () => setBuffering(false));
+
       setInterval(() => {
         if (room) render();
-      }, 1000);
+      }, 250);
     </script>
   </body>
 </html>

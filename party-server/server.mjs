@@ -19,11 +19,15 @@ const CODE_LENGTH = 5;
 const MAX_MEMBERS = 8;
 const IDLE_MS = 30 * 60 * 1000;
 const CHAT_MAX = 200;
+const URI_MAX = 2000;
+const SUBTITLE_MAX_BYTES = 1_500_000;
 
 /** @typedef {{ tmdbId: number, mediaType: 'movie'|'tv', title: string, posterPath?: string|null, season?: number, episode?: number }} PartyContent */
 /** @typedef {{ positionSeconds: number, paused: boolean, updatedAt: number }} PartyClock */
+/** @typedef {{ uri: string, kind: 'hls'|'file' }} PartySource */
+/** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
 /** @typedef {{ id: string, displayName: string, kind: 'player'|'companion', role: 'host'|'guest', buffering: boolean, ws: import('ws').WebSocket }} Member */
-/** @typedef {{ code: string, hostId: string, content: PartyContent, clock: PartyClock, members: Map<string, Member>, lastActive: number }} Room */
+/** @typedef {{ code: string, hostId: string, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, members: Map<string, Member>, lastActive: number }} Room */
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -50,6 +54,9 @@ const publicRoom = (room) => ({
   hostId: room.hostId,
   content: room.content,
   clock: room.clock,
+  source: room.source,
+  embedUrl: room.embedUrl,
+  subtitles: room.subtitles,
   members: [...room.members.values()].map((m) => ({
     id: m.id,
     displayName: m.displayName,
@@ -102,11 +109,88 @@ const applyHostClock = (room, patch) => {
   broadcast(room, { type: 'state', room: publicRoom(room) });
 };
 
+const isBlockedSubtitleHost = (hostname) => {
+  const host = hostname.toLowerCase();
+  return (
+    host === 'localhost' ||
+    host.endsWith('.local') ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '0.0.0.0' ||
+    host.startsWith('10.') ||
+    host.startsWith('192.168.') ||
+    host.startsWith('169.254.') ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  );
+};
+
+const serveSubtitle = async (code, res) => {
+  const room = rooms.get(String(code || '').toUpperCase());
+  const url = room?.subtitles?.url;
+  if (!url) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('No subtitles');
+    return;
+  }
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Bad subtitle URL');
+    return;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Bad subtitle URL');
+    return;
+  }
+  if (isBlockedSubtitleHost(parsed.hostname)) {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Bad subtitle URL');
+    return;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const upstream = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'text/plain, text/vtt, application/x-subrip, */*' },
+    });
+    clearTimeout(timer);
+    if (!upstream.ok) {
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Subtitle fetch failed');
+      return;
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (buf.length > SUBTITLE_MAX_BYTES) {
+      res.writeHead(413, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Subtitle too large');
+      return;
+    }
+    res.writeHead(200, {
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    res.end(buf);
+  } catch {
+    res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Subtitle fetch failed');
+  }
+};
+
 const serveStatic = (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   if (url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, rooms: rooms.size }));
+    return;
+  }
+
+  const subMatch = url.pathname.match(/^\/subtitle\/([A-Za-z0-9]+)\/?$/);
+  if (subMatch && req.method === 'GET') {
+    void serveSubtitle(subMatch[1], res);
     return;
   }
 
@@ -231,6 +315,9 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         episode: content.episode,
       },
       clock,
+      source: null,
+      embedUrl: null,
+      subtitles: null,
       members: new Map([[id, host]]),
       lastActive: Date.now(),
     };
@@ -304,11 +391,51 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         }
         room.content = { ...room.content, season, episode };
         room.clock = { positionSeconds: 0, paused: true, updatedAt: Date.now() };
+        room.source = null;
+        room.embedUrl = null;
+        room.subtitles = null;
         touch(room);
         broadcast(room, { type: 'episode', season, episode });
+        broadcast(room, { type: 'source', source: null, embedUrl: null });
+        broadcast(room, { type: 'subtitles', subtitles: null });
         broadcast(room, { type: 'clock', clock: room.clock });
         broadcast(room, { type: 'state', room: publicRoom(room) });
       }
+      return;
+    }
+    case 'source': {
+      if (!isHost(room, memberId)) throw new Error('Only the host can set the source');
+      const uri = String(msg.uri || '').slice(0, URI_MAX);
+      if (!uri) throw new Error('Missing source');
+      const kind = msg.kind === 'file' ? 'file' : 'hls';
+      const embedUrl = msg.embedUrl ? String(msg.embedUrl).slice(0, URI_MAX) : null;
+      room.source = { uri, kind };
+      room.embedUrl = embedUrl;
+      touch(room);
+      broadcast(room, { type: 'source', source: room.source, embedUrl: room.embedUrl });
+      broadcast(room, { type: 'state', room: publicRoom(room) });
+      return;
+    }
+    case 'subtitles': {
+      if (!isHost(room, memberId)) throw new Error('Only the host can set subtitles');
+      if (msg.subtitles == null) {
+        room.subtitles = null;
+      } else {
+        const url = String(msg.subtitles.url || '').slice(0, URI_MAX);
+        if (!url) {
+          room.subtitles = null;
+        } else {
+          room.subtitles = {
+            url,
+            language: String(msg.subtitles.language || '').slice(0, 16),
+            display: String(msg.subtitles.display || 'Subtitles').slice(0, 80),
+            offsetSeconds: Number(msg.subtitles.offsetSeconds) || 0,
+          };
+        }
+      }
+      touch(room);
+      broadcast(room, { type: 'subtitles', subtitles: room.subtitles });
+      broadcast(room, { type: 'state', room: publicRoom(room) });
       return;
     }
     case 'buffering': {
