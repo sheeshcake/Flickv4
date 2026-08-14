@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flick Watch Party</title>
+    <style>
+      :root {
+        --bg: #000;
+        --card: #141414;
+        --fg: #fff;
+        --muted: #a3a3a3;
+        --primary: #e50914;
+        --border: #262626;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+      body { display: flex; justify-content: center; padding: 24px 16px 48px; }
+      .wrap { width: 100%; max-width: 420px; }
+      h1 { font-size: 28px; margin: 0 0 8px; }
+      p { color: var(--muted); margin: 0 0 20px; line-height: 1.45; }
+      label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+      input, button, textarea {
+        width: 100%; border-radius: 8px; border: 1px solid var(--border); background: #0a0a0a;
+        color: var(--fg); font: inherit; padding: 12px 14px;
+      }
+      input { letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; }
+      textarea { min-height: 64px; resize: vertical; letter-spacing: 0; font-weight: 400; }
+      button {
+        background: var(--primary); border-color: var(--primary); font-weight: 700; cursor: pointer;
+      }
+      button.ghost { background: transparent; color: var(--fg); margin-top: 8px; }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      .row { display: flex; gap: 8px; margin-top: 10px; }
+      .row button { flex: 1; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; margin-top: 16px; }
+      .code { font-size: 32px; letter-spacing: 0.28em; font-weight: 800; text-align: center; margin: 8px 0 16px; }
+      .title { font-weight: 700; margin-bottom: 4px; }
+      .status { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+      .members { list-style: none; padding: 0; margin: 0 0 12px; }
+      .members li { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+      .tag { color: var(--muted); font-size: 12px; }
+      .chat { max-height: 180px; overflow: auto; font-size: 14px; margin-bottom: 8px; }
+      .chat div { margin: 4px 0; }
+      .err { color: #f87171; font-size: 14px; margin-top: 10px; }
+      a.open {
+        display: block; text-align: center; margin-top: 12px; color: var(--fg); text-decoration: none;
+        border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Flick Watch Party</h1>
+      <p>This page is a lobby and remote. The movie plays in the Flick app on each phone or TV — not here.</p>
+
+      <div id="gate">
+        <label for="code">Room code</label>
+        <input id="code" maxlength="6" autocomplete="off" placeholder="AB12C" />
+        <label for="name" style="margin-top:12px">Your name</label>
+        <input id="name" maxlength="32" placeholder="Alex" style="letter-spacing:0;text-transform:none;font-weight:600" />
+        <button id="join" style="margin-top:14px">Join room</button>
+        <div class="err" id="gateErr"></div>
+      </div>
+
+      <div id="room" hidden>
+        <div class="code" id="roomCode"></div>
+        <div class="card">
+          <div class="title" id="title">—</div>
+          <div class="status" id="status">Connecting…</div>
+          <ul class="members" id="members"></ul>
+          <div class="row">
+            <button id="play">Play</button>
+            <button id="pause">Pause</button>
+          </div>
+          <div class="row">
+            <button id="back" class="ghost">−10s</button>
+            <button id="fwd" class="ghost">+10s</button>
+          </div>
+          <a class="open" id="openApp" href="#">Open in Flick</a>
+        </div>
+        <div class="card">
+          <div class="title">Chat</div>
+          <div class="chat" id="chat"></div>
+          <textarea id="chatInput" maxlength="200" placeholder="Say something"></textarea>
+          <button id="send" style="margin-top:8px">Send</button>
+        </div>
+        <button class="ghost" id="leave">Leave</button>
+        <div class="err" id="roomErr"></div>
+      </div>
+    </div>
+    <script>
+      const gate = document.getElementById('gate');
+      const roomEl = document.getElementById('room');
+      const codeInput = document.getElementById('code');
+      const nameInput = document.getElementById('name');
+      const gateErr = document.getElementById('gateErr');
+      const roomErr = document.getElementById('roomErr');
+      const membersEl = document.getElementById('members');
+      const chatEl = document.getElementById('chat');
+      const titleEl = document.getElementById('title');
+      const statusEl = document.getElementById('status');
+      const roomCodeEl = document.getElementById('roomCode');
+      const openApp = document.getElementById('openApp');
+
+      const pathCode = (location.pathname.match(/\/p\/([A-Za-z0-9]+)/i) || [])[1];
+      if (pathCode) codeInput.value = pathCode.toUpperCase();
+
+      let ws;
+      let room;
+      let clock = { positionSeconds: 0, paused: true, updatedAt: Date.now() };
+
+      const predicted = () => {
+        if (!clock) return 0;
+        if (clock.paused) return clock.positionSeconds;
+        return clock.positionSeconds + Math.max(0, (Date.now() - clock.updatedAt) / 1000);
+      };
+
+      const fmt = (s) => {
+        s = Math.max(0, Math.floor(s));
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return m + ':' + String(r).padStart(2, '0');
+      };
+
+      const render = () => {
+        if (!room) return;
+        roomCodeEl.textContent = room.code;
+        titleEl.textContent = room.content?.title || 'Watch party';
+        const ep =
+          room.content?.mediaType === 'tv' && room.content.season != null
+            ? ' · S' + room.content.season + ' E' + room.content.episode
+            : '';
+        statusEl.textContent =
+          (clock.paused ? 'Paused' : 'Playing') + ' · ' + fmt(predicted()) + ep;
+        membersEl.innerHTML = room.members
+          .map(
+            (m) =>
+              '<li><span>' +
+              escapeHtml(m.displayName) +
+              '</span><span class="tag">' +
+              m.role +
+              (m.kind === 'companion' ? ' · web' : '') +
+              (m.buffering ? ' · buffering' : '') +
+              '</span></li>',
+          )
+          .join('');
+        openApp.href = 'flick://party/' + room.code;
+      };
+
+      const escapeHtml = (s) =>
+        String(s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = proto + '//' + location.host;
+
+      const connect = (code, name) => {
+        gateErr.textContent = '';
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          ws.send(
+            JSON.stringify({
+              type: 'join',
+              code,
+              displayName: name || 'Web',
+              kind: 'companion',
+            }),
+          );
+        };
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'error') {
+            (room ? roomErr : gateErr).textContent = msg.message;
+            return;
+          }
+          if (msg.type === 'joined') {
+            room = msg.room;
+            clock = msg.room.clock;
+            gate.hidden = true;
+            roomEl.hidden = false;
+            render();
+            return;
+          }
+          if (msg.type === 'state') {
+            room = msg.room;
+            clock = msg.room.clock;
+            render();
+            return;
+          }
+          if (msg.type === 'clock') {
+            clock = msg.clock;
+            render();
+            return;
+          }
+          if (msg.type === 'chat') {
+            const line = document.createElement('div');
+            line.innerHTML =
+              '<strong>' + escapeHtml(msg.from) + '</strong> ' + escapeHtml(msg.text);
+            chatEl.appendChild(line);
+            chatEl.scrollTop = chatEl.scrollHeight;
+            return;
+          }
+          if (msg.type === 'ended') {
+            roomErr.textContent = msg.reason || 'Room ended';
+          }
+        };
+        ws.onerror = () => {
+          gateErr.textContent = 'Could not connect to the party server.';
+        };
+      };
+
+      document.getElementById('join').onclick = () => {
+        const code = codeInput.value.trim().toUpperCase();
+        if (code.length < 4) {
+          gateErr.textContent = 'Enter a room code from Flick.';
+          return;
+        }
+        connect(code, nameInput.value.trim());
+      };
+
+      const send = (obj) => {
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+      };
+
+      document.getElementById('play').onclick = () => send({ type: 'control', action: 'play' });
+      document.getElementById('pause').onclick = () => send({ type: 'control', action: 'pause' });
+      document.getElementById('back').onclick = () =>
+        send({ type: 'control', action: 'seek', positionSeconds: Math.max(0, predicted() - 10) });
+      document.getElementById('fwd').onclick = () =>
+        send({ type: 'control', action: 'seek', positionSeconds: predicted() + 10 });
+      document.getElementById('send').onclick = () => {
+        const text = document.getElementById('chatInput').value.trim();
+        if (!text) return;
+        send({ type: 'chat', text });
+        document.getElementById('chatInput').value = '';
+      };
+      document.getElementById('leave').onclick = () => {
+        send({ type: 'leave' });
+        location.href = '/';
+      };
+
+      setInterval(() => {
+        if (room) render();
+      }, 1000);
+    </script>
+  </body>
+</html>

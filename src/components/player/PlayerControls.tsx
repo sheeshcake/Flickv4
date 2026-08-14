@@ -49,6 +49,10 @@ interface PlayerControlsProps {
   settingsActive?: boolean;
   /** When provided, shows a Picture-in-Picture button. */
   onEnterPip?: () => void;
+  /** Watch-party room code shown as a chip (not a fifth settings icon). */
+  partyCode?: string;
+  partyLocked?: boolean;
+  onOpenParty?: () => void;
   /** Session volume 0..1. */
   volume: number;
   onVolumeChange: (value: number) => void;
@@ -102,6 +106,9 @@ export const PlayerControls = ({
   onVolumeChange,
   brightness,
   onBrightnessChange,
+  partyCode,
+  partyLocked,
+  onOpenParty,
 }: PlayerControlsProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
   const showBrightness =
@@ -131,9 +138,26 @@ export const PlayerControls = ({
           {!!subtitle && (
             <Text size="xs" className="text-muted-foreground">
               {subtitle}
+              {partyLocked ? ' · Following host' : ''}
+            </Text>
+          )}
+          {partyLocked && !subtitle && (
+            <Text size="xs" className="text-muted-foreground">
+              Following host
             </Text>
           )}
         </VStack>
+        {onOpenParty && partyCode && (
+          <Focusable
+            onPress={onOpenParty}
+            className="rounded-full bg-primary px-3 py-1"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <Text size="xs" bold className="text-primary-foreground">
+              {partyCode}
+            </Text>
+          </Focusable>
+        )}
         {onOpenEpisodes && (
           <Focusable
             onPress={onOpenEpisodes}

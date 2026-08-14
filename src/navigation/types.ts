@@ -15,6 +15,7 @@ export type RootStackParamList = {
   Disclaimer: undefined;
   Credits: undefined;
   FinishedMovies: undefined;
+  JoinParty: { code?: string };
   Player: {
     item: MediaItem;
     title: string;

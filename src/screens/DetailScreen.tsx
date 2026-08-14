@@ -27,6 +27,7 @@ import {
   Plus,
   RefreshCw,
   Share2,
+  Users,
   Volume2,
   VolumeX,
 } from 'lucide-react-native';
@@ -79,6 +80,9 @@ import {
   type TVShowDetails,
   type VideoResult,
 } from '@/src/types';
+import { PartyLobbyModal } from '@/src/components/party/PartyLobbyModal';
+import { partyContentFromItem } from '@/src/party/content';
+import { useWatchParty } from '@/src/hooks/useWatchParty';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 
 const AnimatedBox = Animated.createAnimatedComponent(Box);
@@ -114,6 +118,8 @@ export const DetailScreen = ({
   const { enqueue, getJobFor, resume, remove, pause } = useDownloads();
   const { settings: subtitleSettings } = useSubtitleSettings();
 
+  const { enabled: partyEnabled } = useWatchParty();
+  const [partyOpen, setPartyOpen] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   // TV has no "Trailers & More" tab (see DetailScreenTV), so a TV movie
   // defaults straight to "More Like This" instead of a tab that doesn't
@@ -526,6 +532,7 @@ export const DetailScreen = ({
 
   if (deviceKind === 'tv') {
     return (
+      <>
       <DetailScreenTV
         item={item}
         movie={movie}
@@ -541,6 +548,7 @@ export const DetailScreen = ({
         onBack={() => navigation.goBack()}
         onPlay={play}
         onShare={onShare}
+        onStartParty={partyEnabled && !coming.comingSoon ? () => setPartyOpen(true) : undefined}
         isInList={isInList}
         onToggleList={toggle}
         movieJob={movieJob}
@@ -570,6 +578,32 @@ export const DetailScreen = ({
         qualitySheet={qualitySheet}
         onCloseQualitySheet={() => setQualitySheet(null)}
       />
+      <PartyLobbyModal
+        visible={partyOpen}
+        content={
+          partyOpen
+            ? partyContentFromItem(
+                item,
+                movie ? undefined : selectedSeason ?? undefined,
+                movie ? undefined : firstEpisode?.episode_number,
+              )
+            : null
+        }
+        onPlayTogether={() => {
+          setPartyOpen(false);
+          play(
+            !movie && selectedSeason != null && firstEpisode
+              ? {
+                  season: selectedSeason,
+                  episode: firstEpisode.episode_number,
+                  label: `${getTitle(item)} — ${firstEpisode.name}`,
+                }
+              : undefined,
+          );
+        }}
+        onClose={() => setPartyOpen(false)}
+      />
+    </>
     );
   }
 
@@ -749,6 +783,13 @@ export const DetailScreen = ({
               onPress={() => toggle(item)}
             />
             <ActionIcon icon={Share2} label="Share" onPress={onShare} />
+            {partyEnabled && !coming.comingSoon && (
+              <ActionIcon
+                icon={Users}
+                label="Watch party"
+                onPress={() => setPartyOpen(true)}
+              />
+            )}
           </HStack>
         </VStack>
 
@@ -904,6 +945,31 @@ export const DetailScreen = ({
         visible={castSheetOpen}
         cast={cast}
         onClose={() => setCastSheetOpen(false)}
+      />
+      <PartyLobbyModal
+        visible={partyOpen}
+        content={
+          partyOpen
+            ? partyContentFromItem(
+                item,
+                movie ? undefined : selectedSeason ?? undefined,
+                movie ? undefined : firstEpisode?.episode_number,
+              )
+            : null
+        }
+        onPlayTogether={() => {
+          setPartyOpen(false);
+          play(
+            !movie && selectedSeason != null && firstEpisode
+              ? {
+                  season: selectedSeason,
+                  episode: firstEpisode.episode_number,
+                  label: `${getTitle(item)} — ${firstEpisode.name}`,
+                }
+              : undefined,
+          );
+        }}
+        onClose={() => setPartyOpen(false)}
       />
     </Box>
   );

@@ -14,6 +14,7 @@ import {
   MonitorPlay,
   Ratio,
   Server as ServerIcon,
+  Users,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { VStack } from '@/components/ui/vstack';
@@ -73,6 +74,12 @@ export const SettingsScreen = () => {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
       >
         <VStack space="sm" className="px-4">
+          <MenuRow
+            icon={Users}
+            label="Join watch party"
+            value="Enter a room code"
+            onPress={() => navigation.navigate('JoinParty', {})}
+          />
           <MenuRow
             icon={ServerIcon}
             label="Playback server"

@@ -22,6 +22,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
 import { PlayerControls } from '@/src/components/player/PlayerControls';
 import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer';
+import { PlayerPartyDrawer } from '@/src/components/party/PlayerPartyDrawer';
 import {
   PlayerSettingsDrawer,
   type PlaybackSpeed,
@@ -37,6 +38,8 @@ import {
 import { useControlsVisibility } from '@/src/components/player/useControlsVisibility';
 import { useTVRemote } from '@/src/components/player/useTVRemote';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
+import { useWatchParty } from '@/src/hooks/useWatchParty';
+import { predictedHostTime } from '@/src/party/protocol';
 import {
   UP_NEXT_LEAD_SECONDS,
   useNextEpisode,
@@ -138,6 +141,16 @@ export const PlayerCore = ({
   const isFocused = useIsFocused();
   const { servers, activeServer } = useServers();
   const { upsert, advanceEpisode } = useContinueWatching();
+  const {
+    role: partyRole,
+    room: partyRoom,
+    memberId: partyMemberId,
+    send: sendParty,
+    subscribe: subscribeParty,
+    leaveRoom,
+  } = useWatchParty();
+  const [partyOpen, setPartyOpen] = useState(false);
+  const waitingForGuestsRef = useRef(false);
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
   // Set right before autoplay hands off to the next episode. Guards the
@@ -445,7 +458,7 @@ export const PlayerCore = ({
   // Player state (mirrors what expo-video's `useEvent`/`player.*` used to
   // expose, now derived from react-native-video's declarative props/events).
   // -------------------------------------------------------------------------
-  const [paused, setPaused] = useState(false);
+  const [paused, setPaused] = useState(partyRole === 'guest');
   const pausedRef = useRef(false);
   useEffect(() => {
     pausedRef.current = paused;
@@ -783,23 +796,105 @@ export const PlayerCore = ({
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
-    setPaused((p) => !p);
+    if (partyRole === 'guest') return;
+    setPaused((p) => {
+      const next = !p;
+      if (partyRole === 'host') {
+        sendParty({ type: next ? 'pause' : 'play' });
+      }
+      return next;
+    });
     show();
-  }, [show]);
+  }, [show, partyRole, sendParty]);
 
   const seekBy = useCallback(
     (seconds: number) => {
-      videoRef.current?.seek(currentTimeRef.current + seconds);
+      if (partyRole === 'guest') return;
+      const next = Math.max(0, currentTimeRef.current + seconds);
+      videoRef.current?.seek(next);
+      if (partyRole === 'host') {
+        sendParty({ type: 'seek', positionSeconds: next });
+      }
       show();
     },
-    [show],
+    [show, partyRole, sendParty],
   );
 
   const seekToFraction = useCallback(
     (value: number) => {
-      if (duration > 0) videoRef.current?.seek(value * duration);
+      if (partyRole === 'guest') return;
+      if (duration > 0) {
+        const next = value * duration;
+        videoRef.current?.seek(next);
+        if (partyRole === 'host') {
+          sendParty({ type: 'seek', positionSeconds: next });
+        }
+      }
     },
-    [duration],
+    [duration, partyRole, sendParty],
+  );
+
+  useEffect(() => {
+    if (partyRole !== 'host') return;
+    const id = setInterval(() => {
+      sendParty({
+        type: 'heartbeat',
+        positionSeconds: currentTimeRef.current,
+        paused: pausedRef.current,
+      });
+    }, 2000);
+    return () => clearInterval(id);
+  }, [partyRole, sendParty]);
+
+  useEffect(() => {
+    return subscribeParty((msg) => {
+      if (msg.type === 'clock' && partyRole === 'guest') {
+        setPaused(msg.clock.paused);
+        const target = predictedHostTime(msg.clock);
+        if (Math.abs(currentTimeRef.current - target) > 1.5) {
+          videoRef.current?.seek(target);
+        }
+      }
+      if (msg.type === 'control' && partyRole === 'host') {
+        if (msg.action === 'play') {
+          setPaused(false);
+          sendParty({ type: 'play' });
+        } else if (msg.action === 'pause') {
+          setPaused(true);
+          sendParty({ type: 'pause' });
+        } else if (msg.action === 'seek' && msg.positionSeconds != null) {
+          videoRef.current?.seek(msg.positionSeconds);
+          sendParty({ type: 'seek', positionSeconds: msg.positionSeconds });
+        }
+      }
+    });
+  }, [subscribeParty, partyRole, sendParty]);
+
+  useEffect(() => {
+    if (partyRole !== 'host' || !partyRoom) return;
+    const waiting = partyRoom.members.some(
+      (m) =>
+        m.kind === 'player' &&
+        m.buffering &&
+        m.id !== partyMemberId,
+    );
+    if (waiting && !pausedRef.current) {
+      waitingForGuestsRef.current = true;
+      setPaused(true);
+      sendParty({ type: 'pause' });
+    } else if (!waiting && waitingForGuestsRef.current) {
+      waitingForGuestsRef.current = false;
+      setPaused(false);
+      sendParty({ type: 'play' });
+    }
+  }, [partyRole, partyRoom, partyMemberId, sendParty]);
+
+  const onBuffer = useCallback(
+    (e: { isBuffering?: boolean }) => {
+      if (!partyRole) return;
+      sendParty({ type: 'buffering', buffering: !!e.isBuffering });
+    },
+    [partyRole, sendParty],
   );
 
   // On Android TV, `TVEventHandler`'s raw remote-event feed and the native
@@ -813,7 +908,7 @@ export const PlayerCore = ({
   // Select/Left/Right/Up/Down uncontested. The Up Next card and the
   // series-end state get the same treatment for the same reason.
   const overlayOpen =
-    settingsOpen || episodesOpen || showUpNext || seriesEnded;
+    settingsOpen || episodesOpen || partyOpen || showUpNext || seriesEnded;
 
   useTVRemote({
     // The hidden-state fallback `Pressable` (focusable, hasTVPreferredFocus,
@@ -897,6 +992,7 @@ export const PlayerCore = ({
           onError={onError}
           onEnd={onEnd}
           onProgress={onProgress}
+          onBuffer={onBuffer}
           onPictureInPictureStatusChanged={onPipStatusChanged}
         />
       )}
@@ -990,6 +1086,16 @@ export const PlayerCore = ({
               brightness != null ? handleBrightnessChange : undefined
             }
             onEnterPip={pipSupported ? enterPip : undefined}
+            partyCode={partyRoom?.code}
+            partyLocked={partyRole === 'guest'}
+            onOpenParty={
+              partyRoom
+                ? () => {
+                    setPartyOpen(true);
+                    show();
+                  }
+                : undefined
+            }
           />
         ) : (
           // TV: keep a focusable owner mounted while controls are hidden.
@@ -1039,6 +1145,20 @@ export const PlayerCore = ({
             onSelectEpisode(s, ep);
           }}
           onClose={() => setEpisodesOpen(false)}
+        />
+      )}
+
+      {partyRoom && partyRole && (
+        <PlayerPartyDrawer
+          visible={partyOpen}
+          room={partyRoom}
+          role={partyRole}
+          onLeave={() => {
+            setPartyOpen(false);
+            leaveRoom();
+            onBack();
+          }}
+          onClose={() => setPartyOpen(false)}
         />
       )}
     </Box>

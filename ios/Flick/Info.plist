@@ -27,6 +27,7 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>flick</string>
 				<string>com.wfrdee.flick</string>
 			</array>
 		</dict>
