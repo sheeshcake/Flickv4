@@ -886,7 +886,8 @@ export const PlayerCore = ({
   useEffect(() => {
     if (partyRole !== 'host' || !partyRoom) return;
     const waiting = partyRoom.members.some(
-      (m) => m.buffering && m.id !== partyMemberId,
+      (m) =>
+        m.buffering && m.id !== partyMemberId && m.kind !== 'companion',
     );
     if (waiting && !pausedRef.current) {
       waitingForGuestsRef.current = true;

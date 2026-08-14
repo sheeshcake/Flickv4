@@ -53,6 +53,7 @@ export const WatchPlayer = () => {
   const lastSubUrl = useRef('');
   const roomRef = useRef<PartyRoom | null>(null);
   const clockRef = useRef(clock);
+  const seekingRef = useRef(false);
 
   const overlay = useOverlayVisibility(!clock.paused, membersOpen || chatOpen);
 
@@ -86,19 +87,46 @@ export const WatchPlayer = () => {
     [send],
   );
 
+  const playFollowingHost = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || clockRef.current.paused) return;
+    if (!video.paused) return;
+    try {
+      video.muted = true;
+      await video.play();
+      video.muted = false;
+    } catch {
+      try {
+        video.muted = true;
+        await video.play();
+      } catch {
+        // Next clock tick or tap retries.
+      }
+    }
+  }, []);
+
   const applyClock = useCallback(() => {
     const video = videoRef.current;
     if (modeRef.current !== 'video' || !video) return;
     const target = predicted();
     if (clockRef.current.paused) {
       if (!video.paused) video.pause();
-    } else if (video.paused) {
-      void video.play().catch(() => {});
+    } else if (!seekingRef.current) {
+      void playFollowingHost();
     }
-    if (Number.isFinite(video.currentTime) && Math.abs(video.currentTime - target) > 1.5) {
+    if (
+      !seekingRef.current &&
+      Number.isFinite(video.currentTime) &&
+      Number.isFinite(target) &&
+      Math.abs(video.currentTime - target) > 1.5
+    ) {
+      seekingRef.current = true;
       video.currentTime = target;
+      window.setTimeout(() => {
+        seekingRef.current = false;
+      }, 2500);
     }
-  }, [predicted]);
+  }, [playFollowingHost, predicted]);
 
   const loadSource = useCallback(
     (source: PartySource | null | undefined, embedUrl: string | null | undefined) => {
@@ -149,6 +177,7 @@ export const WatchPlayer = () => {
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setMode('video');
+          modeRef.current = 'video';
           applyClock();
         });
         hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -157,6 +186,7 @@ export const WatchPlayer = () => {
       } else {
         video.src = playUrl;
         setMode('video');
+        modeRef.current = 'video';
       }
       video.onloadedmetadata = () => {
         setDuration(video.duration || 0);
@@ -295,10 +325,11 @@ export const WatchPlayer = () => {
       if (video && modeRef.current === 'video') {
         setVideoTime(video.currentTime || 0);
         setDuration(video.duration || 0);
+        applyClock();
       }
     }, 250);
     return () => window.clearInterval(id);
-  }, []);
+  }, [applyClock]);
 
   useEffect(() => {
     const onFs = () => {
@@ -403,9 +434,14 @@ export const WatchPlayer = () => {
           ref={videoRef}
           className={mode === 'video' ? 'absolute inset-0 h-full w-full bg-black' : 'hidden'}
           playsInline
-          onWaiting={() => send({ type: 'buffering', buffering: true })}
-          onPlaying={() => send({ type: 'buffering', buffering: false })}
-          onCanPlay={() => send({ type: 'buffering', buffering: false })}
+          onSeeked={() => {
+            seekingRef.current = false;
+            if (!clockRef.current.paused) void playFollowingHost();
+          }}
+          onPlaying={() => {
+            const video = videoRef.current;
+            if (video) video.muted = false;
+          }}
         />
         {mode === 'iframe' && iframeUrl ? (
           <iframe
