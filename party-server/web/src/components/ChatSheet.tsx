@@ -20,9 +20,10 @@ interface ChatSheetProps {
   onOpenChange: (open: boolean) => void;
   chat: ChatLine[];
   onSend: (text: string) => void;
+  container?: HTMLElement | null;
 }
 
-export const ChatSheet = ({ open, onOpenChange, chat, onSend }: ChatSheetProps) => {
+export const ChatSheet = ({ open, onOpenChange, chat, onSend, container }: ChatSheetProps) => {
   const [text, setText] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -32,7 +33,7 @@ export const ChatSheet = ({ open, onOpenChange, chat, onSend }: ChatSheetProps) 
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent>
+      <SheetContent container={container}>
         <SheetHeader>
           <SheetTitle>Chat</SheetTitle>
           <SheetDescription>Messages stay in this room.</SheetDescription>

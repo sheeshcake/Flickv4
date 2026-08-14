@@ -14,7 +14,7 @@ function SheetOverlay({
 }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
     <DialogPrimitive.Overlay
-      className={cn('fixed inset-0 z-50 bg-black/70', className)}
+      className={cn('absolute inset-0 z-50 bg-black/70', className)}
       {...props}
     />
   );
@@ -23,14 +23,17 @@ function SheetOverlay({
 function SheetContent({
   className,
   children,
+  container,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content>) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  container?: HTMLElement | null;
+}) {
   return (
-    <SheetPortal>
+    <SheetPortal container={container ?? undefined}>
       <SheetOverlay />
       <DialogPrimitive.Content
         className={cn(
-          'fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-card p-6 shadow-lg',
+          'absolute inset-y-0 right-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-card p-6 shadow-lg',
           className,
         )}
         {...props}

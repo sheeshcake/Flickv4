@@ -46,6 +46,7 @@ export const WatchPlayer = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const [sheetHost, setSheetHost] = useState<HTMLElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const modeRef = useRef<Mode>('none');
   const lastSourceKey = useRef('');
@@ -60,6 +61,11 @@ export const WatchPlayer = () => {
   roomRef.current = room;
   clockRef.current = clock;
   modeRef.current = mode;
+
+  const setStage = useCallback((el: HTMLDivElement | null) => {
+    stageRef.current = el;
+    setSheetHost(el);
+  }, []);
 
   const send = useCallback((obj: Record<string, unknown>) => {
     const ws = wsRef.current;
@@ -422,7 +428,7 @@ export const WatchPlayer = () => {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <div
-        ref={stageRef}
+        ref={setStage}
         className="relative mx-auto aspect-video w-full max-w-[1400px] overflow-hidden bg-black md:mt-0 md:h-screen md:max-w-none md:aspect-auto"
       >
         {mode === 'none' ? (
@@ -502,26 +508,28 @@ export const WatchPlayer = () => {
           onToggleFullscreen={toggleFullscreen}
         />
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />
+        <MembersSheet
+          open={membersOpen}
+          onOpenChange={setMembersOpen}
+          container={sheetHost}
+          code={room.code}
+          members={room.members}
+          onLeave={() => {
+            send({ type: 'leave' });
+            location.href = '/';
+          }}
+        />
+        <ChatSheet
+          open={chatOpen}
+          onOpenChange={setChatOpen}
+          container={sheetHost}
+          chat={chat}
+          onSend={(text) => send({ type: 'chat', text })}
+        />
       </div>
       {roomError ? (
         <p className="px-4 py-2 text-sm text-destructive">{roomError}</p>
       ) : null}
-      <MembersSheet
-        open={membersOpen}
-        onOpenChange={setMembersOpen}
-        code={room.code}
-        members={room.members}
-        onLeave={() => {
-          send({ type: 'leave' });
-          location.href = '/';
-        }}
-      />
-      <ChatSheet
-        open={chatOpen}
-        onOpenChange={setChatOpen}
-        chat={chat}
-        onSend={(text) => send({ type: 'chat', text })}
-      />
     </div>
   );
 };
