@@ -651,7 +651,9 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
             url,
             language: String(msg.subtitles.language || '').slice(0, 16),
             display: String(msg.subtitles.display || 'Subtitles').slice(0, 80),
-            offsetSeconds: Number(msg.subtitles.offsetSeconds) || 0,
+            offsetSeconds: Number.isFinite(Number(msg.subtitles.offsetSeconds))
+              ? Number(msg.subtitles.offsetSeconds)
+              : 0,
           };
         }
       }
