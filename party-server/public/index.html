@@ -297,8 +297,11 @@
         }
       };
 
+      const mediaUrl = (uri) =>
+        '/media/' + room.code + '?u=' + encodeURIComponent(uri);
+
       const loadSource = (source, embedUrl) => {
-        if (!source || !source.uri) {
+        if (!source || !source.uri || !room) {
           lastSourceKey = '';
           failedSourceKey = '';
           destroyHls();
@@ -318,15 +321,16 @@
           if (embedUrl) useIframe(embedUrl);
           else {
             showWaiting('Stream blocked in this browser — Open in Flick.');
-            roomErr.textContent = 'This CDN blocked the browser (CORS or Referer).';
+            roomErr.textContent = 'This CDN blocked the proxy (Referer still 403, or IP-locked).';
           }
         };
+        const playUrl = mediaUrl(source.uri);
         video.onerror = onFail;
         const isHls =
           source.kind === 'hls' || /\.m3u8(\?|#|$)/i.test(source.uri);
         if (isHls && window.Hls && Hls.isSupported()) {
           hls = new Hls({ enableWorker: true });
-          hls.loadSource(source.uri);
+          hls.loadSource(playUrl);
           hls.attachMedia(video);
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             useVideo();
@@ -336,10 +340,10 @@
             if (data && data.fatal) onFail();
           });
         } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = source.uri;
+          video.src = playUrl;
           useVideo();
         } else {
-          video.src = source.uri;
+          video.src = playUrl;
           useVideo();
         }
         video.onloadedmetadata = () => applyClock();

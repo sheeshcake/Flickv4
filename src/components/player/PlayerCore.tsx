@@ -57,6 +57,7 @@ import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
 import { useVideoQuality } from '@/src/hooks/useVideoQuality';
 import { File } from 'expo-file-system';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
+import { originOf } from '@/src/utils/streamUrl';
 import { writeNativeVttCache } from '@/src/utils/nativeSubtitleCache';
 import { WyzieService } from '@/src/services/WyzieService';
 import type { LocalDownloadedSubtitle } from '@/src/services/DownloadService';
@@ -354,8 +355,10 @@ export const PlayerCore = ({
       type: 'source',
       uri: uri.slice(0, PARTY_URI_MAX),
       kind: partySourceKind(uri),
+      referer: `${activeServer.url}/`.slice(0, PARTY_URI_MAX),
+      origin: originOf(activeServer.url).slice(0, PARTY_URI_MAX),
     });
-  }, [partyRole, selectedVariantUri, masterUri, sendParty]);
+  }, [partyRole, selectedVariantUri, masterUri, sendParty, activeServer.url]);
 
   useEffect(() => {
     if (partyRole !== 'host') return;

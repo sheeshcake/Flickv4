@@ -1,7 +1,8 @@
 /**
  * Watch-party wire protocol. Keep in sync with `party-server/server.mjs`.
  * Rooms carry content identity, a host clock, and optional host-published
- * stream/subtitle URLs (JSON only — the server never fetches video).
+ * stream/subtitle URLs. The party server may fetch stream bytes for the
+ * web player using the host’s Referer/Origin (browsers cannot set Referer).
  */
 
 /** Stream URLs (signed m3u8s) are often far longer than a typical page link. */
@@ -48,6 +49,10 @@ export interface PartyMember {
 export interface PartySource {
   uri: string;
   kind: 'hls' | 'file';
+  /** Playback-server Referer the native player sends (web proxy only). */
+  referer?: string;
+  /** Playback-server Origin the native player sends (web proxy only). */
+  origin?: string;
 }
 
 export interface PartySubtitles {
@@ -82,6 +87,8 @@ export type ClientMessage =
       uri: string;
       kind: 'hls' | 'file';
       embedUrl?: string;
+      referer?: string;
+      origin?: string;
     }
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'control'; action: 'play' | 'pause' | 'seek'; positionSeconds?: number }

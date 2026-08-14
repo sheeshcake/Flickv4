@@ -152,6 +152,8 @@ export const PlayerScreen = ({
         type: 'source',
         uri: url.slice(0, PARTY_URI_MAX),
         kind: partySourceKind(url),
+        referer: `${activeServer.url}/`.slice(0, PARTY_URI_MAX),
+        origin: originOf(activeServer.url).slice(0, PARTY_URI_MAX),
         embedUrl: buildEmbedUrl(activeServer, {
           type,
           tmdbId: item.id,

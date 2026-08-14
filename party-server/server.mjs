@@ -1,12 +1,14 @@
 /**
  * Flick watch-party room server.
- * Syncs TMDB identity + a host playback clock. Never proxies video.
+ * Syncs TMDB identity + a host playback clock. Relays stream bytes for the
+ * web player with the host’s Referer/Origin (browsers cannot set Referer).
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
@@ -21,13 +23,18 @@ const IDLE_MS = 30 * 60 * 1000;
 const CHAT_MAX = 200;
 const URI_MAX = 8192;
 const SUBTITLE_MAX_BYTES = 1_500_000;
+const PLAYLIST_MAX_BYTES = 2_000_000;
+const MEDIA_PLAYLIST_TIMEOUT_MS = 20_000;
+const MEDIA_SEGMENT_TIMEOUT_MS = 45_000;
+const MEDIA_UA =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
 /** @typedef {{ tmdbId: number, mediaType: 'movie'|'tv', title: string, posterPath?: string|null, season?: number, episode?: number }} PartyContent */
 /** @typedef {{ positionSeconds: number, paused: boolean, updatedAt: number }} PartyClock */
-/** @typedef {{ uri: string, kind: 'hls'|'file' }} PartySource */
+/** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string }} PartySource */
 /** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
 /** @typedef {{ id: string, displayName: string, kind: 'player'|'companion', role: 'host'|'guest', buffering: boolean, ws: import('ws').WebSocket }} Member */
-/** @typedef {{ code: string, hostId: string, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, members: Map<string, Member>, lastActive: number }} Room */
+/** @typedef {{ code: string, hostId: string, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, mediaAllowedHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -109,7 +116,7 @@ const applyHostClock = (room, patch) => {
   broadcast(room, { type: 'state', room: publicRoom(room) });
 };
 
-const isBlockedSubtitleHost = (hostname) => {
+const isBlockedPrivateHost = (hostname) => {
   const host = hostname.toLowerCase();
   return (
     host === 'localhost' ||
@@ -122,6 +129,191 @@ const isBlockedSubtitleHost = (hostname) => {
     host.startsWith('169.254.') ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
   );
+};
+
+const hostnameOf = (uri) => {
+  try {
+    return new URL(uri).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+const seedMediaHosts = (room, uri) => {
+  room.mediaAllowedHosts = new Set();
+  const host = hostnameOf(uri);
+  if (host) room.mediaAllowedHosts.add(host);
+};
+
+const allowMediaHost = (room, hostname) => {
+  if (!hostname) return;
+  if (!room.mediaAllowedHosts) room.mediaAllowedHosts = new Set();
+  room.mediaAllowedHosts.add(hostname.toLowerCase());
+};
+
+const resolveAgainst = (base, maybeRelative) => {
+  try {
+    return new URL(maybeRelative, base).href;
+  } catch {
+    return null;
+  }
+};
+
+const proxyMediaPath = (code, absoluteUrl) =>
+  `/media/${code}?u=${encodeURIComponent(absoluteUrl)}`;
+
+const rewriteHlsPlaylist = (text, playlistUrl, code, room) => {
+  const rewriteAbs = (raw) => {
+    const abs = resolveAgainst(playlistUrl, raw);
+    if (!abs) return raw;
+    const host = hostnameOf(abs);
+    if (host) allowMediaHost(room, host);
+    return proxyMediaPath(code, abs);
+  };
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return line;
+      if (trimmed.startsWith('#')) {
+        return line.replace(/URI="([^"]+)"/gi, (_m, raw) => `URI="${rewriteAbs(raw)}"`);
+      }
+      return rewriteAbs(trimmed);
+    })
+    .join('\n');
+};
+
+const looksLikePlaylistUrl = (parsed) => /\.m3u8(\?|#|$)/i.test(parsed.pathname);
+
+const serveMedia = async (code, req, res) => {
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room?.source?.uri || !room.source.referer) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('No stream');
+    return;
+  }
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+  const raw = reqUrl.searchParams.get('u') || '';
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Bad media URL');
+    return;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Bad media URL');
+    return;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (isBlockedPrivateHost(host) || !room.mediaAllowedHosts?.has(host)) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Host not allowed');
+    return;
+  }
+
+  const playlistHint = looksLikePlaylistUrl(parsed);
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    playlistHint ? MEDIA_PLAYLIST_TIMEOUT_MS : MEDIA_SEGMENT_TIMEOUT_MS,
+  );
+  const onClose = () => controller.abort();
+  req.on('close', onClose);
+
+  try {
+    const upstreamHeaders = {
+      Accept: '*/*',
+      'User-Agent': MEDIA_UA,
+      Referer: room.source.referer,
+    };
+    if (room.source.origin) upstreamHeaders.Origin = room.source.origin;
+    if (req.headers.range) upstreamHeaders.Range = req.headers.range;
+
+    const upstream = await fetch(parsed.href, {
+      method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+      headers: upstreamHeaders,
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    const finalHost = hostnameOf(upstream.url);
+    if (finalHost) allowMediaHost(room, finalHost);
+
+    const contentType = upstream.headers.get('content-type') || '';
+    const treatAsPlaylist =
+      playlistHint ||
+      /mpegurl|x-mpegURL|vnd\.apple\.mpegurl/i.test(contentType);
+
+    if (treatAsPlaylist && req.method !== 'HEAD') {
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      if (buf.length > PLAYLIST_MAX_BYTES) {
+        res.writeHead(413, { 'content-type': 'text/plain; charset=utf-8' });
+        res.end('Playlist too large');
+        return;
+      }
+      const text = buf.toString('utf8');
+      if (upstream.ok && text.trimStart().startsWith('#EXTM3U')) {
+        const rewritten = rewriteHlsPlaylist(
+          text,
+          upstream.url || parsed.href,
+          String(code || '').toUpperCase(),
+          room,
+        );
+        res.writeHead(200, {
+          'content-type': 'application/vnd.apple.mpegurl; charset=utf-8',
+          'cache-control': 'no-store',
+        });
+        res.end(rewritten);
+        return;
+      }
+      res.writeHead(upstream.status, {
+        'content-type': contentType || 'application/octet-stream',
+        'cache-control': 'no-store',
+      });
+      res.end(buf);
+      return;
+    }
+
+    const outHeaders = {
+      'content-type': contentType || 'application/octet-stream',
+      'cache-control': 'no-store',
+    };
+    const len = upstream.headers.get('content-length');
+    if (len) outHeaders['content-length'] = len;
+    const range = upstream.headers.get('content-range');
+    if (range) outHeaders['content-range'] = range;
+    const acceptRanges = upstream.headers.get('accept-ranges');
+    if (acceptRanges) outHeaders['accept-ranges'] = acceptRanges;
+
+    res.writeHead(upstream.status, outHeaders);
+    if (req.method === 'HEAD' || !upstream.body) {
+      res.end();
+      return;
+    }
+    try {
+      if (typeof Readable.fromWeb === 'function') {
+        const nodeStream = Readable.fromWeb(upstream.body);
+        nodeStream.on('error', () => res.destroy());
+        nodeStream.pipe(res);
+        return;
+      }
+    } catch {
+      // fall through and buffer
+    }
+    res.end(Buffer.from(await upstream.arrayBuffer()));
+  } catch {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Media fetch failed');
+    } else {
+      res.destroy();
+    }
+  } finally {
+    clearTimeout(timer);
+    req.off('close', onClose);
+  }
 };
 
 const serveSubtitle = async (code, res) => {
@@ -145,7 +337,7 @@ const serveSubtitle = async (code, res) => {
     res.end('Bad subtitle URL');
     return;
   }
-  if (isBlockedSubtitleHost(parsed.hostname)) {
+  if (isBlockedPrivateHost(parsed.hostname)) {
     res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('Bad subtitle URL');
     return;
@@ -185,6 +377,12 @@ const serveStatic = (req, res) => {
   if (url.pathname === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, rooms: rooms.size }));
+    return;
+  }
+
+  const mediaMatch = url.pathname.match(/^\/media\/([A-Za-z0-9]+)\/?$/);
+  if (mediaMatch && (req.method === 'GET' || req.method === 'HEAD')) {
+    void serveMedia(mediaMatch[1], req, res);
     return;
   }
 
@@ -318,6 +516,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       source: null,
       embedUrl: null,
       subtitles: null,
+      mediaAllowedHosts: new Set(),
       members: new Map([[id, host]]),
       lastActive: Date.now(),
     };
@@ -394,6 +593,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         room.source = null;
         room.embedUrl = null;
         room.subtitles = null;
+        room.mediaAllowedHosts = new Set();
         touch(room);
         broadcast(room, { type: 'episode', season, episode });
         broadcast(room, { type: 'source', source: null, embedUrl: null });
@@ -415,7 +615,21 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         : msg.kind === 'file'
           ? 'file'
           : 'hls';
-      room.source = { uri, kind };
+      const referer =
+        msg.referer != null
+          ? String(msg.referer).slice(0, URI_MAX)
+          : room.source?.referer;
+      const origin =
+        msg.origin != null
+          ? String(msg.origin).slice(0, URI_MAX)
+          : room.source?.origin;
+      room.source = {
+        uri,
+        kind,
+        ...(referer ? { referer } : {}),
+        ...(origin ? { origin } : {}),
+      };
+      seedMediaHosts(room, uri);
       if (msg.embedUrl !== undefined) {
         room.embedUrl = msg.embedUrl ? String(msg.embedUrl).slice(0, URI_MAX) : null;
       }
