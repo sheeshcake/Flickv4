@@ -109,6 +109,11 @@ export const WatchPlayer = () => {
         return;
       }
       if (key === failedSourceKey.current && modeRef.current === 'iframe') return;
+
+      const video = videoRef.current;
+      // Join sets room before <video> exists — retry from the mount effect.
+      if (!video) return;
+
       lastSourceKey.current = key;
       destroyHls();
       setIframeUrl(null);
@@ -117,9 +122,8 @@ export const WatchPlayer = () => {
         failedSourceKey.current = key;
         if (embedUrl) {
           destroyHls();
-          const video = videoRef.current;
-          video?.removeAttribute('src');
-          video?.load();
+          video.removeAttribute('src');
+          video.load();
           setMode('iframe');
           setIframeUrl(embedUrl);
           setCues([]);
@@ -129,9 +133,6 @@ export const WatchPlayer = () => {
           setRoomError('This CDN blocked the proxy (Referer still 403, or IP-locked).');
         }
       };
-
-      const video = videoRef.current;
-      if (!video) return;
       const playUrl = mediaProxyUrl(current.code, source.uri);
       video.onerror = onFail;
       const isHls = source.kind === 'hls' || /\.m3u8(\?|#|$)/i.test(source.uri);
@@ -216,16 +217,12 @@ export const WatchPlayer = () => {
           roomRef.current = msg.room;
           setRoom(msg.room);
           setClock(msg.room.clock);
-          loadSource(msg.room.source, msg.room.embedUrl);
-          void loadSubtitles(msg.room.subtitles);
           return;
         }
         if (msg.type === 'state') {
           roomRef.current = msg.room;
           setRoom(msg.room);
           setClock(msg.room.clock);
-          loadSource(msg.room.source, msg.room.embedUrl);
-          void loadSubtitles(msg.room.subtitles);
           return;
         }
         if (msg.type === 'clock') {
@@ -277,6 +274,13 @@ export const WatchPlayer = () => {
     },
     [applyClock, loadSource, loadSubtitles, showWaiting],
   );
+
+  // <video> only mounts after `room` is set. Load the host stream then.
+  useEffect(() => {
+    if (!room) return;
+    loadSource(room.source, room.embedUrl);
+    void loadSubtitles(room.subtitles);
+  }, [room, loadSource, loadSubtitles]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
