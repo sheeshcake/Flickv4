@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
+import { ChatSheet, type ChatLine } from '@/components/ChatSheet';
+import { ChatToast } from '@/components/ChatToast';
 import { JoinGate } from '@/components/JoinGate';
-import { PartySheet } from '@/components/PartySheet';
+import { MembersSheet } from '@/components/MembersSheet';
 import { PlayerOverlay } from '@/components/PlayerOverlay';
+import { useOverlayVisibility } from '@/hooks/useOverlayVisibility';
 import {
   codeFromPath,
   mediaProxyUrl,
@@ -28,13 +31,14 @@ export const WatchPlayer = () => {
   });
   const [mode, setMode] = useState<Mode>('none');
   const [waiting, setWaiting] = useState('Waiting for the host’s stream…');
-  const [overlayOn, setOverlayOn] = useState(true);
-  const [partyOpen, setPartyOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [toast, setToast] = useState<ChatLine | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [duration, setDuration] = useState(0);
   const [videoTime, setVideoTime] = useState(0);
-  const [chat, setChat] = useState<{ from: string; text: string }[]>([]);
+  const [chat, setChat] = useState<ChatLine[]>([]);
   const [cues, setCues] = useState<Cue[]>([]);
   const [subOffset, setSubOffset] = useState(0);
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
@@ -49,6 +53,8 @@ export const WatchPlayer = () => {
   const lastSubUrl = useRef('');
   const roomRef = useRef<PartyRoom | null>(null);
   const clockRef = useRef(clock);
+
+  const overlay = useOverlayVisibility(!clock.paused, membersOpen || chatOpen);
 
   roomRef.current = room;
   clockRef.current = clock;
@@ -314,6 +320,25 @@ export const WatchPlayer = () => {
     };
   }, []);
 
+  const prevChatLen = useRef(0);
+  useEffect(() => {
+    if (chatOpen) {
+      setToast(null);
+      prevChatLen.current = chat.length;
+      return;
+    }
+    if (chat.length <= prevChatLen.current) {
+      prevChatLen.current = chat.length;
+      return;
+    }
+    prevChatLen.current = chat.length;
+    const line = chat[chat.length - 1];
+    if (!line) return;
+    setToast(line);
+    const id = window.setTimeout(() => setToast(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [chat, chatOpen]);
+
   const toggleFullscreen = () => {
     const stage = stageRef.current;
     const video = videoRef.current;
@@ -395,8 +420,16 @@ export const WatchPlayer = () => {
             {cue.text}
           </div>
         ) : null}
+        {!overlay.visible ? (
+          <button
+            type="button"
+            className="absolute inset-0 z-5"
+            aria-label="Show controls"
+            onClick={overlay.show}
+          />
+        ) : null}
         <PlayerOverlay
-          visible={overlayOn}
+          visible={overlay.visible}
           title={room.content.title || 'Watch party'}
           subtitle={subtitle}
           playing={!clock.paused}
@@ -404,7 +437,8 @@ export const WatchPlayer = () => {
           duration={duration}
           fullscreen={fullscreen}
           partyCode={room.code}
-          onToggleOverlay={() => setOverlayOn((v) => !v)}
+          onToggleOverlay={overlay.toggle}
+          onInteract={overlay.show}
           onBack={() => {
             send({ type: 'leave' });
             location.href = '/';
@@ -427,24 +461,30 @@ export const WatchPlayer = () => {
               positionSeconds: frac * duration,
             });
           }}
-          onOpenParty={() => setPartyOpen(true)}
+          onOpenMembers={() => setMembersOpen(true)}
+          onOpenChat={() => setChatOpen(true)}
           onToggleFullscreen={toggleFullscreen}
         />
+        <ChatToast line={toast} onOpen={() => setChatOpen(true)} />
       </div>
       {roomError ? (
         <p className="px-4 py-2 text-sm text-destructive">{roomError}</p>
       ) : null}
-      <PartySheet
-        open={partyOpen}
-        onOpenChange={setPartyOpen}
+      <MembersSheet
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
         code={room.code}
         members={room.members}
-        chat={chat}
-        onSend={(text) => send({ type: 'chat', text })}
         onLeave={() => {
           send({ type: 'leave' });
           location.href = '/';
         }}
+      />
+      <ChatSheet
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        chat={chat}
+        onSend={(text) => send({ type: 'chat', text })}
       />
     </div>
   );
