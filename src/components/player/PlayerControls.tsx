@@ -53,7 +53,7 @@ interface PlayerControlsProps {
   partyCode?: string;
   partyLocked?: boolean;
   onOpenParty?: () => void;
-  /** Session volume 0..1. */
+  /** Device media volume 0..1 (system volume when available). */
   volume: number;
   onVolumeChange: (value: number) => void;
   /**

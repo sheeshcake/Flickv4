@@ -41,3 +41,6 @@ yarn-error.*
 # generated native folders
 # /ios
 # /android
+
+# party companion Vite output
+party-server/public/

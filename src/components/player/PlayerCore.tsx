@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StatusBar, StyleSheet } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
-import * as Brightness from 'expo-brightness';
 import Video, {
   SelectedTrackType,
   TextTrackType,
@@ -39,6 +38,7 @@ import { useControlsVisibility } from '@/src/components/player/useControlsVisibi
 import { useTVRemote } from '@/src/components/player/useTVRemote';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
+import { useDevicePlaybackLevels } from '@/src/hooks/useDevicePlaybackLevels';
 import {
   PARTY_URI_MAX,
   isPartyStreamUri,
@@ -174,42 +174,13 @@ export const PlayerCore = ({
   // rather than persisting app-wide — see the flick-player-controls skill's
   // "session-only vs per-server vs persisted" table.
   const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(1);
-  // Session-only volume / brightness — leave the device brightness restored
-  // on unmount so exiting the player doesn't leave the screen dimmed.
-  const [volume, setVolume] = useState(1);
-  const [brightness, setBrightness] = useState<number | undefined>(undefined);
-  const initialBrightnessRef = useRef<number | null>(null);
-  const brightnessSupportedRef = useRef(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const current = await Brightness.getBrightnessAsync();
-        if (cancelled) return;
-        initialBrightnessRef.current = current;
-        setBrightness(current);
-      } catch {
-        brightnessSupportedRef.current = false;
-        if (!cancelled) setBrightness(undefined);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      const restore = initialBrightnessRef.current;
-      if (restore != null && brightnessSupportedRef.current) {
-        void Brightness.setBrightnessAsync(restore).catch(() => {});
-      }
-    };
-  }, []);
-
-  const handleBrightnessChange = useCallback((value: number) => {
-    setBrightness(value);
-    void Brightness.setBrightnessAsync(value).catch(() => {
-      brightnessSupportedRef.current = false;
-      setBrightness(undefined);
-    });
-  }, []);
+  const {
+    volume,
+    setVolume,
+    brightness,
+    onBrightnessChange: handleBrightnessChange,
+    videoVolume,
+  } = useDevicePlaybackLevels();
   const { aspect, setAspect } = useVideoAspect();
   const videoRef = useRef<VideoRef>(null);
   const isTVShow = item.media_type === 'tv';
@@ -986,7 +957,7 @@ export const PlayerCore = ({
           pointerEvents="none"
           paused={paused}
           rate={playbackRate}
-          volume={volume}
+          volume={videoVolume}
           progressUpdateInterval={500}
           preferredForwardBufferDuration={
             Platform.OS === 'ios'
