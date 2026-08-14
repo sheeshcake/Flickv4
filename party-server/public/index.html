@@ -322,7 +322,9 @@
           }
         };
         video.onerror = onFail;
-        if (source.kind === 'hls' && window.Hls && Hls.isSupported()) {
+        const isHls =
+          source.kind === 'hls' || /\.m3u8(\?|#|$)/i.test(source.uri);
+        if (isHls && window.Hls && Hls.isSupported()) {
           hls = new Hls({ enableWorker: true });
           hls.loadSource(source.uri);
           hls.attachMedia(video);
@@ -333,7 +335,7 @@
           hls.on(Hls.Events.ERROR, (_e, data) => {
             if (data && data.fatal) onFail();
           });
-        } else if (source.kind === 'hls' && video.canPlayType('application/vnd.apple.mpegurl')) {
+        } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
           video.src = source.uri;
           useVideo();
         } else {

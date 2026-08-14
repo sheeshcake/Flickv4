@@ -4,7 +4,16 @@
  * stream/subtitle URLs (JSON only — the server never fetches video).
  */
 
-export const PARTY_URI_MAX = 2000;
+/** Stream URLs (signed m3u8s) are often far longer than a typical page link. */
+export const PARTY_URI_MAX = 8192;
+
+const STREAM_URI_RE = /\.(m3u8|mp4|webm|mkv)(\?|#|$)/i;
+
+export const isPartyStreamUri = (uri: string): boolean =>
+  /^https?:\/\//i.test(uri) && STREAM_URI_RE.test(uri);
+
+export const partySourceKind = (uri: string): 'hls' | 'file' =>
+  /\.m3u8(\?|#|$)/i.test(uri) ? 'hls' : 'file';
 
 export const PARTY_CODE_LENGTH = 5;
 export const PARTY_MAX_MEMBERS = 8;

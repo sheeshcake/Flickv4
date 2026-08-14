@@ -30,7 +30,11 @@ import { originOf, buildEmbedUrl } from '@/src/utils/streamUrl';
 import { getTitle, type Episode } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
-import { PARTY_URI_MAX } from '@/src/party/protocol';
+import {
+  PARTY_URI_MAX,
+  isPartyStreamUri,
+  partySourceKind,
+} from '@/src/party/protocol';
 
 export const PlayerScreen = ({
   route,
@@ -142,11 +146,12 @@ export const PlayerScreen = ({
   const publishHostSource = useCallback(
     (url: string) => {
       if (role !== 'host') return;
-      if (!/^https?:\/\//i.test(url)) return;
+      // Only the scraped media URL — never the embed/page link.
+      if (!isPartyStreamUri(url)) return;
       send({
         type: 'source',
         uri: url.slice(0, PARTY_URI_MAX),
-        kind: url.includes('.m3u8') ? 'hls' : 'file',
+        kind: partySourceKind(url),
         embedUrl: buildEmbedUrl(activeServer, {
           type,
           tmdbId: item.id,

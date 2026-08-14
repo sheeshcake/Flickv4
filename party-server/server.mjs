@@ -19,7 +19,7 @@ const CODE_LENGTH = 5;
 const MAX_MEMBERS = 8;
 const IDLE_MS = 30 * 60 * 1000;
 const CHAT_MAX = 200;
-const URI_MAX = 2000;
+const URI_MAX = 8192;
 const SUBTITLE_MAX_BYTES = 1_500_000;
 
 /** @typedef {{ tmdbId: number, mediaType: 'movie'|'tv', title: string, posterPath?: string|null, season?: number, episode?: number }} PartyContent */
@@ -407,10 +407,18 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       if (!isHost(room, memberId)) throw new Error('Only the host can set the source');
       const uri = String(msg.uri || '').slice(0, URI_MAX);
       if (!uri) throw new Error('Missing source');
-      const kind = msg.kind === 'file' ? 'file' : 'hls';
-      const embedUrl = msg.embedUrl ? String(msg.embedUrl).slice(0, URI_MAX) : null;
+      if (!/^https?:\/\//i.test(uri) || !/\.(m3u8|mp4|webm|mkv)(\?|#|$)/i.test(uri)) {
+        throw new Error('Source must be a stream URL (m3u8/mp4), not an embed page');
+      }
+      const kind = /\.m3u8(\?|#|$)/i.test(uri)
+        ? 'hls'
+        : msg.kind === 'file'
+          ? 'file'
+          : 'hls';
       room.source = { uri, kind };
-      room.embedUrl = embedUrl;
+      if (msg.embedUrl !== undefined) {
+        room.embedUrl = msg.embedUrl ? String(msg.embedUrl).slice(0, URI_MAX) : null;
+      }
       touch(room);
       broadcast(room, { type: 'source', source: room.source, embedUrl: room.embedUrl });
       broadcast(room, { type: 'state', room: publicRoom(room) });

@@ -39,7 +39,12 @@ import { useControlsVisibility } from '@/src/components/player/useControlsVisibi
 import { useTVRemote } from '@/src/components/player/useTVRemote';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
-import { PARTY_URI_MAX, predictedHostTime } from '@/src/party/protocol';
+import {
+  PARTY_URI_MAX,
+  isPartyStreamUri,
+  partySourceKind,
+  predictedHostTime,
+} from '@/src/party/protocol';
 import {
   UP_NEXT_LEAD_SECONDS,
   useNextEpisode,
@@ -340,6 +345,17 @@ export const PlayerCore = ({
   useEffect(() => {
     setSubtitleOffsetSeconds(0);
   }, [wyzieSelectedId]);
+
+  useEffect(() => {
+    if (partyRole !== 'host') return;
+    const uri = selectedVariantUri ?? masterUri;
+    if (!uri || !isPartyStreamUri(uri)) return;
+    sendParty({
+      type: 'source',
+      uri: uri.slice(0, PARTY_URI_MAX),
+      kind: partySourceKind(uri),
+    });
+  }, [partyRole, selectedVariantUri, masterUri, sendParty]);
 
   useEffect(() => {
     if (partyRole !== 'host') return;
