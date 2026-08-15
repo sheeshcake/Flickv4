@@ -140,7 +140,7 @@ export const WatchPlayer = () => {
     (
       source: PartySource | null | undefined,
       embedUrl: string | null | undefined,
-      opts?: { direct?: boolean },
+      opts?: { direct?: boolean; onFail?: () => void },
     ) => {
       const current = roomRef.current;
       if (!source?.uri || !current) {
@@ -166,6 +166,10 @@ export const WatchPlayer = () => {
 
       const onFail = () => {
         failedSourceKey.current = key;
+        if (opts?.onFail) {
+          void opts.onFail();
+          return;
+        }
         if (embedUrl) {
           destroyHls();
           video.removeAttribute('src');
@@ -223,55 +227,88 @@ export const WatchPlayer = () => {
   const playRoom = useCallback(
     async (current: PartyRoom) => {
       const vkey = `${current.content.tmdbId}|${current.content.imdbId ?? ''}|${current.content.season ?? ''}|${current.content.episode ?? ''}`;
+
+      const playHostEmbed = () => {
+        if (current.embedUrl) {
+          playIframe(current.embedUrl);
+          return;
+        }
+        showWaiting('Stream blocked in this browser — Open in Flick.');
+        setRoomError('This CDN blocked the stream in the browser.');
+      };
+
+      const tryMovieboxThenEmbed = async () => {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[Moviebox]', 'fetch', current.code, current.content.title);
+          const res = await fetch(`/moviebox/${current.code}`);
+          if (res.ok) {
+            const data = (await res.json()) as {
+              url?: string;
+              kind?: 'hls' | 'file';
+              playerUrl?: string;
+            };
+            if (data.url) {
+              // eslint-disable-next-line no-console
+              console.log('[Moviebox]', 'direct', data.kind, data.url.split('?')[0]);
+              webResolvedRef.current = true;
+              loadSource(
+                { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
+                current.embedUrl,
+                {
+                  direct: true,
+                  onFail: () => {
+                    if (data.playerUrl) playIframe(data.playerUrl);
+                    else playHostEmbed();
+                  },
+                },
+              );
+              return;
+            }
+            if (data.playerUrl) {
+              // eslint-disable-next-line no-console
+              console.log('[Moviebox]', 'iframe', data.playerUrl);
+              webResolvedRef.current = true;
+              playIframe(data.playerUrl);
+              return;
+            }
+          } else {
+            // eslint-disable-next-line no-console
+            console.log('[Moviebox]', 'http', res.status);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.log('[Moviebox]', 'fetch failed', err);
+        }
+        playHostEmbed();
+      };
+
       if (lastWebKey.current === vkey) {
         if (modeRef.current !== 'iframe' && !webResolvedRef.current) {
-          loadSource(current.source, current.embedUrl);
+          loadSource(current.source, current.embedUrl, {
+            onFail: () => {
+              void tryMovieboxThenEmbed();
+            },
+          });
         }
         return;
       }
-      try {
-        // eslint-disable-next-line no-console
-        console.log('[Moviebox]', 'fetch', current.code, current.content.title);
-        const res = await fetch(`/moviebox/${current.code}`);
-        if (res.ok) {
-          const data = (await res.json()) as {
-            url?: string;
-            kind?: 'hls' | 'file';
-            playerUrl?: string;
-          };
-          if (data.url) {
-            // eslint-disable-next-line no-console
-            console.log('[Moviebox]', 'direct', data.kind, data.url.split('?')[0]);
-            lastWebKey.current = vkey;
-            webResolvedRef.current = true;
-            loadSource(
-              { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
-              data.playerUrl || current.embedUrl,
-              { direct: true },
-            );
-            return;
-          }
-          if (data.playerUrl) {
-            // eslint-disable-next-line no-console
-            console.log('[Moviebox]', 'iframe', data.playerUrl);
-            lastWebKey.current = vkey;
-            webResolvedRef.current = true;
-            playIframe(data.playerUrl);
-            return;
-          }
-        } else {
-          // eslint-disable-next-line no-console
-          console.log('[Moviebox]', 'http', res.status);
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.log('[Moviebox]', 'fetch failed', err);
-      }
+
       lastWebKey.current = vkey;
       webResolvedRef.current = false;
-      loadSource(current.source, current.embedUrl);
+
+      if (current.source?.uri) {
+        loadSource(current.source, current.embedUrl, {
+          onFail: () => {
+            void tryMovieboxThenEmbed();
+          },
+        });
+        return;
+      }
+
+      showWaiting('Waiting for the host’s stream…');
     },
-    [loadSource],
+    [loadSource, showWaiting],
   );
 
   const loadSubtitles = useCallback(async (sub: PartySubtitles | null | undefined) => {
@@ -354,8 +391,12 @@ export const WatchPlayer = () => {
             };
             setRoom(roomRef.current);
           }
-          if (modeRef.current !== 'iframe' && !webResolvedRef.current) {
-            loadSource(msg.source, msg.embedUrl);
+          if (
+            roomRef.current &&
+            modeRef.current !== 'iframe' &&
+            !webResolvedRef.current
+          ) {
+            void playRoom(roomRef.current);
           }
           return;
         }
@@ -406,8 +447,8 @@ export const WatchPlayer = () => {
     [applyClock, loadSource, loadSubtitles, playRoom, showWaiting],
   );
 
-  // <video> only mounts after `room` is set. Moviebox first, then the
-  // host /media proxy, then the host embed URL.
+  // <video> only mounts after `room` is set. Host /media proxy first,
+  // then Moviebox, then the host embed URL.
   useEffect(() => {
     if (!room) return;
     void playRoom(room);
