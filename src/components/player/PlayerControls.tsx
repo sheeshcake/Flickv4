@@ -10,6 +10,7 @@ import {
   RotateCw,
   Settings2,
   Sun,
+  Users,
   Volume2,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -147,7 +148,7 @@ export const PlayerControls = ({
             </Text>
           )}
         </VStack>
-        {onOpenParty && partyCode && (
+        {onOpenParty && partyCode ? (
           <Focusable
             onPress={onOpenParty}
             className="rounded-full bg-primary px-3 py-1"
@@ -157,7 +158,15 @@ export const PlayerControls = ({
               {partyCode}
             </Text>
           </Focusable>
-        )}
+        ) : onOpenParty ? (
+          <Focusable
+            onPress={onOpenParty}
+            className="rounded-full bg-background/40 p-2"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
+          >
+            <Icon as={Users} size="lg" className="text-foreground" />
+          </Focusable>
+        ) : null}
         {onOpenEpisodes && (
           <Focusable
             onPress={onOpenEpisodes}

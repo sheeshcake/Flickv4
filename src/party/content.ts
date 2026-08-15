@@ -17,6 +17,7 @@ export const partyContentFromItem = (
   item: MediaItem,
   season?: number,
   episode?: number,
+  imdbId?: string | null,
 ): PartyContent => ({
   tmdbId: item.id,
   mediaType: item.media_type === 'tv' ? 'tv' : 'movie',
@@ -24,4 +25,5 @@ export const partyContentFromItem = (
   posterPath: item.poster_path,
   season,
   episode,
+  imdbId: imdbId ?? null,
 });

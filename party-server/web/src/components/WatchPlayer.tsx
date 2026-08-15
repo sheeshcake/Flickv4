@@ -52,6 +52,7 @@ export const WatchPlayer = () => {
   const lastSourceKey = useRef('');
   const failedSourceKey = useRef('');
   const lastSubUrl = useRef('');
+  const lastVideasyKey = useRef('');
   const roomRef = useRef<PartyRoom | null>(null);
   const clockRef = useRef(clock);
   const seekingRef = useRef(false);
@@ -202,6 +203,39 @@ export const WatchPlayer = () => {
     [applyClock, send, showWaiting],
   );
 
+  const playRoom = useCallback(
+    async (current: PartyRoom) => {
+      const vkey = `${current.content.tmdbId}|${current.content.imdbId ?? ''}|${current.content.season ?? ''}|${current.content.episode ?? ''}`;
+      if (lastVideasyKey.current === vkey) {
+        if (modeRef.current !== 'iframe') {
+          loadSource(current.source, current.embedUrl);
+        }
+        return;
+      }
+      try {
+        const res = await fetch(`/videasy/${current.code}`);
+        if (res.ok) {
+          const data = (await res.json()) as { url?: string };
+          if (data.url) {
+            lastVideasyKey.current = vkey;
+            lastSourceKey.current = '';
+            destroyHls();
+            setCues([]);
+            setMode('iframe');
+            modeRef.current = 'iframe';
+            setIframeUrl(data.url);
+            return;
+          }
+        }
+      } catch {
+        // Videasy down or missing — use the host proxy.
+      }
+      lastVideasyKey.current = vkey;
+      loadSource(current.source, current.embedUrl);
+    },
+    [loadSource],
+  );
+
   const loadSubtitles = useCallback(async (sub: PartySubtitles | null | undefined) => {
     if (!sub?.url || modeRef.current === 'iframe') {
       lastSubUrl.current = '';
@@ -282,7 +316,9 @@ export const WatchPlayer = () => {
             };
             setRoom(roomRef.current);
           }
-          loadSource(msg.source, msg.embedUrl);
+          if (modeRef.current !== 'iframe') {
+            loadSource(msg.source, msg.embedUrl);
+          }
           return;
         }
         if (msg.type === 'subtitles') {
@@ -297,7 +333,21 @@ export const WatchPlayer = () => {
           lastSourceKey.current = '';
           failedSourceKey.current = '';
           lastSubUrl.current = '';
+          lastVideasyKey.current = '';
           setCues([]);
+          if (roomRef.current) {
+            roomRef.current = {
+              ...roomRef.current,
+              content: {
+                ...roomRef.current.content,
+                season: msg.season,
+                episode: msg.episode,
+              },
+              source: null,
+              embedUrl: null,
+            };
+            setRoom(roomRef.current);
+          }
           showWaiting('Host switched episode — waiting for stream…');
           return;
         }
@@ -314,15 +364,15 @@ export const WatchPlayer = () => {
         setGateError('Could not connect to the party server.');
       };
     },
-    [applyClock, loadSource, loadSubtitles, showWaiting],
+    [applyClock, loadSource, loadSubtitles, playRoom, showWaiting],
   );
 
-  // <video> only mounts after `room` is set. Load the host stream then.
+  // <video> only mounts after `room` is set. Videasy first, then host proxy.
   useEffect(() => {
     if (!room) return;
-    loadSource(room.source, room.embedUrl);
+    void playRoom(room);
     void loadSubtitles(room.subtitles);
-  }, [room, loadSource, loadSubtitles]);
+  }, [room, playRoom, loadSubtitles]);
 
   useEffect(() => {
     const id = window.setInterval(() => {

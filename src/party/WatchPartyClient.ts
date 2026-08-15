@@ -104,9 +104,16 @@ export class WatchPartyClient {
     code: string,
     displayName: string,
     kind: PartyClientKind = 'player',
+    hostKey?: string,
   ): Promise<Extract<ServerMessage, { type: 'joined' }>> {
     return this.request(
-      { type: 'join', displayName, kind, code: code.trim().toUpperCase() },
+      {
+        type: 'join',
+        displayName,
+        kind,
+        code: code.trim().toUpperCase(),
+        ...(hostKey ? { hostKey } : {}),
+      },
       (m): m is Extract<ServerMessage, { type: 'joined' }> => m.type === 'joined',
     );
   }

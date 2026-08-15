@@ -411,6 +411,7 @@ export const PlayerScreen = ({
         item={item}
         season={season}
         episode={episode}
+        imdbId={imdbId}
         resumeFrom={effectiveResumeFrom}
         onBack={() => navigation.goBack()}
         onSelectEpisode={

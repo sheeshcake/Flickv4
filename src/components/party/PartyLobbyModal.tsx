@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, Share, StyleSheet } from 'react-native';
 import { Users, X } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -12,12 +12,14 @@ import { Spinner } from '@/components/ui/spinner';
 import { Button, ButtonText } from '@/components/ui/button';
 import { Focusable } from '@/src/components/Focusable';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
-import type { PartyContent } from '@/src/party/protocol';
+import type { PartyClock, PartyContent } from '@/src/party/protocol';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface PartyLobbyModalProps {
   visible: boolean;
   content: PartyContent | null;
+  clock?: PartyClock;
+  playTogetherLabel?: string;
   onPlayTogether: () => void;
   onClose: () => void;
 }
@@ -28,6 +30,8 @@ const qrUri = (url: string) =>
 export const PartyLobbyModal = ({
   visible,
   content,
+  clock,
+  playTogetherLabel = 'Play together',
   onPlayTogether,
   onClose,
 }: PartyLobbyModalProps) => {
@@ -35,6 +39,8 @@ export const PartyLobbyModal = ({
     useWatchParty();
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const clockRef = useRef(clock);
+  clockRef.current = clock;
 
   useEffect(() => {
     if (!visible || !content || !enabled) return;
@@ -42,7 +48,7 @@ export const PartyLobbyModal = ({
     let cancelled = false;
     setBusy(true);
     setLocalError(null);
-    createRoom(content)
+    createRoom(content, clockRef.current)
       .catch((e) => {
         if (!cancelled) {
           setLocalError(e instanceof Error ? e.message : 'Could not create room');
@@ -151,7 +157,7 @@ export const PartyLobbyModal = ({
                     <Text className="text-foreground">Share</Text>
                   </Focusable>
                   <Button onPress={onPlayTogether} isDisabled={!room}>
-                    <ButtonText>Play together</ButtonText>
+                    <ButtonText>{playTogetherLabel}</ButtonText>
                   </Button>
                 </HStack>
               </VStack>

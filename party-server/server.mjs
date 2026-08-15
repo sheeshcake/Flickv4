@@ -6,6 +6,7 @@
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -30,12 +31,12 @@ const MEDIA_SEGMENT_TIMEOUT_MS = 45_000;
 const MEDIA_UA =
   'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
 
-/** @typedef {{ tmdbId: number, mediaType: 'movie'|'tv', title: string, posterPath?: string|null, season?: number, episode?: number }} PartyContent */
+/** @typedef {{ tmdbId: number, mediaType: 'movie'|'tv', title: string, posterPath?: string|null, season?: number, episode?: number, imdbId?: string|null }} PartyContent */
 /** @typedef {{ positionSeconds: number, paused: boolean, updatedAt: number }} PartyClock */
 /** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string }} PartySource */
 /** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
 /** @typedef {{ id: string, displayName: string, kind: 'player'|'companion', role: 'host'|'guest', buffering: boolean, ws: import('ws').WebSocket }} Member */
-/** @typedef {{ code: string, hostId: string, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, mediaAllowedHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
+/** @typedef {{ code: string, hostId: string, hostKey: string, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, mediaAllowedHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -317,6 +318,56 @@ const serveMedia = async (code, req, res) => {
   }
 };
 
+const videasyCandidates = (content) => {
+  const ids = [String(content.tmdbId)];
+  if (content.imdbId) ids.push(String(content.imdbId));
+  const urls = [];
+  for (const id of ids) {
+    if (content.mediaType === 'tv' && content.season != null && content.episode != null) {
+      urls.push(`https://player.videasy.to/tv/${id}/${content.season}/${content.episode}`);
+    } else {
+      urls.push(`https://player.videasy.to/movie/${id}`);
+    }
+  }
+  return urls;
+};
+
+const probeVideasyUrl = async (href) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(href, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: { 'user-agent': MEDIA_UA },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const serveVideasy = async (code, res) => {
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room?.content) {
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  for (const href of videasyCandidates(room.content)) {
+    if (await probeVideasyUrl(href)) {
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, url: href }));
+      return;
+    }
+  }
+  res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ ok: false }));
+};
+
 const serveSubtitle = async (code, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
   const url = room?.subtitles?.url;
@@ -384,6 +435,12 @@ const serveStatic = (req, res) => {
   const mediaMatch = url.pathname.match(/^\/media\/([A-Za-z0-9]+)\/?$/);
   if (mediaMatch && (req.method === 'GET' || req.method === 'HEAD')) {
     void serveMedia(mediaMatch[1], req, res);
+    return;
+  }
+
+  const videasyMatch = url.pathname.match(/^\/videasy\/([A-Za-z0-9]+)\/?$/);
+  if (videasyMatch && req.method === 'GET') {
+    void serveVideasy(videasyMatch[1], res);
     return;
   }
 
@@ -460,8 +517,12 @@ wss.on('connection', (ws) => {
     if (!room) return;
     const leavingHost = isHost(room, memberId);
     room.members.delete(memberId);
-    if (leavingHost || room.members.size === 0) {
-      destroyRoom(room.code, leavingHost ? 'Host left' : 'Room empty');
+    if (room.members.size === 0) {
+      destroyRoom(room.code, 'Room empty');
+      return;
+    }
+    if (leavingHost) {
+      applyHostClock(room, { paused: true });
       return;
     }
     touch(room);
@@ -487,6 +548,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
     }
     const code = uniqueCode();
     const id = `m${++memberSeq}`;
+    const hostKey = crypto.randomBytes(16).toString('hex');
     const clock = {
       positionSeconds: Number(msg.clock?.positionSeconds) || 0,
       paused: msg.clock?.paused !== false,
@@ -505,6 +567,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
     const room = {
       code,
       hostId: id,
+      hostKey,
       content: {
         tmdbId: content.tmdbId,
         mediaType: content.mediaType === 'tv' ? 'tv' : 'movie',
@@ -512,6 +575,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         posterPath: content.posterPath ?? null,
         season: content.season,
         episode: content.episode,
+        imdbId: content.imdbId ? String(content.imdbId).slice(0, 16) : null,
       },
       clock,
       source: null,
@@ -523,7 +587,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
     };
     rooms.set(code, room);
     setMemberId(id);
-    send(ws, { type: 'created', memberId: id, room: publicRoom(room) });
+    send(ws, { type: 'created', memberId: id, room: publicRoom(room), hostKey });
     return;
   }
 
@@ -536,11 +600,16 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
     if (!room) throw new Error('Room not found');
     if (room.members.size >= MAX_MEMBERS) throw new Error('Room is full');
     const id = `m${++memberSeq}`;
+    const reclaim =
+      typeof msg.hostKey === 'string' &&
+      msg.hostKey.length > 0 &&
+      msg.hostKey === room.hostKey;
+    if (reclaim) room.hostId = id;
     room.members.set(id, {
       id,
       displayName,
       kind,
-      role: 'guest',
+      role: reclaim ? 'host' : 'guest',
       buffering: false,
       ws,
     });
@@ -679,7 +748,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         throw new Error('Bad control');
       }
       const host = room.members.get(room.hostId);
-      if (!host) throw new Error('Host gone');
+      if (!host) throw new Error('Host is away');
       send(host.ws, {
         type: 'control',
         action,

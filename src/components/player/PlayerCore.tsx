@@ -21,7 +21,10 @@ import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
 import { PlayerControls } from '@/src/components/player/PlayerControls';
 import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer';
+import { PartyLobbyModal } from '@/src/components/party/PartyLobbyModal';
 import { PlayerPartyDrawer } from '@/src/components/party/PlayerPartyDrawer';
+import { WatchPartyIntroModal } from '@/src/components/party/WatchPartyIntroModal';
+import { partyContentFromItem } from '@/src/party/content';
 import {
   PlayerSettingsDrawer,
   type PlaybackSpeed,
@@ -70,6 +73,7 @@ interface PlayerCoreProps {
   item: MediaItem;
   season?: number;
   episode?: number;
+  imdbId?: string | null;
   resumeFrom?: number;
   onBack: () => void;
   /** TV only: called when the user picks a different episode from the drawer. */
@@ -137,6 +141,7 @@ export const PlayerCore = ({
   item,
   season,
   episode,
+  imdbId,
   resumeFrom,
   onBack,
   onSelectEpisode,
@@ -148,14 +153,18 @@ export const PlayerCore = ({
   const { servers, activeServer } = useServers();
   const { upsert, advanceEpisode } = useContinueWatching();
   const {
+    enabled: partyEnabled,
     role: partyRole,
     room: partyRoom,
     memberId: partyMemberId,
+    chat: partyChat,
     send: sendParty,
     subscribe: subscribeParty,
     leaveRoom,
   } = useWatchParty();
   const [partyOpen, setPartyOpen] = useState(false);
+  const [partyIntroOpen, setPartyIntroOpen] = useState(false);
+  const [partyLobbyOpen, setPartyLobbyOpen] = useState(false);
   const waitingForGuestsRef = useRef(false);
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
@@ -919,7 +928,13 @@ export const PlayerCore = ({
   // Select/Left/Right/Up/Down uncontested. The Up Next card and the
   // series-end state get the same treatment for the same reason.
   const overlayOpen =
-    settingsOpen || episodesOpen || partyOpen || showUpNext || seriesEnded;
+    settingsOpen ||
+    episodesOpen ||
+    partyOpen ||
+    partyIntroOpen ||
+    partyLobbyOpen ||
+    showUpNext ||
+    seriesEnded;
 
   useTVRemote({
     // The hidden-state fallback `Pressable` (focusable, hasTVPreferredFocus,
@@ -1100,9 +1115,10 @@ export const PlayerCore = ({
             partyCode={partyRoom?.code}
             partyLocked={partyRole === 'guest'}
             onOpenParty={
-              partyRoom
+              partyEnabled
                 ? () => {
-                    setPartyOpen(true);
+                    if (partyRoom) setPartyOpen(true);
+                    else setPartyIntroOpen(true);
                     show();
                   }
                 : undefined
@@ -1164,6 +1180,8 @@ export const PlayerCore = ({
           visible={partyOpen}
           room={partyRoom}
           role={partyRole}
+          chat={partyChat}
+          onSendChat={(text) => sendParty({ type: 'chat', text })}
           onLeave={() => {
             setPartyOpen(false);
             leaveRoom();
@@ -1172,6 +1190,33 @@ export const PlayerCore = ({
           onClose={() => setPartyOpen(false)}
         />
       )}
+      <WatchPartyIntroModal
+        visible={partyIntroOpen}
+        onContinue={() => {
+          setPartyIntroOpen(false);
+          setPartyLobbyOpen(true);
+        }}
+        onDismiss={() => setPartyIntroOpen(false)}
+      />
+      <PartyLobbyModal
+        visible={partyLobbyOpen}
+        content={
+          partyLobbyOpen
+            ? partyContentFromItem(item, season, episode, imdbId)
+            : null
+        }
+        clock={{
+          positionSeconds: currentTimeRef.current,
+          paused: pausedRef.current,
+          updatedAt: Date.now(),
+        }}
+        playTogetherLabel="Done"
+        onPlayTogether={() => {
+          setPartyLobbyOpen(false);
+          setPartyOpen(true);
+        }}
+        onClose={() => setPartyLobbyOpen(false)}
+      />
     </Box>
   );
 };

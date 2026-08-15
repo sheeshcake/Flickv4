@@ -18,6 +18,7 @@ export default defineConfig({
     proxy: {
       '/media': 'http://127.0.0.1:8787',
       '/subtitle': 'http://127.0.0.1:8787',
+      '/videasy': 'http://127.0.0.1:8787',
       '/health': 'http://127.0.0.1:8787',
       '/ws': {
         target: 'ws://127.0.0.1:8787',

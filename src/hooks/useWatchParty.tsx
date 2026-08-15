@@ -15,6 +15,7 @@ import {
 } from '@/src/party/WatchPartyClient';
 import type {
   ClientMessage,
+  PartyChatLine,
   PartyClientKind,
   PartyClock,
   PartyContent,
@@ -23,6 +24,7 @@ import type {
   ServerMessage,
 } from '@/src/party/protocol';
 import { companionPathForCode } from '@/src/party/protocol';
+import { getPartyHostKey, savePartyHostKey } from '@/src/party/hostKeys';
 
 type Listener = (msg: ServerMessage) => void;
 
@@ -35,6 +37,7 @@ interface WatchPartyContextValue {
   error: string | null;
   companionUrl: string | null;
   displayName: string;
+  chat: PartyChatLine[];
   createRoom: (content: PartyContent, clock?: PartyClock) => Promise<PartyRoom>;
   joinRoom: (
     code: string,
@@ -54,6 +57,7 @@ const WatchPartyContext = createContext<WatchPartyContextValue>({
   error: null,
   companionUrl: null,
   displayName: 'Flick user',
+  chat: [],
   createRoom: async () => {
     throw new Error('Watch party is not configured');
   },
@@ -81,6 +85,7 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
   const [memberId, setMemberId] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chat, setChat] = useState<PartyChatLine[]>([]);
   roomRef.current = room;
 
   const displayName = useMemo(() => deviceDisplayName(), []);
@@ -129,10 +134,14 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
         if (msg.type === 'subtitles' && roomRef.current) {
           setRoom({ ...roomRef.current, subtitles: msg.subtitles });
         }
+        if (msg.type === 'chat') {
+          setChat((prev) => [...prev, { from: msg.from, text: msg.text, at: msg.at }]);
+        }
         if (msg.type === 'ended') {
           setRoom(null);
           setMemberId(null);
           setConnected(false);
+          setChat([]);
           clientRef.current = null;
         }
         if (msg.type === 'error') setError(msg.message);
@@ -149,7 +158,9 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
     async (content: PartyContent, clock?: PartyClock) => {
       setError(null);
       const client = await ensureClient();
+      setChat([]);
       const res = await client.create(displayName, content, 'player', clock);
+      if (res.hostKey) void savePartyHostKey(res.room.code, res.hostKey);
       setMemberId(res.memberId);
       setRoom(res.room);
       return res.room;
@@ -161,7 +172,9 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
     async (code: string, kind: PartyClientKind = 'player') => {
       setError(null);
       const client = await ensureClient();
-      const res = await client.join(code, displayName, kind);
+      setChat([]);
+      const hostKey = (await getPartyHostKey(code)) ?? undefined;
+      const res = await client.join(code, displayName, kind, hostKey);
       setMemberId(res.memberId);
       setRoom(res.room);
       return res.room;
@@ -176,6 +189,7 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
     setRoom(null);
     setMemberId(null);
     setConnected(false);
+    setChat([]);
   }, []);
 
   const send = useCallback((msg: ClientMessage) => {
@@ -199,6 +213,7 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       error,
       companionUrl,
       displayName,
+      chat,
       createRoom,
       joinRoom,
       leaveRoom,
@@ -214,6 +229,7 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       error,
       companionUrl,
       displayName,
+      chat,
       createRoom,
       joinRoom,
       leaveRoom,

@@ -31,6 +31,7 @@ export interface PartyContent {
   posterPath?: string | null;
   season?: number;
   episode?: number;
+  imdbId?: string | null;
 }
 
 export interface PartyRoom {
