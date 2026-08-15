@@ -1,4 +1,5 @@
-import { X } from 'lucide-react-native';
+import { useState } from 'react';
+import { Eye, EyeOff, X } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
@@ -17,6 +18,8 @@ interface ServerLoadingSideNavProps {
    * `PlayerScreen`'s `tryNextServer`. */
   triedServerIds: Set<string>;
   onSelectServer: (id: string) => void;
+  /** Debug-mode only: Hide collapses this list; a Show chip brings it back. */
+  canHide?: boolean;
 }
 
 /**
@@ -33,18 +36,55 @@ export const ServerLoadingSideNav = ({
   activeServerId,
   triedServerIds,
   onSelectServer,
+  canHide = false,
 }: ServerLoadingSideNavProps) => {
-  if (servers.length <= 1) return null;
+  const [hidden, setHidden] = useState(false);
+  if (servers.length <= 1 && !canHide) return null;
+
+  if (canHide && hidden) {
+    return (
+      <Box className="absolute right-3 top-20 z-20">
+        <Focusable
+          onPress={() => setHidden(false)}
+          className="rounded-full border border-border bg-card/95 px-3 py-2"
+          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+        >
+          <HStack space="xs" className="items-center">
+            <Icon as={Eye} size="sm" className="text-foreground" />
+            <Text size="xs" className="text-foreground">
+              Show
+            </Text>
+          </HStack>
+        </Focusable>
+      </Box>
+    );
+  }
 
   return (
     <Box className="absolute bottom-0 right-0 top-0 z-20 w-64 border-l border-border bg-card/95">
-      <Text
-        size="2xs"
-        bold
-        className="px-4 pt-4 uppercase tracking-wide text-muted-foreground"
-      >
-        Servers
-      </Text>
+      <HStack className="items-center justify-between px-4 pt-4">
+        <Text
+          size="2xs"
+          bold
+          className="uppercase tracking-wide text-muted-foreground"
+        >
+          Servers
+        </Text>
+        {canHide ? (
+          <Focusable
+            onPress={() => setHidden(true)}
+            className="rounded-md px-2 py-1"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <HStack space="xs" className="items-center">
+              <Icon as={EyeOff} size="xs" className="text-foreground" />
+              <Text size="2xs" className="text-foreground">
+                Hide
+              </Text>
+            </HStack>
+          </Focusable>
+        ) : null}
+      </HStack>
       <ScrollView>
         <VStack space="xs" className="p-2">
           {servers.map((s) => {

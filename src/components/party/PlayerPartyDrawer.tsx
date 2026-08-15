@@ -53,6 +53,11 @@ export const PlayerPartyDrawer = ({
               ? 'You control playback. Guests follow this device.'
               : 'Host controls playback on this device.'}
           </Text>
+          {!room.members.some((m) => m.id === room.hostId || m.role === 'host') && (
+            <Text size="sm" className="mb-3 text-destructive">
+              Host is away
+            </Text>
+          )}
           {waiting.length > 0 && (
             <Text size="sm" className="mb-3 text-primary">
               Waiting for {waiting.map((m) => m.displayName).join(', ')}

@@ -52,6 +52,17 @@ interface WebViewScraperProps {
    * `StyleSheet.absoluteFill`).
    */
   previewStyle?: StyleProp<ViewStyle>;
+  /**
+   * Mute every `<video>`/`<audio>` in the embed. Defaults to muted when
+   * `debug` is off so a hidden scrape cannot play sound.
+   */
+  muted?: boolean;
+  /**
+   * Auto-click play overlays so a hidden scrape can start the stream.
+   * Defaults to on when `debug` is off; debug leaves the page alone so you
+   * can tap yourself.
+   */
+  autoTap?: boolean;
 }
 
 interface MessageData {
@@ -85,7 +96,11 @@ const log = (...args: unknown[]) => console.log(TAG, ...args);
 // `handleLoadEnd`) is threaded in so the page-side center-click retry loop
 // below knows when to stop trying — `<= 0` means "no timeout" (retry
 // indefinitely, matching the component's own "wait indefinitely" semantics).
-const buildInjectedJavaScript = (timeoutMs: number) => `
+const buildInjectedJavaScript = (
+  timeoutMs: number,
+  muted: boolean,
+  autoTap: boolean,
+) => `
 (function() {
   function post(p) {
     try {
@@ -109,6 +124,27 @@ const buildInjectedJavaScript = (timeoutMs: number) => `
   }
 
   log('hook installed');
+
+  var MUTE_MEDIA = ${muted ? 'true' : 'false'};
+  function muteMedia() {
+    if (!MUTE_MEDIA) return;
+    var nodes = document.querySelectorAll('video, audio');
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].muted = true;
+      nodes[i].defaultMuted = true;
+      try { nodes[i].volume = 0; } catch (e) {}
+    }
+  }
+  if (MUTE_MEDIA) {
+    muteMedia();
+    setInterval(muteMedia, 1000);
+    try {
+      new MutationObserver(muteMedia).observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+    } catch (e) {}
+  }
 
   var originalOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function() {
@@ -313,10 +349,15 @@ const buildInjectedJavaScript = (timeoutMs: number) => `
     centerClickIntervalId = setInterval(clickCenter, CENTER_CLICK_INTERVAL_MS);
   }
 
-  if (document.readyState === 'complete') {
-    startCenterClickLoop();
+  var AUTO_TAP = ${autoTap ? 'true' : 'false'};
+  if (AUTO_TAP) {
+    if (document.readyState === 'complete') {
+      startCenterClickLoop();
+    } else {
+      window.addEventListener('load', startCenterClickLoop);
+    }
   } else {
-    window.addEventListener('load', startCenterClickLoop);
+    log('auto tap disabled (debug)');
   }
 })();
 true;
@@ -352,6 +393,8 @@ export const WebViewScraper = ({
   debug = false,
   timeoutSeconds,
   previewStyle,
+  muted,
+  autoTap,
 }: WebViewScraperProps) => {
   const [webViewKey, setWebViewKey] = useState(0);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -377,9 +420,11 @@ export const WebViewScraper = ({
     ],
   );
 
+  const muteMedia = muted ?? !debug;
+  const shouldAutoTap = autoTap ?? !debug;
   const injectedJavaScript = useMemo(
-    () => buildInjectedJavaScript(timeoutMs),
-    [timeoutMs],
+    () => buildInjectedJavaScript(timeoutMs, muteMedia, shouldAutoTap),
+    [timeoutMs, muteMedia, shouldAutoTap],
   );
 
   // Reset the WebView when the target changes.

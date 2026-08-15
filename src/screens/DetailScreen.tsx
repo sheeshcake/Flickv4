@@ -41,7 +41,7 @@ import { useServers } from '@/src/hooks/useServers';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { DownloadService } from '@/src/services/DownloadService';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
-import { originOf } from '@/src/utils/streamUrl';
+import { playbackHeadersFor } from '@/src/services/MovieboxService';
 import { ensureDownloadPermissions } from '@/src/utils/downloadPermissions';
 import { getComingSoon } from '@/src/utils/comingSoon';
 import type { EpisodeDownloadState } from '@/src/components/SeasonEpisodePicker';
@@ -256,12 +256,11 @@ export const DetailScreen = ({
           type: movie ? 'movie' : 'tv',
           season: opts.season,
           episode: opts.episode,
+          title: getTitle(item),
+          resolver: activeServer.resolver,
         });
 
-        const headers = {
-          Referer: `${activeServer.url}/`,
-          Origin: originOf(activeServer.url),
-        };
+        const headers = playbackHeadersFor(activeServer);
         const variants = stream.videoUrl.includes('.m3u8')
           ? await fetchHlsVariants(stream.videoUrl, headers)
           : [];
@@ -286,6 +285,7 @@ export const DetailScreen = ({
               title: opts.title,
               streamUri,
               subtitleLanguage: subtitleSettings.defaultLanguage || undefined,
+              resolver: activeServer.resolver,
             });
           },
         });
@@ -301,7 +301,7 @@ export const DetailScreen = ({
     },
     [
       resolvingDownload,
-      activeServer.url,
+      activeServer,
       item,
       movie,
       enqueue,

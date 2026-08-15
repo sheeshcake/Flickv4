@@ -11,7 +11,7 @@ export const ChatToast = ({ line, onOpen }: ChatToastProps) => {
     <button
       type="button"
       onClick={onOpen}
-      className="absolute right-4 bottom-16 z-20 max-w-xs rounded-lg border border-border bg-card/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm"
+      className="absolute right-4 bottom-[max(4.5rem,calc(env(safe-area-inset-bottom)+3.5rem))] z-20 max-w-xs rounded-lg border border-border bg-card/95 px-3 py-2 text-left shadow-lg backdrop-blur-sm"
     >
       <p className="text-xs font-semibold text-primary">{line.from}</p>
       <p className="line-clamp-2 text-sm">{line.text}</p>

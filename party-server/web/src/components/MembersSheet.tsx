@@ -14,6 +14,7 @@ interface MembersSheetProps {
   code: string;
   members: PartyMember[];
   onLeave: () => void;
+  container?: HTMLElement | null;
 }
 
 export const MembersSheet = ({
@@ -22,9 +23,10 @@ export const MembersSheet = ({
   code,
   members,
   onLeave,
+  container,
 }: MembersSheetProps) => (
   <Sheet open={open} onOpenChange={onOpenChange}>
-    <SheetContent>
+    <SheetContent container={container}>
       <SheetHeader>
         <SheetTitle>Party {code}</SheetTitle>
         <SheetDescription>Host controls playback. Guests follow.</SheetDescription>

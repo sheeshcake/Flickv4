@@ -21,7 +21,12 @@ import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
 import { PlayerControls } from '@/src/components/player/PlayerControls';
 import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer';
+import { PartyLobbyModal } from '@/src/components/party/PartyLobbyModal';
+import { PlayerChatDrawer } from '@/src/components/party/PlayerChatDrawer';
+import { PlayerChatToast } from '@/src/components/party/PlayerChatToast';
 import { PlayerPartyDrawer } from '@/src/components/party/PlayerPartyDrawer';
+import { WatchPartyIntroModal } from '@/src/components/party/WatchPartyIntroModal';
+import { partyContentFromItem } from '@/src/party/content';
 import {
   PlayerSettingsDrawer,
   type PlaybackSpeed,
@@ -44,6 +49,7 @@ import {
   isPartyStreamUri,
   partySourceKind,
   predictedHostTime,
+  type PartyChatLine,
 } from '@/src/party/protocol';
 import {
   UP_NEXT_LEAD_SECONDS,
@@ -57,7 +63,7 @@ import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
 import { useVideoQuality } from '@/src/hooks/useVideoQuality';
 import { File } from 'expo-file-system';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
-import { originOf } from '@/src/utils/streamUrl';
+import { playbackHeadersFor } from '@/src/services/MovieboxService';
 import { writeNativeVttCache } from '@/src/utils/nativeSubtitleCache';
 import { WyzieService } from '@/src/services/WyzieService';
 import type { LocalDownloadedSubtitle } from '@/src/services/DownloadService';
@@ -70,6 +76,7 @@ interface PlayerCoreProps {
   item: MediaItem;
   season?: number;
   episode?: number;
+  imdbId?: string | null;
   resumeFrom?: number;
   onBack: () => void;
   /** TV only: called when the user picks a different episode from the drawer. */
@@ -137,6 +144,7 @@ export const PlayerCore = ({
   item,
   season,
   episode,
+  imdbId,
   resumeFrom,
   onBack,
   onSelectEpisode,
@@ -148,14 +156,21 @@ export const PlayerCore = ({
   const { servers, activeServer } = useServers();
   const { upsert, advanceEpisode } = useContinueWatching();
   const {
+    enabled: partyEnabled,
     role: partyRole,
     room: partyRoom,
     memberId: partyMemberId,
+    chat: partyChat,
     send: sendParty,
     subscribe: subscribeParty,
     leaveRoom,
   } = useWatchParty();
   const [partyOpen, setPartyOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatToast, setChatToast] = useState<PartyChatLine | null>(null);
+  const prevChatLen = useRef(0);
+  const [partyIntroOpen, setPartyIntroOpen] = useState(false);
+  const [partyLobbyOpen, setPartyLobbyOpen] = useState(false);
   const waitingForGuestsRef = useRef(false);
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
@@ -322,14 +337,15 @@ export const PlayerCore = ({
     if (partyRole !== 'host') return;
     const uri = selectedVariantUri ?? masterUri;
     if (!uri || !isPartyStreamUri(uri)) return;
+    const headers = playbackHeadersFor(activeServer);
     sendParty({
       type: 'source',
       uri: uri.slice(0, PARTY_URI_MAX),
       kind: partySourceKind(uri),
-      referer: `${activeServer.url}/`.slice(0, PARTY_URI_MAX),
-      origin: originOf(activeServer.url).slice(0, PARTY_URI_MAX),
+      referer: headers.Referer.slice(0, PARTY_URI_MAX),
+      origin: headers.Origin.slice(0, PARTY_URI_MAX),
     });
-  }, [partyRole, selectedVariantUri, masterUri, sendParty, activeServer.url]);
+  }, [partyRole, selectedVariantUri, masterUri, sendParty, activeServer]);
 
   useEffect(() => {
     if (partyRole !== 'host') return;
@@ -886,7 +902,8 @@ export const PlayerCore = ({
   useEffect(() => {
     if (partyRole !== 'host' || !partyRoom) return;
     const waiting = partyRoom.members.some(
-      (m) => m.buffering && m.id !== partyMemberId,
+      (m) =>
+        m.buffering && m.id !== partyMemberId && m.kind !== 'companion',
     );
     if (waiting && !pausedRef.current) {
       waitingForGuestsRef.current = true;
@@ -907,6 +924,24 @@ export const PlayerCore = ({
     [partyRole, sendParty],
   );
 
+  useEffect(() => {
+    if (chatOpen) {
+      setChatToast(null);
+      prevChatLen.current = partyChat.length;
+      return;
+    }
+    if (partyChat.length <= prevChatLen.current) {
+      prevChatLen.current = partyChat.length;
+      return;
+    }
+    prevChatLen.current = partyChat.length;
+    const line = partyChat[partyChat.length - 1];
+    if (!line) return;
+    setChatToast(line);
+    const id = setTimeout(() => setChatToast(null), 4000);
+    return () => clearTimeout(id);
+  }, [partyChat, chatOpen]);
+
   // On Android TV, `TVEventHandler`'s raw remote-event feed and the native
   // focus engine's own "click the focused view" handling both react to the
   // same physical Select/D-pad press. With this hook always listening, a
@@ -918,7 +953,14 @@ export const PlayerCore = ({
   // Select/Left/Right/Up/Down uncontested. The Up Next card and the
   // series-end state get the same treatment for the same reason.
   const overlayOpen =
-    settingsOpen || episodesOpen || partyOpen || showUpNext || seriesEnded;
+    settingsOpen ||
+    episodesOpen ||
+    partyOpen ||
+    chatOpen ||
+    partyIntroOpen ||
+    partyLobbyOpen ||
+    showUpNext ||
+    seriesEnded;
 
   useTVRemote({
     // The hidden-state fallback `Pressable` (focusable, hasTVPreferredFocus,
@@ -1099,9 +1141,18 @@ export const PlayerCore = ({
             partyCode={partyRoom?.code}
             partyLocked={partyRole === 'guest'}
             onOpenParty={
+              partyEnabled
+                ? () => {
+                    if (partyRoom) setPartyOpen(true);
+                    else setPartyIntroOpen(true);
+                    show();
+                  }
+                : undefined
+            }
+            onOpenChat={
               partyRoom
                 ? () => {
-                    setPartyOpen(true);
+                    setChatOpen(true);
                     show();
                   }
                 : undefined
@@ -1158,19 +1209,62 @@ export const PlayerCore = ({
         />
       )}
 
-      {partyRoom && partyRole && (
-        <PlayerPartyDrawer
-          visible={partyOpen}
-          room={partyRoom}
-          role={partyRole}
-          onLeave={() => {
-            setPartyOpen(false);
-            leaveRoom();
-            onBack();
-          }}
-          onClose={() => setPartyOpen(false)}
+      {partyRoom && partyRole && !pipActive && (
+        <PlayerChatToast
+          line={chatToast}
+          onOpen={() => setChatOpen(true)}
         />
       )}
+
+      {partyRoom && partyRole && (
+        <>
+          <PlayerPartyDrawer
+            visible={partyOpen}
+            room={partyRoom}
+            role={partyRole}
+            onLeave={() => {
+              setPartyOpen(false);
+              setChatOpen(false);
+              leaveRoom();
+              onBack();
+            }}
+            onClose={() => setPartyOpen(false)}
+          />
+          <PlayerChatDrawer
+            visible={chatOpen}
+            chat={partyChat}
+            onSend={(text) => sendParty({ type: 'chat', text })}
+            onClose={() => setChatOpen(false)}
+          />
+        </>
+      )}
+      <WatchPartyIntroModal
+        visible={partyIntroOpen}
+        onContinue={() => {
+          setPartyIntroOpen(false);
+          setPartyLobbyOpen(true);
+        }}
+        onDismiss={() => setPartyIntroOpen(false)}
+      />
+      <PartyLobbyModal
+        visible={partyLobbyOpen}
+        content={
+          partyLobbyOpen
+            ? partyContentFromItem(item, season, episode, imdbId)
+            : null
+        }
+        clock={{
+          positionSeconds: currentTimeRef.current,
+          paused: pausedRef.current,
+          updatedAt: Date.now(),
+        }}
+        playTogetherLabel="Done"
+        onPlayTogether={() => {
+          setPartyLobbyOpen(false);
+          setPartyOpen(true);
+        }}
+        onClose={() => setPartyLobbyOpen(false)}
+      />
     </Box>
   );
 };

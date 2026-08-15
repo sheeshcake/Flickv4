@@ -20,6 +20,9 @@ import { cueAt, parseSubtitleText, type Cue } from '@/lib/subtitles';
 
 type Mode = 'none' | 'video' | 'iframe';
 
+const hostIsPresent = (room: PartyRoom) =>
+  room.members.some((m) => m.id === room.hostId || m.role === 'host');
+
 export const WatchPlayer = () => {
   const [gateError, setGateError] = useState('');
   const [roomError, setRoomError] = useState('');
@@ -42,23 +45,33 @@ export const WatchPlayer = () => {
   const [cues, setCues] = useState<Cue[]>([]);
   const [subOffset, setSubOffset] = useState(0);
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
+  const [needsUnmute, setNeedsUnmute] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const [sheetHost, setSheetHost] = useState<HTMLElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const modeRef = useRef<Mode>('none');
   const lastSourceKey = useRef('');
   const failedSourceKey = useRef('');
   const lastSubUrl = useRef('');
+  const lastWebKey = useRef('');
+  const webResolvedRef = useRef(false);
   const roomRef = useRef<PartyRoom | null>(null);
   const clockRef = useRef(clock);
+  const seekingRef = useRef(false);
 
   const overlay = useOverlayVisibility(!clock.paused, membersOpen || chatOpen);
 
   roomRef.current = room;
   clockRef.current = clock;
   modeRef.current = mode;
+
+  const setStage = useCallback((el: HTMLDivElement | null) => {
+    stageRef.current = el;
+    setSheetHost(el);
+  }, []);
 
   const send = useCallback((obj: Record<string, unknown>) => {
     const ws = wsRef.current;
@@ -86,22 +99,62 @@ export const WatchPlayer = () => {
     [send],
   );
 
+  const unlockAudio = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = false;
+    setNeedsUnmute(false);
+  }, []);
+
+  const playFollowingHost = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || clockRef.current.paused) return;
+    if (!video.paused) return;
+    try {
+      video.muted = true;
+      await video.play();
+      video.muted = false;
+      if (video.muted) setNeedsUnmute(true);
+    } catch {
+      try {
+        video.muted = true;
+        await video.play();
+        setNeedsUnmute(true);
+      } catch {
+        // Next clock tick or tap retries.
+      }
+    }
+  }, []);
+
   const applyClock = useCallback(() => {
     const video = videoRef.current;
     if (modeRef.current !== 'video' || !video) return;
     const target = predicted();
     if (clockRef.current.paused) {
       if (!video.paused) video.pause();
-    } else if (video.paused) {
-      void video.play().catch(() => {});
+    } else if (!seekingRef.current) {
+      void playFollowingHost();
     }
-    if (Number.isFinite(video.currentTime) && Math.abs(video.currentTime - target) > 1.5) {
+    if (
+      !seekingRef.current &&
+      Number.isFinite(video.currentTime) &&
+      Number.isFinite(target) &&
+      Math.abs(video.currentTime - target) > 1.5
+    ) {
+      seekingRef.current = true;
       video.currentTime = target;
+      window.setTimeout(() => {
+        seekingRef.current = false;
+      }, 2500);
     }
-  }, [predicted]);
+  }, [playFollowingHost, predicted]);
 
   const loadSource = useCallback(
-    (source: PartySource | null | undefined, embedUrl: string | null | undefined) => {
+    (
+      source: PartySource | null | undefined,
+      embedUrl: string | null | undefined,
+      opts?: { direct?: boolean; onFail?: () => void },
+    ) => {
       const current = roomRef.current;
       if (!source?.uri || !current) {
         lastSourceKey.current = '';
@@ -109,7 +162,7 @@ export const WatchPlayer = () => {
         showWaiting('Waiting for the host’s stream…');
         return;
       }
-      const key = `${source.kind}|${source.uri}`;
+      const key = `${opts?.direct ? 'direct' : 'proxy'}|${source.kind}|${source.uri}`;
       if (key === lastSourceKey.current && modeRef.current === 'video') {
         applyClock();
         return;
@@ -126,29 +179,42 @@ export const WatchPlayer = () => {
 
       const onFail = () => {
         failedSourceKey.current = key;
+        if (opts?.onFail) {
+          void opts.onFail();
+          return;
+        }
         if (embedUrl) {
           destroyHls();
           video.removeAttribute('src');
           video.load();
           setMode('iframe');
+          modeRef.current = 'iframe';
           setIframeUrl(embedUrl);
           setCues([]);
           send({ type: 'buffering', buffering: false });
         } else {
           showWaiting('Stream blocked in this browser — Open in Flick.');
-          setRoomError('This CDN blocked the proxy (Referer still 403, or IP-locked).');
+          setRoomError('This CDN blocked the stream in the browser.');
         }
       };
-      const playUrl = mediaProxyUrl(current.code, source.uri);
+      const playUrl = opts?.direct
+        ? source.uri
+        : mediaProxyUrl(current.code, source.uri);
       video.onerror = onFail;
       const isHls = source.kind === 'hls' || /\.m3u8(\?|#|$)/i.test(source.uri);
-      if (isHls && Hls.isSupported()) {
+      const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'));
+      if (isHls && nativeHls) {
+        video.src = playUrl;
+        setMode('video');
+        modeRef.current = 'video';
+      } else if (isHls && Hls.isSupported()) {
         const hls = new Hls({ enableWorker: true });
         hlsRef.current = hls;
         hls.loadSource(playUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setMode('video');
+          modeRef.current = 'video';
           applyClock();
         });
         hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -157,6 +223,7 @@ export const WatchPlayer = () => {
       } else {
         video.src = playUrl;
         setMode('video');
+        modeRef.current = 'video';
       }
       video.onloadedmetadata = () => {
         setDuration(video.duration || 0);
@@ -164,6 +231,109 @@ export const WatchPlayer = () => {
       };
     },
     [applyClock, send, showWaiting],
+  );
+
+  const playIframe = (url: string) => {
+    lastSourceKey.current = '';
+    destroyHls();
+    setCues([]);
+    setMode('iframe');
+    modeRef.current = 'iframe';
+    setIframeUrl(url);
+  };
+
+  const playRoom = useCallback(
+    async (current: PartyRoom) => {
+      const vkey = `${current.content.tmdbId}|${current.content.imdbId ?? ''}|${current.content.season ?? ''}|${current.content.episode ?? ''}`;
+
+      const playHostEmbed = () => {
+        if (current.embedUrl) {
+          playIframe(current.embedUrl);
+          return;
+        }
+        showWaiting('Stream blocked in this browser — Open in Flick.');
+        setRoomError('This CDN blocked the stream in the browser.');
+      };
+
+      const tryMovieboxThenEmbed = async () => {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[Moviebox]', 'fetch', current.code, current.content.title);
+          const res = await fetch(`/moviebox/${current.code}`);
+          if (res.ok) {
+            const data = (await res.json()) as {
+              url?: string;
+              kind?: 'hls' | 'file';
+              playerUrl?: string;
+            };
+            if (data.url) {
+              // eslint-disable-next-line no-console
+              console.log('[Moviebox]', 'direct', data.kind, data.url.split('?')[0]);
+              webResolvedRef.current = true;
+              loadSource(
+                { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
+                current.embedUrl,
+                {
+                  direct: true,
+                  onFail: () => {
+                    if (data.playerUrl) playIframe(data.playerUrl);
+                    else playHostEmbed();
+                  },
+                },
+              );
+              return;
+            }
+            if (data.playerUrl) {
+              // eslint-disable-next-line no-console
+              console.log('[Moviebox]', 'iframe', data.playerUrl);
+              webResolvedRef.current = true;
+              playIframe(data.playerUrl);
+              return;
+            }
+          } else {
+            // eslint-disable-next-line no-console
+            console.log('[Moviebox]', 'http', res.status);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.log('[Moviebox]', 'fetch failed', err);
+        }
+        playHostEmbed();
+      };
+
+      const playViaProxy = () => {
+        loadSource(current.source, current.embedUrl, {
+          onFail: () => {
+            void tryMovieboxThenEmbed();
+          },
+        });
+      };
+
+      const playHostStream = () => {
+        loadSource(current.source, current.embedUrl, {
+          direct: true,
+          onFail: playViaProxy,
+        });
+      };
+
+      if (lastWebKey.current === vkey) {
+        if (modeRef.current !== 'iframe' && !webResolvedRef.current) {
+          playHostStream();
+        }
+        return;
+      }
+
+      lastWebKey.current = vkey;
+      webResolvedRef.current = false;
+
+      if (current.source?.uri) {
+        playHostStream();
+        return;
+      }
+
+      showWaiting('Waiting for the host’s stream…');
+    },
+    [loadSource, showWaiting],
   );
 
   const loadSubtitles = useCallback(async (sub: PartySubtitles | null | undefined) => {
@@ -193,12 +363,13 @@ export const WatchPlayer = () => {
   }, []);
 
   const connect = useCallback(
-    (code: string, name: string) => {
+    (code: string, name: string, password?: string) => {
       if (code.length < 4) {
         setGateError('Enter a room code from Flick.');
         return;
       }
       setGateError('');
+      wsRef.current?.close();
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(`${proto}//${location.host}`);
       wsRef.current = ws;
@@ -209,6 +380,7 @@ export const WatchPlayer = () => {
             code,
             displayName: name || 'Web',
             kind: 'companion',
+            ...(password ? { password } : {}),
           }),
         );
       };
@@ -223,12 +395,18 @@ export const WatchPlayer = () => {
           roomRef.current = msg.room;
           setRoom(msg.room);
           setClock(msg.room.clock);
+          if (hostIsPresent(msg.room)) {
+            setRoomError((prev) => (prev === 'Host is away' ? '' : prev));
+          }
           return;
         }
         if (msg.type === 'state') {
           roomRef.current = msg.room;
           setRoom(msg.room);
           setClock(msg.room.clock);
+          if (hostIsPresent(msg.room)) {
+            setRoomError((prev) => (prev === 'Host is away' ? '' : prev));
+          }
           return;
         }
         if (msg.type === 'clock') {
@@ -246,7 +424,13 @@ export const WatchPlayer = () => {
             };
             setRoom(roomRef.current);
           }
-          loadSource(msg.source, msg.embedUrl);
+          if (
+            roomRef.current &&
+            modeRef.current !== 'iframe' &&
+            !webResolvedRef.current
+          ) {
+            void playRoom(roomRef.current);
+          }
           return;
         }
         if (msg.type === 'subtitles') {
@@ -261,7 +445,22 @@ export const WatchPlayer = () => {
           lastSourceKey.current = '';
           failedSourceKey.current = '';
           lastSubUrl.current = '';
+          lastWebKey.current = '';
+          webResolvedRef.current = false;
           setCues([]);
+          if (roomRef.current) {
+            roomRef.current = {
+              ...roomRef.current,
+              content: {
+                ...roomRef.current.content,
+                season: msg.season,
+                episode: msg.episode,
+              },
+              source: null,
+              embedUrl: null,
+            };
+            setRoom(roomRef.current);
+          }
           showWaiting('Host switched episode — waiting for stream…');
           return;
         }
@@ -278,15 +477,16 @@ export const WatchPlayer = () => {
         setGateError('Could not connect to the party server.');
       };
     },
-    [applyClock, loadSource, loadSubtitles, showWaiting],
+    [applyClock, loadSource, loadSubtitles, playRoom, showWaiting],
   );
 
-  // <video> only mounts after `room` is set. Load the host stream then.
+  // <video> only mounts after `room` is set. Original host URI first,
+  // then /media proxy, then Moviebox, then the host embed URL.
   useEffect(() => {
     if (!room) return;
-    loadSource(room.source, room.embedUrl);
+    void playRoom(room);
     void loadSubtitles(room.subtitles);
-  }, [room, loadSource, loadSubtitles]);
+  }, [room, playRoom, loadSubtitles]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -295,10 +495,11 @@ export const WatchPlayer = () => {
       if (video && modeRef.current === 'video') {
         setVideoTime(video.currentTime || 0);
         setDuration(video.duration || 0);
+        applyClock();
       }
     }, 250);
     return () => window.clearInterval(id);
-  }, []);
+  }, [applyClock]);
 
   useEffect(() => {
     const onFs = () => {
@@ -318,6 +519,29 @@ export const WatchPlayer = () => {
       destroyHls();
       wsRef.current?.close();
     };
+  }, []);
+
+  const sheetOpen = membersOpen || chatOpen;
+  useEffect(() => {
+    if (!sheetOpen) return;
+    history.pushState({ partySheet: true }, '');
+    const onPop = () => {
+      setMembersOpen(false);
+      setChatOpen(false);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+    };
+  }, [sheetOpen]);
+
+  const closeSheets = useCallback((open: boolean) => {
+    if (open) return;
+    setMembersOpen(false);
+    setChatOpen(false);
+    if (history.state && history.state.partySheet) {
+      history.back();
+    }
   }, []);
 
   const prevChatLen = useRef(0);
@@ -387,12 +611,22 @@ export const WatchPlayer = () => {
   const subtitle = [ep, cap, clock.paused ? 'Paused' : 'Playing', 'Following host']
     .filter(Boolean)
     .join(' · ');
+  const banner = !hostIsPresent(room)
+    ? 'Host is away'
+    : roomError === 'Host is away'
+      ? ''
+      : roomError;
+
+  const onInteract = () => {
+    unlockAudio();
+    overlay.show();
+  };
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="h-dvh bg-background">
       <div
-        ref={stageRef}
-        className="relative mx-auto aspect-video w-full max-w-[1400px] overflow-hidden bg-black md:mt-0 md:h-screen md:max-w-none md:aspect-auto"
+        ref={setStage}
+        className="relative h-dvh w-full overflow-hidden bg-black"
       >
         {mode === 'none' ? (
           <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-muted-foreground">
@@ -400,18 +634,31 @@ export const WatchPlayer = () => {
           </div>
         ) : null}
         <video
-          ref={videoRef}
+          ref={(el) => {
+            videoRef.current = el;
+            if (el) {
+              el.setAttribute('playsinline', '');
+              el.setAttribute('webkit-playsinline', '');
+              el.setAttribute('x-webkit-airplay', 'allow');
+            }
+          }}
           className={mode === 'video' ? 'absolute inset-0 h-full w-full bg-black' : 'hidden'}
           playsInline
-          onWaiting={() => send({ type: 'buffering', buffering: true })}
-          onPlaying={() => send({ type: 'buffering', buffering: false })}
-          onCanPlay={() => send({ type: 'buffering', buffering: false })}
+          onSeeked={() => {
+            seekingRef.current = false;
+            if (!clockRef.current.paused) void playFollowingHost();
+          }}
+          onPlaying={() => {
+            const video = videoRef.current;
+            if (!video) return;
+            if (!needsUnmute) video.muted = false;
+          }}
         />
         {mode === 'iframe' && iframeUrl ? (
           <iframe
             title="Embed player"
             src={iframeUrl}
-            allow="autoplay; fullscreen"
+            allow="autoplay; fullscreen; playsinline"
             className="absolute inset-0 h-full w-full border-0"
           />
         ) : null}
@@ -420,12 +667,26 @@ export const WatchPlayer = () => {
             {cue.text}
           </div>
         ) : null}
+        {needsUnmute && mode === 'video' ? (
+          <button
+            type="button"
+            onClick={unlockAudio}
+            className="absolute top-1/2 left-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-card/95 px-4 py-2 text-sm font-semibold shadow-lg"
+          >
+            Tap for sound
+          </button>
+        ) : null}
+        {banner ? (
+          <p className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-4 left-4 z-20 rounded-md bg-background/80 px-3 py-2 text-center text-sm text-destructive">
+            {banner}
+          </p>
+        ) : null}
         {!overlay.visible ? (
           <button
             type="button"
             className="absolute inset-0 z-5"
             aria-label="Show controls"
-            onClick={overlay.show}
+            onClick={onInteract}
           />
         ) : null}
         <PlayerOverlay
@@ -438,7 +699,7 @@ export const WatchPlayer = () => {
           fullscreen={fullscreen}
           partyCode={room.code}
           onToggleOverlay={overlay.toggle}
-          onInteract={overlay.show}
+          onInteract={onInteract}
           onBack={() => {
             send({ type: 'leave' });
             location.href = '/';
@@ -466,26 +727,31 @@ export const WatchPlayer = () => {
           onToggleFullscreen={toggleFullscreen}
         />
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />
+        <MembersSheet
+          open={membersOpen}
+          onOpenChange={(open) => {
+            setMembersOpen(open);
+            if (!open) closeSheets(false);
+          }}
+          container={sheetHost}
+          code={room.code}
+          members={room.members}
+          onLeave={() => {
+            send({ type: 'leave' });
+            location.href = '/';
+          }}
+        />
+        <ChatSheet
+          open={chatOpen}
+          onOpenChange={(open) => {
+            setChatOpen(open);
+            if (!open) closeSheets(false);
+          }}
+          container={sheetHost}
+          chat={chat}
+          onSend={(text) => send({ type: 'chat', text })}
+        />
       </div>
-      {roomError ? (
-        <p className="px-4 py-2 text-sm text-destructive">{roomError}</p>
-      ) : null}
-      <MembersSheet
-        open={membersOpen}
-        onOpenChange={setMembersOpen}
-        code={room.code}
-        members={room.members}
-        onLeave={() => {
-          send({ type: 'leave' });
-          location.href = '/';
-        }}
-      />
-      <ChatSheet
-        open={chatOpen}
-        onOpenChange={setChatOpen}
-        chat={chat}
-        onSend={(text) => send({ type: 'chat', text })}
-      />
     </div>
   );
 };

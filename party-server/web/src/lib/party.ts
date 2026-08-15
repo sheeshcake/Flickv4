@@ -31,6 +31,7 @@ export interface PartyContent {
   posterPath?: string | null;
   season?: number;
   episode?: number;
+  imdbId?: string | null;
 }
 
 export interface PartyRoom {
@@ -42,7 +43,26 @@ export interface PartyRoom {
   source?: PartySource | null;
   embedUrl?: string | null;
   subtitles?: PartySubtitles | null;
+  locked?: boolean;
 }
+
+export interface PublicRoomSummary {
+  code: string;
+  title: string;
+  posterPath: string | null;
+  mediaType: 'movie' | 'tv';
+  season: number | null;
+  episode: number | null;
+  memberCount: number;
+  locked: boolean;
+  paused: boolean;
+}
+
+export const posterUrl = (posterPath: string | null | undefined): string | null => {
+  if (!posterPath) return null;
+  if (/^https?:\/\//i.test(posterPath)) return posterPath;
+  return `https://image.tmdb.org/t/p/w185${posterPath}`;
+};
 
 export type ServerMessage =
   | { type: 'joined'; memberId: string; room: PartyRoom }

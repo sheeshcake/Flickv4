@@ -14,7 +14,7 @@ function SheetOverlay({
 }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
     <DialogPrimitive.Overlay
-      className={cn('fixed inset-0 z-50 bg-black/70', className)}
+      className={cn('absolute inset-0 z-50 bg-black/70', className)}
       {...props}
     />
   );
@@ -23,20 +23,23 @@ function SheetOverlay({
 function SheetContent({
   className,
   children,
+  container,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content>) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  container?: HTMLElement | null;
+}) {
   return (
-    <SheetPortal>
+    <SheetPortal container={container ?? undefined}>
       <SheetOverlay />
       <DialogPrimitive.Content
         className={cn(
-          'fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-card p-6 shadow-lg',
+          'absolute inset-y-0 right-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-card p-6 shadow-lg max-md:inset-0 max-md:max-w-none max-md:border-l-0 pt-[max(1.5rem,env(safe-area-inset-top))] pr-[max(1.5rem,env(safe-area-inset-right))] pb-[max(1.5rem,env(safe-area-inset-bottom))] pl-[max(1.5rem,env(safe-area-inset-left))]',
           className,
         )}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute top-4 right-4 rounded-full p-1 text-foreground hover:bg-white/10">
+        <DialogPrimitive.Close className="absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] rounded-full p-2 text-foreground hover:bg-white/10">
           <X className="size-5" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>

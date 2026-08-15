@@ -20,9 +20,10 @@ interface ChatSheetProps {
   onOpenChange: (open: boolean) => void;
   chat: ChatLine[];
   onSend: (text: string) => void;
+  container?: HTMLElement | null;
 }
 
-export const ChatSheet = ({ open, onOpenChange, chat, onSend }: ChatSheetProps) => {
+export const ChatSheet = ({ open, onOpenChange, chat, onSend, container }: ChatSheetProps) => {
   const [text, setText] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -32,7 +33,7 @@ export const ChatSheet = ({ open, onOpenChange, chat, onSend }: ChatSheetProps) 
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent>
+      <SheetContent container={container}>
         <SheetHeader>
           <SheetTitle>Chat</SheetTitle>
           <SheetDescription>Messages stay in this room.</SheetDescription>
@@ -50,11 +51,20 @@ export const ChatSheet = ({ open, onOpenChange, chat, onSend }: ChatSheetProps) 
             className="mt-2"
             maxLength={200}
             placeholder="Say something"
+            enterKeyHint="send"
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.shiftKey) return;
+              e.preventDefault();
+              const next = text.trim();
+              if (!next) return;
+              onSend(next);
+              setText('');
+            }}
           />
           <Button
-            className="mt-2"
+            className="mt-2 h-12"
             onClick={() => {
               const next = text.trim();
               if (!next) return;

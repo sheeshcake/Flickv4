@@ -24,6 +24,11 @@ interface PlayerOverlayProps {
   onToggleFullscreen: () => void;
 }
 
+const seekFraction = (el: HTMLElement, clientX: number) => {
+  const rect = el.getBoundingClientRect();
+  return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+};
+
 export const PlayerOverlay = ({
   visible,
   title,
@@ -59,12 +64,12 @@ export const PlayerOverlay = ({
         onClick={onToggleOverlay}
       />
 
-      <div className="relative z-10 flex items-center gap-3 px-6 pt-5">
+      <div className="relative z-10 flex flex-wrap items-center gap-2 px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] sm:gap-3 sm:px-6 sm:pt-5">
         <Button
           type="button"
           variant="secondary"
           size="icon"
-          className="size-10"
+          className="size-11"
           onClick={() => {
             onInteract();
             onBack();
@@ -73,56 +78,60 @@ export const PlayerOverlay = ({
         >
           <ArrowLeft className="size-5" />
         </Button>
-        <img src={logo} alt="Flick" className="h-8 w-auto shrink-0" />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-lg font-bold">{title}</h2>
+        <img src={logo} alt="Flick" className="hidden h-8 w-auto shrink-0 sm:block" />
+        <div className="min-w-0 flex-1 basis-32">
+          <h2 className="truncate text-base font-bold sm:text-lg">{title}</h2>
           {subtitle ? (
             <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
           ) : null}
         </div>
-        <Button
-          type="button"
-          size="chip"
-          onClick={() => {
-            onInteract();
-            onOpenMembers();
-          }}
-        >
-          {partyCode}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className="size-10"
-          onClick={() => {
-            onInteract();
-            onOpenChat();
-          }}
-          aria-label="Chat"
-        >
-          <MessageCircle className="size-5" />
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className="size-10"
-          onClick={() => {
-            onInteract();
-            onToggleFullscreen();
-          }}
-          aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-        >
-          {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="button"
+            size="chip"
+            className="h-11 min-w-11 px-3"
+            onClick={() => {
+              onInteract();
+              onOpenMembers();
+            }}
+          >
+            {partyCode}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-11"
+            onClick={() => {
+              onInteract();
+              onOpenChat();
+            }}
+            aria-label="Chat"
+          >
+            <MessageCircle className="size-5" />
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-11"
+            onClick={() => {
+              onInteract();
+              onToggleFullscreen();
+            }}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
+          </Button>
+        </div>
       </div>
 
-      <div className="relative z-10 flex flex-1 items-center justify-center gap-10">
+      <div className="relative z-10 flex flex-1 items-center justify-center gap-8 sm:gap-10">
         <Button
           type="button"
           variant="secondary"
           size="icon"
+          className="size-12"
           onClick={() => {
             onInteract();
             onSeekBy(-10);
@@ -148,6 +157,7 @@ export const PlayerOverlay = ({
           type="button"
           variant="secondary"
           size="icon"
+          className="size-12"
           onClick={() => {
             onInteract();
             onSeekBy(10);
@@ -158,24 +168,25 @@ export const PlayerOverlay = ({
         </Button>
       </div>
 
-      <div className="relative z-10 px-8 pb-4">
+      <div className="relative z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8 sm:pb-4">
         <button
           type="button"
-          className="block h-1.5 w-full rounded-full bg-white/20"
+          className="flex h-8 w-full items-center"
           aria-label="Seek"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+          onPointerUp={(e) => {
+            const frac = seekFraction(e.currentTarget, e.clientX);
             onInteract();
             onScrubEnd(frac);
           }}
         >
-          <span
-            className="block h-full rounded-full bg-primary"
-            style={{ width: `${progress * 100}%` }}
-          />
+          <span className="block h-1.5 w-full rounded-full bg-white/20">
+            <span
+              className="block h-full rounded-full bg-primary"
+              style={{ width: `${progress * 100}%` }}
+            />
+          </span>
         </button>
-        <div className="mt-1.5 flex justify-between text-xs">
+        <div className="mt-0.5 flex justify-between text-xs">
           <span>{formatTime(currentTime)}</span>
           <span className="text-muted-foreground">{formatTime(duration)}</span>
         </div>

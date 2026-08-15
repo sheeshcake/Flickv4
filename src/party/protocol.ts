@@ -30,6 +30,13 @@ export interface PartyContent {
   posterPath?: string | null;
   season?: number;
   episode?: number;
+  imdbId?: string | null;
+}
+
+export interface PartyChatLine {
+  from: string;
+  text: string;
+  at?: number;
 }
 
 export interface PartyClock {
@@ -71,11 +78,26 @@ export interface PartyRoom {
   source?: PartySource | null;
   embedUrl?: string | null;
   subtitles?: PartySubtitles | null;
+  locked?: boolean;
 }
 
 export type ClientMessage =
-  | { type: 'create'; displayName: string; kind: PartyClientKind; content: PartyContent; clock?: PartyClock }
-  | { type: 'join'; displayName: string; kind: PartyClientKind; code: string }
+  | {
+      type: 'create';
+      displayName: string;
+      kind: PartyClientKind;
+      content: PartyContent;
+      clock?: PartyClock;
+      password?: string;
+    }
+  | {
+      type: 'join';
+      displayName: string;
+      kind: PartyClientKind;
+      code: string;
+      hostKey?: string;
+      password?: string;
+    }
   | { type: 'play' }
   | { type: 'pause' }
   | { type: 'seek'; positionSeconds: number }
@@ -96,7 +118,7 @@ export type ClientMessage =
   | { type: 'leave' };
 
 export type ServerMessage =
-  | { type: 'created'; memberId: string; room: PartyRoom }
+  | { type: 'created'; memberId: string; room: PartyRoom; hostKey: string }
   | { type: 'joined'; memberId: string; room: PartyRoom }
   | { type: 'state'; room: PartyRoom }
   | { type: 'clock'; clock: PartyClock }

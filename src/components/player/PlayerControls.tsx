@@ -8,8 +8,10 @@ import {
   Play,
   RotateCcw,
   RotateCw,
+  MessageCircle,
   Settings2,
   Sun,
+  Users,
   Volume2,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -53,6 +55,7 @@ interface PlayerControlsProps {
   partyCode?: string;
   partyLocked?: boolean;
   onOpenParty?: () => void;
+  onOpenChat?: () => void;
   /** Device media volume 0..1 (system volume when available). */
   volume: number;
   onVolumeChange: (value: number) => void;
@@ -109,6 +112,7 @@ export const PlayerControls = ({
   partyCode,
   partyLocked,
   onOpenParty,
+  onOpenChat,
 }: PlayerControlsProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
   const showBrightness =
@@ -147,7 +151,7 @@ export const PlayerControls = ({
             </Text>
           )}
         </VStack>
-        {onOpenParty && partyCode && (
+        {onOpenParty && partyCode ? (
           <Focusable
             onPress={onOpenParty}
             className="rounded-full bg-primary px-3 py-1"
@@ -156,6 +160,23 @@ export const PlayerControls = ({
             <Text size="xs" bold className="text-primary-foreground">
               {partyCode}
             </Text>
+          </Focusable>
+        ) : onOpenParty ? (
+          <Focusable
+            onPress={onOpenParty}
+            className="rounded-full bg-background/40 p-2"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
+          >
+            <Icon as={Users} size="lg" className="text-foreground" />
+          </Focusable>
+        ) : null}
+        {onOpenChat && (
+          <Focusable
+            onPress={onOpenChat}
+            className="rounded-full bg-background/40 p-2"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
+          >
+            <Icon as={MessageCircle} size="lg" className="text-foreground" />
           </Focusable>
         )}
         {onOpenEpisodes && (
