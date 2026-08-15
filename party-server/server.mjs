@@ -1,7 +1,7 @@
 /**
  * Flick watch-party room server.
  * Syncs TMDB identity + a host playback clock. Web companion waterfall:
- * Moviebox CDN file → `/media` proxy of the host stream → host embed URL.
+ * original host URI → `/media` proxy → Moviebox → host embed URL.
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */

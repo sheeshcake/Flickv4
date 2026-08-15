@@ -286,13 +286,24 @@ export const WatchPlayer = () => {
         playHostEmbed();
       };
 
+      const playViaProxy = () => {
+        loadSource(current.source, current.embedUrl, {
+          onFail: () => {
+            void tryMovieboxThenEmbed();
+          },
+        });
+      };
+
+      const playHostStream = () => {
+        loadSource(current.source, current.embedUrl, {
+          direct: true,
+          onFail: playViaProxy,
+        });
+      };
+
       if (lastWebKey.current === vkey) {
         if (modeRef.current !== 'iframe' && !webResolvedRef.current) {
-          loadSource(current.source, current.embedUrl, {
-            onFail: () => {
-              void tryMovieboxThenEmbed();
-            },
-          });
+          playHostStream();
         }
         return;
       }
@@ -301,11 +312,7 @@ export const WatchPlayer = () => {
       webResolvedRef.current = false;
 
       if (current.source?.uri) {
-        loadSource(current.source, current.embedUrl, {
-          onFail: () => {
-            void tryMovieboxThenEmbed();
-          },
-        });
+        playHostStream();
         return;
       }
 
@@ -456,8 +463,8 @@ export const WatchPlayer = () => {
     [applyClock, loadSource, loadSubtitles, playRoom, showWaiting],
   );
 
-  // <video> only mounts after `room` is set. Host /media proxy first,
-  // then Moviebox, then the host embed URL.
+  // <video> only mounts after `room` is set. Original host URI first,
+  // then /media proxy, then Moviebox, then the host embed URL.
   useEffect(() => {
     if (!room) return;
     void playRoom(room);
