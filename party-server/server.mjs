@@ -36,7 +36,7 @@ const MEDIA_UA =
 /** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string }} PartySource */
 /** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
 /** @typedef {{ id: string, displayName: string, kind: 'player'|'companion', role: 'host'|'guest', buffering: boolean, ws: import('ws').WebSocket }} Member */
-/** @typedef {{ code: string, hostId: string, hostKey: string, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, mediaAllowedHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
+/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, mediaAllowedHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -58,6 +58,31 @@ const uniqueCode = () => {
   return randomCode() + randomCode().slice(0, 1);
 };
 
+const PASSWORD_MAX = 64;
+const SCRYPT_KEYLEN = 32;
+
+const normalizePassword = (value) => {
+  if (typeof value !== 'string') return '';
+  return value.trim().slice(0, PASSWORD_MAX);
+};
+
+const hashPassword = (password) => {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN);
+  return `${salt.toString('hex')}:${hash.toString('hex')}`;
+};
+
+const verifyPassword = (password, stored) => {
+  if (!stored) return false;
+  const [saltHex, hashHex] = String(stored).split(':');
+  if (!saltHex || !hashHex) return false;
+  const salt = Buffer.from(saltHex, 'hex');
+  const expected = Buffer.from(hashHex, 'hex');
+  if (expected.length !== SCRYPT_KEYLEN) return false;
+  const actual = crypto.scryptSync(password, salt, SCRYPT_KEYLEN);
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+};
+
 const publicRoom = (room) => ({
   code: room.code,
   hostId: room.hostId,
@@ -66,6 +91,7 @@ const publicRoom = (room) => ({
   source: room.source,
   embedUrl: room.embedUrl,
   subtitles: room.subtitles,
+  locked: Boolean(room.passwordHash),
   members: [...room.members.values()].map((m) => ({
     id: m.id,
     displayName: m.displayName,
@@ -74,6 +100,19 @@ const publicRoom = (room) => ({
     buffering: m.buffering,
   })),
 });
+
+const publicRoomList = () =>
+  [...rooms.values()].map((room) => ({
+    code: room.code,
+    title: room.content.title,
+    posterPath: room.content.posterPath ?? null,
+    mediaType: room.content.mediaType,
+    season: room.content.season ?? null,
+    episode: room.content.episode ?? null,
+    memberCount: room.members.size,
+    locked: Boolean(room.passwordHash),
+    paused: Boolean(room.clock.paused),
+  }));
 
 const send = (ws, msg) => {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -744,6 +783,15 @@ const serveStatic = (req, res) => {
     return;
   }
 
+  if (url.pathname === '/rooms' && req.method === 'GET') {
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    res.end(JSON.stringify({ rooms: publicRoomList() }));
+    return;
+  }
+
   const mediaMatch = url.pathname.match(/^\/media\/([A-Za-z0-9]+)\/?$/);
   if (mediaMatch && (req.method === 'GET' || req.method === 'HEAD')) {
     void serveMedia(mediaMatch[1], req, res);
@@ -874,6 +922,8 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
     const code = uniqueCode();
     const id = `m${++memberSeq}`;
     const hostKey = crypto.randomBytes(16).toString('hex');
+    const password = normalizePassword(msg.password);
+    const passwordHash = password ? hashPassword(password) : null;
     const clock = {
       positionSeconds: Number(msg.clock?.positionSeconds) || 0,
       paused: msg.clock?.paused !== false,
@@ -893,6 +943,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       code,
       hostId: id,
       hostKey,
+      passwordHash,
       content: {
         tmdbId: content.tmdbId,
         mediaType: content.mediaType === 'tv' ? 'tv' : 'movie',
@@ -929,6 +980,13 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       typeof msg.hostKey === 'string' &&
       msg.hostKey.length > 0 &&
       msg.hostKey === room.hostKey;
+    if (room.passwordHash && !reclaim) {
+      const password = normalizePassword(msg.password);
+      if (!password) throw new Error('Password required');
+      if (!verifyPassword(password, room.passwordHash)) {
+        throw new Error('Wrong password');
+      }
+    }
     if (reclaim) room.hostId = id;
     room.members.set(id, {
       id,

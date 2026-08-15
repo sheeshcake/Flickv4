@@ -45,6 +45,7 @@ export const WatchPlayer = () => {
   const [cues, setCues] = useState<Cue[]>([]);
   const [subOffset, setSubOffset] = useState(0);
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
+  const [needsUnmute, setNeedsUnmute] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -98,6 +99,13 @@ export const WatchPlayer = () => {
     [send],
   );
 
+  const unlockAudio = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = false;
+    setNeedsUnmute(false);
+  }, []);
+
   const playFollowingHost = useCallback(async () => {
     const video = videoRef.current;
     if (!video || clockRef.current.paused) return;
@@ -106,10 +114,12 @@ export const WatchPlayer = () => {
       video.muted = true;
       await video.play();
       video.muted = false;
+      if (video.muted) setNeedsUnmute(true);
     } catch {
       try {
         video.muted = true;
         await video.play();
+        setNeedsUnmute(true);
       } catch {
         // Next clock tick or tap retries.
       }
@@ -192,7 +202,12 @@ export const WatchPlayer = () => {
         : mediaProxyUrl(current.code, source.uri);
       video.onerror = onFail;
       const isHls = source.kind === 'hls' || /\.m3u8(\?|#|$)/i.test(source.uri);
-      if (isHls && Hls.isSupported()) {
+      const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'));
+      if (isHls && nativeHls) {
+        video.src = playUrl;
+        setMode('video');
+        modeRef.current = 'video';
+      } else if (isHls && Hls.isSupported()) {
         const hls = new Hls({ enableWorker: true });
         hlsRef.current = hls;
         hls.loadSource(playUrl);
@@ -348,12 +363,13 @@ export const WatchPlayer = () => {
   }, []);
 
   const connect = useCallback(
-    (code: string, name: string) => {
+    (code: string, name: string, password?: string) => {
       if (code.length < 4) {
         setGateError('Enter a room code from Flick.');
         return;
       }
       setGateError('');
+      wsRef.current?.close();
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(`${proto}//${location.host}`);
       wsRef.current = ws;
@@ -364,6 +380,7 @@ export const WatchPlayer = () => {
             code,
             displayName: name || 'Web',
             kind: 'companion',
+            ...(password ? { password } : {}),
           }),
         );
       };
@@ -504,6 +521,29 @@ export const WatchPlayer = () => {
     };
   }, []);
 
+  const sheetOpen = membersOpen || chatOpen;
+  useEffect(() => {
+    if (!sheetOpen) return;
+    history.pushState({ partySheet: true }, '');
+    const onPop = () => {
+      setMembersOpen(false);
+      setChatOpen(false);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+    };
+  }, [sheetOpen]);
+
+  const closeSheets = useCallback((open: boolean) => {
+    if (open) return;
+    setMembersOpen(false);
+    setChatOpen(false);
+    if (history.state && history.state.partySheet) {
+      history.back();
+    }
+  }, []);
+
   const prevChatLen = useRef(0);
   useEffect(() => {
     if (chatOpen) {
@@ -577,11 +617,16 @@ export const WatchPlayer = () => {
       ? ''
       : roomError;
 
+  const onInteract = () => {
+    unlockAudio();
+    overlay.show();
+  };
+
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="h-dvh bg-background">
       <div
         ref={setStage}
-        className="relative mx-auto aspect-video w-full max-w-[1400px] overflow-hidden bg-black md:mt-0 md:h-screen md:max-w-none md:aspect-auto"
+        className="relative h-dvh w-full overflow-hidden bg-black"
       >
         {mode === 'none' ? (
           <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-muted-foreground">
@@ -589,7 +634,14 @@ export const WatchPlayer = () => {
           </div>
         ) : null}
         <video
-          ref={videoRef}
+          ref={(el) => {
+            videoRef.current = el;
+            if (el) {
+              el.setAttribute('playsinline', '');
+              el.setAttribute('webkit-playsinline', '');
+              el.setAttribute('x-webkit-airplay', 'allow');
+            }
+          }}
           className={mode === 'video' ? 'absolute inset-0 h-full w-full bg-black' : 'hidden'}
           playsInline
           onSeeked={() => {
@@ -598,14 +650,15 @@ export const WatchPlayer = () => {
           }}
           onPlaying={() => {
             const video = videoRef.current;
-            if (video) video.muted = false;
+            if (!video) return;
+            if (!needsUnmute) video.muted = false;
           }}
         />
         {mode === 'iframe' && iframeUrl ? (
           <iframe
             title="Embed player"
             src={iframeUrl}
-            allow="autoplay; fullscreen"
+            allow="autoplay; fullscreen; playsinline"
             className="absolute inset-0 h-full w-full border-0"
           />
         ) : null}
@@ -614,12 +667,26 @@ export const WatchPlayer = () => {
             {cue.text}
           </div>
         ) : null}
+        {needsUnmute && mode === 'video' ? (
+          <button
+            type="button"
+            onClick={unlockAudio}
+            className="absolute top-1/2 left-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-card/95 px-4 py-2 text-sm font-semibold shadow-lg"
+          >
+            Tap for sound
+          </button>
+        ) : null}
+        {banner ? (
+          <p className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-4 left-4 z-20 rounded-md bg-background/80 px-3 py-2 text-center text-sm text-destructive">
+            {banner}
+          </p>
+        ) : null}
         {!overlay.visible ? (
           <button
             type="button"
             className="absolute inset-0 z-5"
             aria-label="Show controls"
-            onClick={overlay.show}
+            onClick={onInteract}
           />
         ) : null}
         <PlayerOverlay
@@ -632,7 +699,7 @@ export const WatchPlayer = () => {
           fullscreen={fullscreen}
           partyCode={room.code}
           onToggleOverlay={overlay.toggle}
-          onInteract={overlay.show}
+          onInteract={onInteract}
           onBack={() => {
             send({ type: 'leave' });
             location.href = '/';
@@ -662,7 +729,10 @@ export const WatchPlayer = () => {
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />
         <MembersSheet
           open={membersOpen}
-          onOpenChange={setMembersOpen}
+          onOpenChange={(open) => {
+            setMembersOpen(open);
+            if (!open) closeSheets(false);
+          }}
           container={sheetHost}
           code={room.code}
           members={room.members}
@@ -673,15 +743,15 @@ export const WatchPlayer = () => {
         />
         <ChatSheet
           open={chatOpen}
-          onOpenChange={setChatOpen}
+          onOpenChange={(open) => {
+            setChatOpen(open);
+            if (!open) closeSheets(false);
+          }}
           container={sheetHost}
           chat={chat}
           onSend={(text) => send({ type: 'chat', text })}
         />
       </div>
-      {banner ? (
-        <p className="px-4 py-2 text-sm text-destructive">{banner}</p>
-      ) : null}
     </div>
   );
 };
