@@ -255,21 +255,7 @@ export const WatchPlayer = () => {
           }
         }
       } catch {
-        // Moviebox down — try Videasy, then the host proxy.
-      }
-      try {
-        const res = await fetch(`/videasy/${current.code}`);
-        if (res.ok) {
-          const data = (await res.json()) as { url?: string };
-          if (data.url) {
-            lastWebKey.current = vkey;
-            webResolvedRef.current = true;
-            playIframe(data.url);
-            return;
-          }
-        }
-      } catch {
-        // Videasy down or missing — use the host proxy.
+        // Moviebox down — use the host /media proxy, then embedUrl.
       }
       lastWebKey.current = vkey;
       webResolvedRef.current = false;
@@ -410,8 +396,8 @@ export const WatchPlayer = () => {
     [applyClock, loadSource, loadSubtitles, playRoom, showWaiting],
   );
 
-  // <video> only mounts after `room` is set. Moviebox file first, then
-  // Videasy, then the host proxy.
+  // <video> only mounts after `room` is set. Moviebox first, then the
+  // host /media proxy, then the host embed URL.
   useEffect(() => {
     if (!room) return;
     void playRoom(room);

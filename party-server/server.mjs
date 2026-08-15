@@ -1,8 +1,7 @@
 /**
  * Flick watch-party room server.
- * Syncs TMDB identity + a host playback clock. The web companion prefers a
- * Moviebox CDN file (no Railway video proxy). `/media` is a last-resort
- * Referer/Origin relay for the host’s scraped stream.
+ * Syncs TMDB identity + a host playback clock. Web companion waterfall:
+ * Moviebox CDN file → `/media` proxy of the host stream → host embed URL.
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
