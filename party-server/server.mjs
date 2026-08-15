@@ -334,6 +334,17 @@ const MOVIEBOX_HEADERS = {
 /** @type {{ token: string, at: number }} */
 const movieboxAuth = { token: '', at: 0 };
 
+const movieboxLog = (...args) => console.log('[Moviebox]', ...args);
+
+const shortMovieboxUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return String(url).slice(0, 120);
+  }
+};
+
 const movieboxFetch = async (url, init = {}, timeoutMs = 15000) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -346,8 +357,10 @@ const movieboxFetch = async (url, init = {}, timeoutMs = 15000) => {
 
 const getMovieboxToken = async () => {
   if (movieboxAuth.token && Date.now() - movieboxAuth.at < 25 * 60 * 1000) {
+    movieboxLog('token: cached');
     return movieboxAuth.token;
   }
+  movieboxLog('token: fetching guest JWT');
   const resp = await movieboxFetch(`${MOVIEBOX_API}/home?host=moviebox.ph`, {
     headers: MOVIEBOX_HEADERS,
   });
@@ -360,6 +373,7 @@ const getMovieboxToken = async () => {
     }
   }
   movieboxAuth.at = Date.now();
+  movieboxLog(movieboxAuth.token ? 'token: acquired' : 'token: missing');
   return movieboxAuth.token;
 };
 
@@ -453,6 +467,7 @@ const searchMoviebox = async (content) => {
   let best = null;
   let bestScore = 0;
   for (let page = 1; page <= 3; page++) {
+    movieboxLog('search: page', page, `"${content.title}"`);
     const resp = await movieboxFetch(`${MOVIEBOX_API}/subject/search`, {
       method: 'POST',
       headers,
@@ -462,9 +477,13 @@ const searchMoviebox = async (content) => {
         perPage: 20,
       }),
     });
-    if (!resp.ok) break;
+    if (!resp.ok) {
+      movieboxLog('search: page', page, 'failed', resp.status);
+      break;
+    }
     const json = await resp.json();
     const items = json?.data?.items || json?.data?.list || [];
+    movieboxLog('search: page', page, 'hits', items.length);
     if (!items.length) break;
     for (const raw of items) {
       const item = raw?.subject && raw.subject.title ? raw.subject : raw;
@@ -473,15 +492,31 @@ const searchMoviebox = async (content) => {
       if (score > bestScore) {
         best = item;
         bestScore = score;
+        movieboxLog('search: best so far', item.title, `score=${Math.round(score)}`);
       }
     }
     if (bestScore >= 120) break;
   }
-  return bestScore >= 70 ? best : null;
+  if (bestScore >= 70 && best) {
+    movieboxLog(
+      'search: matched',
+      best.title,
+      `score=${Math.round(bestScore)}`,
+      best.detailPath,
+    );
+    return best;
+  }
+  movieboxLog(
+    'search: no match',
+    `"${content.title}"`,
+    `bestScore=${Math.round(bestScore)}`,
+  );
+  return null;
 };
 
 const playMoviebox = async (item, content) => {
   const { se, ep } = movieboxPlayParams(item, content);
+  movieboxLog('play:', item.title, `se=${se}`, `ep=${ep}`, item.detailPath);
   const playUrl =
     `${MOVIEBOX_STREAM}/web/subject/play?subjectId=${encodeURIComponent(item.subjectId)}` +
     `&se=${se}&ep=${ep}&detailPath=${encodeURIComponent(item.detailPath)}`;
@@ -497,15 +532,44 @@ const playMoviebox = async (item, content) => {
       Referer: `https://h5.aoneroom.com/spa/videoPlayPage/movies/${item.detailPath}?id=${item.subjectId}&type=/movie/detail&detailSe=${se}&detailEp=${ep}&lang=en`,
     },
   });
-  if (!resp.ok) return { playerUrl, stream: null };
+  if (!resp.ok) {
+    movieboxLog('play: failed', resp.status);
+    return { playerUrl, stream: null };
+  }
   const json = await resp.json();
-  return { playerUrl, stream: pickMovieboxStream(json?.data) };
+  const stream = pickMovieboxStream(json?.data);
+  if (stream) {
+    const resolutions = (json?.data?.streams || [])
+      .map((s) => s.resolutions)
+      .filter(Boolean);
+    movieboxLog(
+      'play: stream',
+      stream.kind,
+      resolutions.length ? `qualities=${resolutions.join(',')}` : '',
+      shortMovieboxUrl(stream.url),
+    );
+  } else {
+    movieboxLog('play: no stream on subject', item.subjectId);
+  }
+  return { playerUrl, stream };
 };
 
 const resolveMoviebox = async (content) => {
+  movieboxLog(
+    'resolve:',
+    content.mediaType,
+    `"${content.title}"`,
+    content.mediaType === 'tv'
+      ? `S${content.season ?? '?'}E${content.episode ?? '?'}`
+      : '',
+  );
   const item = await searchMoviebox(content);
-  if (!item) return null;
+  if (!item) {
+    movieboxLog('resolve: no match');
+    return null;
+  }
   const { playerUrl, stream } = await playMoviebox(item, content);
+  movieboxLog(stream?.url ? 'resolve: ok' : 'resolve: player page only');
   return {
     url: stream?.url || null,
     kind: stream?.kind || 'file',
@@ -516,6 +580,7 @@ const resolveMoviebox = async (content) => {
 const serveMoviebox = async (code, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
   if (!room?.content?.title) {
+    movieboxLog('http: no room/title', code);
     res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: false }));
     return;
@@ -523,13 +588,21 @@ const serveMoviebox = async (code, res) => {
   try {
     const resolved = await resolveMoviebox(room.content);
     if (!resolved?.url && !resolved?.playerUrl) {
+      movieboxLog('http: 404', room.code, room.content.title);
       res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ ok: false }));
       return;
     }
+    movieboxLog(
+      'http: 200',
+      room.code,
+      resolved.url ? 'file' : 'iframe',
+      resolved.kind,
+    );
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, ...resolved }));
-  } catch {
+  } catch (err) {
+    movieboxLog('http: 502', err instanceof Error ? err.message : err);
     res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: false }));
   }

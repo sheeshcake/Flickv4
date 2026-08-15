@@ -230,6 +230,8 @@ export const WatchPlayer = () => {
         return;
       }
       try {
+        // eslint-disable-next-line no-console
+        console.log('[Moviebox]', 'fetch', current.code, current.content.title);
         const res = await fetch(`/moviebox/${current.code}`);
         if (res.ok) {
           const data = (await res.json()) as {
@@ -238,6 +240,8 @@ export const WatchPlayer = () => {
             playerUrl?: string;
           };
           if (data.url) {
+            // eslint-disable-next-line no-console
+            console.log('[Moviebox]', 'direct', data.kind, data.url.split('?')[0]);
             lastWebKey.current = vkey;
             webResolvedRef.current = true;
             loadSource(
@@ -248,14 +252,20 @@ export const WatchPlayer = () => {
             return;
           }
           if (data.playerUrl) {
+            // eslint-disable-next-line no-console
+            console.log('[Moviebox]', 'iframe', data.playerUrl);
             lastWebKey.current = vkey;
             webResolvedRef.current = true;
             playIframe(data.playerUrl);
             return;
           }
+        } else {
+          // eslint-disable-next-line no-console
+          console.log('[Moviebox]', 'http', res.status);
         }
-      } catch {
-        // Moviebox down — use the host /media proxy, then embedUrl.
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.log('[Moviebox]', 'fetch failed', err);
       }
       lastWebKey.current = vkey;
       webResolvedRef.current = false;
