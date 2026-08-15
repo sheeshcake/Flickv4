@@ -20,6 +20,9 @@ import { cueAt, parseSubtitleText, type Cue } from '@/lib/subtitles';
 
 type Mode = 'none' | 'video' | 'iframe';
 
+const hostIsPresent = (room: PartyRoom) =>
+  room.members.some((m) => m.id === room.hostId || m.role === 'host');
+
 export const WatchPlayer = () => {
   const [gateError, setGateError] = useState('');
   const [roomError, setRoomError] = useState('');
@@ -368,12 +371,18 @@ export const WatchPlayer = () => {
           roomRef.current = msg.room;
           setRoom(msg.room);
           setClock(msg.room.clock);
+          if (hostIsPresent(msg.room)) {
+            setRoomError((prev) => (prev === 'Host is away' ? '' : prev));
+          }
           return;
         }
         if (msg.type === 'state') {
           roomRef.current = msg.room;
           setRoom(msg.room);
           setClock(msg.room.clock);
+          if (hostIsPresent(msg.room)) {
+            setRoomError((prev) => (prev === 'Host is away' ? '' : prev));
+          }
           return;
         }
         if (msg.type === 'clock') {
@@ -555,6 +564,11 @@ export const WatchPlayer = () => {
   const subtitle = [ep, cap, clock.paused ? 'Paused' : 'Playing', 'Following host']
     .filter(Boolean)
     .join(' · ');
+  const banner = !hostIsPresent(room)
+    ? 'Host is away'
+    : roomError === 'Host is away'
+      ? ''
+      : roomError;
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -658,8 +672,8 @@ export const WatchPlayer = () => {
           onSend={(text) => send({ type: 'chat', text })}
         />
       </div>
-      {roomError ? (
-        <p className="px-4 py-2 text-sm text-destructive">{roomError}</p>
+      {banner ? (
+        <p className="px-4 py-2 text-sm text-destructive">{banner}</p>
       ) : null}
     </div>
   );
