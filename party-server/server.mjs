@@ -336,6 +336,24 @@ const movieboxAuth = { token: '', at: 0 };
 
 const movieboxLog = (...args) => console.log('[Moviebox]', ...args);
 
+const clientIpFromReq = (req) => {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd.trim()) {
+    return fwd.split(',')[0].trim();
+  }
+  if (Array.isArray(fwd) && fwd[0]) {
+    return String(fwd[0]).split(',')[0].trim();
+  }
+  const real = req.headers['x-real-ip'];
+  if (typeof real === 'string' && real.trim()) return real.trim();
+  return req.socket?.remoteAddress || '';
+};
+
+const geoHeaders = (clientIp) => {
+  if (!clientIp) return {};
+  return { 'X-Forwarded-For': clientIp, 'X-Real-IP': clientIp };
+};
+
 const shortMovieboxUrl = (url) => {
   try {
     const parsed = new URL(url);
@@ -355,14 +373,14 @@ const movieboxFetch = async (url, init = {}, timeoutMs = 15000) => {
   }
 };
 
-const getMovieboxToken = async () => {
+const getMovieboxToken = async (clientIp = '') => {
   if (movieboxAuth.token && Date.now() - movieboxAuth.at < 25 * 60 * 1000) {
     movieboxLog('token: cached');
     return movieboxAuth.token;
   }
   movieboxLog('token: fetching guest JWT');
   const resp = await movieboxFetch(`${MOVIEBOX_API}/home?host=moviebox.ph`, {
-    headers: MOVIEBOX_HEADERS,
+    headers: { ...MOVIEBOX_HEADERS, ...geoHeaders(clientIp) },
   });
   const xUser = resp.headers.get('x-user');
   if (xUser) {
@@ -458,10 +476,11 @@ const pickMovieboxStream = (data) => {
   return null;
 };
 
-const searchMoviebox = async (content) => {
-  const token = await getMovieboxToken();
+const searchMoviebox = async (content, clientIp = '') => {
+  const token = await getMovieboxToken(clientIp);
   const headers = {
     ...MOVIEBOX_HEADERS,
+    ...geoHeaders(clientIp),
     Authorization: token ? `Bearer ${token}` : '',
   };
   let best = null;
@@ -514,7 +533,7 @@ const searchMoviebox = async (content) => {
   return null;
 };
 
-const playMoviebox = async (item, content) => {
+const playMoviebox = async (item, content, clientIp = '') => {
   const { se, ep } = movieboxPlayParams(item, content);
   movieboxLog('play:', item.title, `se=${se}`, `ep=${ep}`, item.detailPath);
   const playUrl =
@@ -530,6 +549,7 @@ const playMoviebox = async (item, content) => {
       'Accept-Language': 'en-US,en;q=0.9',
       Origin: 'https://h5.aoneroom.com',
       Referer: `https://h5.aoneroom.com/spa/videoPlayPage/movies/${item.detailPath}?id=${item.subjectId}&type=/movie/detail&detailSe=${se}&detailEp=${ep}&lang=en`,
+      ...geoHeaders(clientIp),
     },
   });
   if (!resp.ok) {
@@ -554,7 +574,7 @@ const playMoviebox = async (item, content) => {
   return { playerUrl, stream };
 };
 
-const resolveMoviebox = async (content) => {
+const resolveMoviebox = async (content, clientIp = '') => {
   movieboxLog(
     'resolve:',
     content.mediaType,
@@ -562,13 +582,14 @@ const resolveMoviebox = async (content) => {
     content.mediaType === 'tv'
       ? `S${content.season ?? '?'}E${content.episode ?? '?'}`
       : '',
+    clientIp ? `ip=${clientIp}` : '',
   );
-  const item = await searchMoviebox(content);
+  const item = await searchMoviebox(content, clientIp);
   if (!item) {
     movieboxLog('resolve: no match');
     return null;
   }
-  const { playerUrl, stream } = await playMoviebox(item, content);
+  const { playerUrl, stream } = await playMoviebox(item, content, clientIp);
   movieboxLog(stream?.url ? 'resolve: ok' : 'resolve: player page only');
   return {
     url: stream?.url || null,
@@ -577,7 +598,7 @@ const resolveMoviebox = async (content) => {
   };
 };
 
-const serveMoviebox = async (code, res) => {
+const serveMoviebox = async (code, req, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
   if (!room?.content?.title) {
     movieboxLog('http: no room/title', code);
@@ -585,8 +606,9 @@ const serveMoviebox = async (code, res) => {
     res.end(JSON.stringify({ ok: false }));
     return;
   }
+  const clientIp = clientIpFromReq(req);
   try {
-    const resolved = await resolveMoviebox(room.content);
+    const resolved = await resolveMoviebox(room.content, clientIp);
     if (!resolved?.url && !resolved?.playerUrl) {
       movieboxLog('http: 404', room.code, room.content.title);
       res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
@@ -730,7 +752,7 @@ const serveStatic = (req, res) => {
 
   const movieboxMatch = url.pathname.match(/^\/moviebox\/([A-Za-z0-9]+)\/?$/);
   if (movieboxMatch && req.method === 'GET') {
-    void serveMoviebox(movieboxMatch[1], res);
+    void serveMoviebox(movieboxMatch[1], req, res);
     return;
   }
 
@@ -757,6 +779,13 @@ const serveStatic = (req, res) => {
 
   fs.readFile(filePath, (err, data) => {
     if (err) {
+      if (isPartyPage) {
+        res.writeHead(503, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(
+          '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Flick Watch Party</title></head><body style="font-family:sans-serif;background:#111;color:#eee;padding:2rem"><p>UI not built — run <code>npm run build</code> in party-server (Railway build command).</p></body></html>',
+        );
+        return;
+      }
       res.writeHead(404, { 'content-type': 'text/plain' });
       res.end('Not found');
       return;
