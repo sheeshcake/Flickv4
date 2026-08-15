@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 import { X } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -7,17 +6,14 @@ import { VStack } from '@/components/ui/vstack';
 import { Heading } from '@/components/ui/heading';
 import { Text } from '@/components/ui/text';
 import { Icon } from '@/components/ui/icon';
-import { Input, InputField } from '@/components/ui/input';
 import { Focusable } from '@/src/components/Focusable';
-import type { PartyChatLine, PartyRoom } from '@/src/party/protocol';
+import type { PartyRoom } from '@/src/party/protocol';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface PlayerPartyDrawerProps {
   visible: boolean;
   room: PartyRoom;
   role: 'host' | 'guest';
-  chat: PartyChatLine[];
-  onSendChat: (text: string) => void;
   onLeave: () => void;
   onClose: () => void;
 }
@@ -26,22 +22,12 @@ export const PlayerPartyDrawer = ({
   visible,
   room,
   role,
-  chat,
-  onSendChat,
   onLeave,
   onClose,
 }: PlayerPartyDrawerProps) => {
-  const [draft, setDraft] = useState('');
   if (!visible) return null;
 
   const waiting = room.members.filter((m) => m.buffering);
-
-  const sendDraft = () => {
-    const next = draft.trim();
-    if (!next) return;
-    onSendChat(next);
-    setDraft('');
-  };
 
   return (
     <Box style={StyleSheet.absoluteFill} className="z-50">
@@ -67,6 +53,11 @@ export const PlayerPartyDrawer = ({
               ? 'You control playback. Guests follow this device.'
               : 'Host controls playback on this device.'}
           </Text>
+          {!room.members.some((m) => m.id === room.hostId || m.role === 'host') && (
+            <Text size="sm" className="mb-3 text-destructive">
+              Host is away
+            </Text>
+          )}
           {waiting.length > 0 && (
             <Text size="sm" className="mb-3 text-primary">
               Waiting for {waiting.map((m) => m.displayName).join(', ')}
@@ -89,44 +80,6 @@ export const PlayerPartyDrawer = ({
               </Box>
             ))}
           </VStack>
-
-          <Heading size="sm" bold className="mt-5 mb-2 text-foreground">
-            Chat
-          </Heading>
-          <Box className="mb-2 min-h-24 rounded-md border border-border p-2">
-            {chat.length === 0 ? (
-              <Text size="xs" className="text-muted-foreground">
-                No messages yet.
-              </Text>
-            ) : (
-              chat.map((line, i) => (
-                <Text key={`${line.from}-${i}`} size="sm" className="mb-1 text-foreground">
-                  <Text size="sm" bold className="text-foreground">
-                    {line.from}
-                  </Text>{' '}
-                  {line.text}
-                </Text>
-              ))
-            )}
-          </Box>
-          <Input>
-            <InputField
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Say something"
-              maxLength={200}
-              onSubmitEditing={sendDraft}
-              returnKeyType="send"
-            />
-          </Input>
-          <Focusable
-            onPress={sendDraft}
-            className="mt-2 items-center rounded-md bg-foreground px-4 py-2"
-            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
-          >
-            <Text className="font-semibold text-background">Send</Text>
-          </Focusable>
-
           <Focusable
             onPress={onLeave}
             className="mt-6 items-center rounded-md bg-primary px-4 py-3"

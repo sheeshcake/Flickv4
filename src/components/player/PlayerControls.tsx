@@ -8,6 +8,7 @@ import {
   Play,
   RotateCcw,
   RotateCw,
+  MessageCircle,
   Settings2,
   Sun,
   Users,
@@ -54,6 +55,7 @@ interface PlayerControlsProps {
   partyCode?: string;
   partyLocked?: boolean;
   onOpenParty?: () => void;
+  onOpenChat?: () => void;
   /** Device media volume 0..1 (system volume when available). */
   volume: number;
   onVolumeChange: (value: number) => void;
@@ -110,6 +112,7 @@ export const PlayerControls = ({
   partyCode,
   partyLocked,
   onOpenParty,
+  onOpenChat,
 }: PlayerControlsProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
   const showBrightness =
@@ -167,6 +170,15 @@ export const PlayerControls = ({
             <Icon as={Users} size="lg" className="text-foreground" />
           </Focusable>
         ) : null}
+        {onOpenChat && (
+          <Focusable
+            onPress={onOpenChat}
+            className="rounded-full bg-background/40 p-2"
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
+          >
+            <Icon as={MessageCircle} size="lg" className="text-foreground" />
+          </Focusable>
+        )}
         {onOpenEpisodes && (
           <Focusable
             onPress={onOpenEpisodes}

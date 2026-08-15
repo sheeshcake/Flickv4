@@ -93,9 +93,17 @@ export class WatchPartyClient {
     content: PartyContent,
     kind: PartyClientKind = 'player',
     clock?: PartyClock,
+    password?: string,
   ): Promise<Extract<ServerMessage, { type: 'created' }>> {
     return this.request(
-      { type: 'create', displayName, kind, content, clock },
+      {
+        type: 'create',
+        displayName,
+        kind,
+        content,
+        clock,
+        ...(password ? { password } : {}),
+      },
       (m): m is Extract<ServerMessage, { type: 'created' }> => m.type === 'created',
     );
   }
@@ -105,6 +113,7 @@ export class WatchPartyClient {
     displayName: string,
     kind: PartyClientKind = 'player',
     hostKey?: string,
+    password?: string,
   ): Promise<Extract<ServerMessage, { type: 'joined' }>> {
     return this.request(
       {
@@ -113,6 +122,7 @@ export class WatchPartyClient {
         kind,
         code: code.trim().toUpperCase(),
         ...(hostKey ? { hostKey } : {}),
+        ...(password ? { password } : {}),
       },
       (m): m is Extract<ServerMessage, { type: 'joined' }> => m.type === 'joined',
     );

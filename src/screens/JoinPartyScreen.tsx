@@ -29,12 +29,13 @@ export const JoinPartyScreen = ({
   const navigation = useNavigation<Nav>();
   const { enabled, joinRoom, leaveRoom } = useWatchParty();
   const [code, setCode] = useState(route.params?.code ?? '');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [introDone, setIntroDone] = useState(false);
 
   const goToPlayer = useCallback(
-    async (rawCode: string) => {
+    async (rawCode: string, roomPassword?: string) => {
       if (!enabled) {
         setError('Watch party is not configured on this build.');
         return;
@@ -47,7 +48,11 @@ export const JoinPartyScreen = ({
       setBusy(true);
       setError(null);
       try {
-        const room = await joinRoom(trimmed);
+        const room = await joinRoom(
+          trimmed,
+          'player',
+          roomPassword?.trim() || undefined,
+        );
         const item = await mediaItemFromPartyContent(room.content);
         const season = room.content.season;
         const episode = room.content.episode;
@@ -124,6 +129,19 @@ export const JoinPartyScreen = ({
             />
           </Input>
 
+          <Input>
+            <InputField
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password (if the host set one)"
+              secureTextEntry
+              autoCorrect={false}
+              maxLength={64}
+              editable={!busy}
+              onSubmitEditing={() => void goToPlayer(code, password)}
+            />
+          </Input>
+
           {!!error && (
             <Text size="sm" className="text-destructive">
               {error}
@@ -131,7 +149,7 @@ export const JoinPartyScreen = ({
           )}
 
           <Button
-            onPress={() => void goToPlayer(code)}
+            onPress={() => void goToPlayer(code, password)}
             isDisabled={busy || !enabled}
           >
             {busy ? <ButtonSpinner /> : null}

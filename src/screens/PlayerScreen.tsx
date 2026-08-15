@@ -26,7 +26,12 @@ import { useDownloads } from '@/src/hooks/useDownloads';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { TMDBService } from '@/src/services/TMDBService';
 import { forceLandscape, restoreOrientation } from '@/src/utils/orientation';
-import { originOf, buildEmbedUrl } from '@/src/utils/streamUrl';
+import { buildEmbedUrl } from '@/src/utils/streamUrl';
+import {
+  MovieboxService,
+  isMovieboxServer,
+  playbackHeadersFor,
+} from '@/src/services/MovieboxService';
 import { getTitle, type Episode } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
@@ -148,20 +153,25 @@ export const PlayerScreen = ({
       if (role !== 'host') return;
       // Only the scraped media URL — never the embed/page link.
       if (!isPartyStreamUri(url)) return;
+      const headers = playbackHeadersFor(activeServer);
       send({
         type: 'source',
         uri: url.slice(0, PARTY_URI_MAX),
         kind: partySourceKind(url),
-        referer: `${activeServer.url}/`.slice(0, PARTY_URI_MAX),
-        origin: originOf(activeServer.url).slice(0, PARTY_URI_MAX),
-        embedUrl: buildEmbedUrl(activeServer, {
-          type,
-          tmdbId: item.id,
-          imdbId,
-          season,
-          episode,
-          title: getTitle(item),
-        }).slice(0, PARTY_URI_MAX),
+        referer: headers.Referer.slice(0, PARTY_URI_MAX),
+        origin: headers.Origin.slice(0, PARTY_URI_MAX),
+        ...(isMovieboxServer(activeServer)
+          ? {}
+          : {
+              embedUrl: buildEmbedUrl(activeServer, {
+                type,
+                tmdbId: item.id,
+                imdbId,
+                season,
+                episode,
+                title: getTitle(item),
+              }).slice(0, PARTY_URI_MAX),
+            }),
       });
     },
     [role, send, activeServer, type, item, imdbId, season, episode],
@@ -260,10 +270,7 @@ export const PlayerScreen = ({
         type: url.includes('.m3u8') ? 'm3u8' : undefined,
         // Default the request origin to the selected server, which many
         // stream hosts require (403 otherwise).
-        headers: {
-          Referer: `${activeServer.url}/`,
-          Origin: originOf(activeServer.url),
-        },
+        headers: playbackHeadersFor(activeServer),
       });
       publishHostSource(url);
     },
@@ -326,6 +333,55 @@ export const PlayerScreen = ({
     // instead of clobbering it with 0.
     tryNextServer(effectiveResumeFrom ?? 0);
   }, [tryNextServer, effectiveResumeFrom]);
+
+  const usingMoviebox = isMovieboxServer(activeServer);
+
+  useEffect(() => {
+    if (localForCurrent) return;
+    if (resolvedRef.current || source || noSource) return;
+    if (!usingMoviebox) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const resolved = await MovieboxService.resolve({
+          title: getTitle(item),
+          mediaType: type,
+          season,
+          episode,
+        });
+        if (cancelled || resolvedRef.current) return;
+        if (!resolved) {
+          onScrapeError();
+          return;
+        }
+        finish({
+          uri: resolved.uri,
+          type: resolved.kind === 'hls' ? 'm3u8' : undefined,
+          headers: playbackHeadersFor(activeServer),
+        });
+        publishHostSource(resolved.uri);
+      } catch {
+        if (!cancelled && !resolvedRef.current) onScrapeError();
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    localForCurrent,
+    source,
+    noSource,
+    usingMoviebox,
+    activeServer,
+    item,
+    type,
+    season,
+    episode,
+    finish,
+    onScrapeError,
+    publishHostSource,
+  ]);
 
   // A stream that DID resolve but then failed to actually play (403,
   // decoder/DRM issue, etc.) — reported by `PlayerCore`'s native `<Video>`
@@ -460,7 +516,7 @@ export const PlayerScreen = ({
   return (
     <Box className="flex-1 bg-black">
       <StatusBar hidden />
-      {!localForCurrent && (
+      {!localForCurrent && !usingMoviebox && (
         <WebViewScraper
           server={activeServer}
           tmdbId={item.id}
@@ -475,13 +531,15 @@ export const PlayerScreen = ({
           onDataExtracted={onExtracted}
           onError={onScrapeError}
           debug={scraperDebugEnabled}
+          muted={!scraperDebugEnabled}
+          autoTap={!scraperDebugEnabled}
           timeoutSeconds={activeServer.scraperTimeoutSeconds}
         />
       )}
       {/* Once a retry has kicked in (some earlier server already failed
           this cycle), name the server currently being tried so a
           multi-server failover isn't a silent, confusing wait. */}
-      {scraperDebugEnabled ? (
+      {scraperDebugEnabled && !usingMoviebox ? (
         // Debug: keep the WebView visible/interactive — once a stream is
         // found we deliberately keep showing it (see `onExtracted`) instead
         // of switching to the native player, so the page keeps playing the
@@ -514,6 +572,7 @@ export const PlayerScreen = ({
           onSelectServer={(id) =>
             handleSelectServer(id, effectiveResumeFrom ?? 0)
           }
+          canHide={scraperDebugEnabled && !usingMoviebox}
         />
       )}
       <Pressable

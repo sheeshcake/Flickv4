@@ -9,6 +9,7 @@ import {
   type ResolveRequest,
   type ResolvedStream,
 } from '@/src/services/DownloadService';
+import { MovieboxService } from '@/src/services/MovieboxService';
 
 /**
  * Off-screen harness that lets `DownloadService` resolve a stream URL by
@@ -31,8 +32,19 @@ export const DownloadResolverHost = () => {
   } | null>(null);
 
   useEffect(() => {
-    const resolver = (req: ResolveRequest) =>
-      new Promise<ResolvedStream>((resolve, reject) => {
+    const resolver = (req: ResolveRequest) => {
+      if (req.resolver === 'moviebox') {
+        return MovieboxService.resolve({
+          title: req.title ?? '',
+          mediaType: req.type,
+          season: req.season,
+          episode: req.episode,
+        }).then((resolved) => {
+          if (!resolved) throw new Error('Moviebox: no stream found');
+          return { videoUrl: resolved.uri, isWebM: false };
+        });
+      }
+      return new Promise<ResolvedStream>((resolve, reject) => {
         // If a scrape is already in-flight, refuse a concurrent request.
         if (pendingRef.current) {
           reject(new Error('Resolver busy'));
@@ -41,6 +53,7 @@ export const DownloadResolverHost = () => {
         pendingRef.current = { resolve, reject };
         setJob(req);
       });
+    };
 
     DownloadService.setResolver(resolver);
     void DownloadService.hydrate();

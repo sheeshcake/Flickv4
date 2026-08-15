@@ -8,6 +8,10 @@ import {
   type ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  MOVIEBOX_SERVER_ID,
+  type ServerResolver,
+} from '@/src/services/MovieboxService';
 
 const STORAGE_KEY = 'flick.servers';
 
@@ -18,6 +22,11 @@ export interface PlaybackServer {
   url: string;
   /** Built-in servers cannot be deleted. */
   builtIn?: boolean;
+  /**
+   * How this server resolves a stream. `moviebox` uses the aoneroom REST
+   * API (no WebView). Omitted/`webview` is the embed-page scraper.
+   */
+  resolver?: ServerResolver;
   /**
    * Optional custom embed URL template used for movies, for servers that
    * don't follow the default `{url}/{type}/{tmdbId}` path pattern — e.g. a
@@ -111,6 +120,7 @@ interface RemoteServerJson {
    * timeout. Omitted/null → app default (`DEFAULT_SCRAPER_TIMEOUT_SECONDS`).
    */
   scraper_timeout_seconds?: number | null;
+  resolver?: string | null;
 }
 
 const slugifyId = (name: string): string =>
@@ -140,8 +150,25 @@ const mapRemoteServer = (s: RemoteServerJson): PlaybackServer => {
     ...(scraperTimeoutSeconds != null
       ? { scraperTimeoutSeconds }
       : {}),
+    ...(s.resolver === 'moviebox' ? { resolver: 'moviebox' as const } : {}),
   };
 };
+
+/** Always present — does not depend on the remote `list.json` fetch. */
+export const MOVIEBOX_SERVER: PlaybackServer = {
+  id: MOVIEBOX_SERVER_ID,
+  name: 'Moviebox',
+  url: 'https://moviebox.ph',
+  builtIn: true,
+  resolver: 'moviebox',
+};
+
+const withLocalMoviebox = (list: PlaybackServer[]): PlaybackServer[] => [
+  MOVIEBOX_SERVER,
+  ...list.filter(
+    (s) => s.id !== MOVIEBOX_SERVER.id && s.resolver !== 'moviebox',
+  ),
+];
 
 /**
  * Last-resort fallback for `activeServer` — only ever surfaces on a
@@ -392,7 +419,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const servers = useMemo(
-    () => [...builtInServers, ...customServers],
+    () => [...withLocalMoviebox(builtInServers), ...customServers],
     [builtInServers, customServers],
   );
 

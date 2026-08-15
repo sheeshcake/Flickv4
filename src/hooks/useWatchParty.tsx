@@ -38,10 +38,15 @@ interface WatchPartyContextValue {
   companionUrl: string | null;
   displayName: string;
   chat: PartyChatLine[];
-  createRoom: (content: PartyContent, clock?: PartyClock) => Promise<PartyRoom>;
+  createRoom: (
+    content: PartyContent,
+    clock?: PartyClock,
+    password?: string,
+  ) => Promise<PartyRoom>;
   joinRoom: (
     code: string,
     kind?: PartyClientKind,
+    password?: string,
   ) => Promise<PartyRoom>;
   leaveRoom: () => void;
   send: (msg: ClientMessage) => void;
@@ -107,7 +112,12 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
     if (!clientRef.current) {
       const client = new WatchPartyClient(WATCH_PARTY_CONFIG.url);
       client.subscribe((msg) => {
-        if (msg.type === 'state') setRoom(msg.room);
+        if (msg.type === 'state') {
+          setRoom(msg.room);
+          if (msg.room.members.some((m) => m.id === msg.room.hostId || m.role === 'host')) {
+            setError((prev) => (prev === 'Host is away' ? null : prev));
+          }
+        }
         if (msg.type === 'clock' && roomRef.current) {
           setRoom({ ...roomRef.current, clock: msg.clock });
         }
@@ -155,11 +165,17 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const createRoom = useCallback(
-    async (content: PartyContent, clock?: PartyClock) => {
+    async (content: PartyContent, clock?: PartyClock, password?: string) => {
       setError(null);
       const client = await ensureClient();
       setChat([]);
-      const res = await client.create(displayName, content, 'player', clock);
+      const res = await client.create(
+        displayName,
+        content,
+        'player',
+        clock,
+        password,
+      );
       if (res.hostKey) void savePartyHostKey(res.room.code, res.hostKey);
       setMemberId(res.memberId);
       setRoom(res.room);
@@ -169,12 +185,16 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const joinRoom = useCallback(
-    async (code: string, kind: PartyClientKind = 'player') => {
+    async (
+      code: string,
+      kind: PartyClientKind = 'player',
+      password?: string,
+    ) => {
       setError(null);
       const client = await ensureClient();
       setChat([]);
       const hostKey = (await getPartyHostKey(code)) ?? undefined;
-      const res = await client.join(code, displayName, kind, hostKey);
+      const res = await client.join(code, displayName, kind, hostKey, password);
       setMemberId(res.memberId);
       setRoom(res.room);
       return res.room;

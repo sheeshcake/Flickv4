@@ -78,11 +78,26 @@ export interface PartyRoom {
   source?: PartySource | null;
   embedUrl?: string | null;
   subtitles?: PartySubtitles | null;
+  locked?: boolean;
 }
 
 export type ClientMessage =
-  | { type: 'create'; displayName: string; kind: PartyClientKind; content: PartyContent; clock?: PartyClock }
-  | { type: 'join'; displayName: string; kind: PartyClientKind; code: string; hostKey?: string }
+  | {
+      type: 'create';
+      displayName: string;
+      kind: PartyClientKind;
+      content: PartyContent;
+      clock?: PartyClock;
+      password?: string;
+    }
+  | {
+      type: 'join';
+      displayName: string;
+      kind: PartyClientKind;
+      code: string;
+      hostKey?: string;
+      password?: string;
+    }
   | { type: 'play' }
   | { type: 'pause' }
   | { type: 'seek'; positionSeconds: number }

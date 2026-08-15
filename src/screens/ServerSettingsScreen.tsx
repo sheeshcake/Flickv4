@@ -38,6 +38,7 @@ import {
   useServers,
   type PlaybackServer,
 } from '@/src/hooks/useServers';
+import { MovieboxService, isMovieboxServer } from '@/src/services/MovieboxService';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 // A well-known, always-available TMDB movie used purely as a probe when
@@ -86,15 +87,6 @@ export const ServerSettingsScreen = () => {
     setFormModalOpen(true);
   };
 
-  const runTest = useCallback(
-    (id: string, server: PlaybackServer) => {
-      if (testingId) return;
-      setTestingId(id);
-      setTestTarget(server);
-    },
-    [testingId],
-  );
-
   const finishTest = useCallback(() => {
     setTestTarget(null);
     setTestingId(null);
@@ -136,6 +128,60 @@ export const ServerSettingsScreen = () => {
       });
     },
     [testTarget, finishTest, toast],
+  );
+
+  const runTest = useCallback(
+    (id: string, server: PlaybackServer) => {
+      if (testingId) return;
+      setTestingId(id);
+      setTestTarget(server);
+      if (!isMovieboxServer(server)) return;
+      void MovieboxService.resolve({
+        title: TEST_TITLE,
+        mediaType: 'movie',
+      })
+        .then((resolved) => {
+          finishTest();
+          toast.show({
+            placement: 'top',
+            duration: resolved ? 3500 : 4500,
+            render: ({ id: toastId }) => (
+              <Toast
+                nativeID={toastId}
+                action={resolved ? 'success' : 'error'}
+                variant="solid"
+              >
+                <ToastTitle>
+                  {resolved
+                    ? `${server.name} works`
+                    : `${server.name} test failed`}
+                </ToastTitle>
+                <ToastDescription>
+                  {resolved
+                    ? 'Resolved a test stream successfully.'
+                    : 'Moviebox: no stream found'}
+                </ToastDescription>
+              </Toast>
+            ),
+          });
+        })
+        .catch((e) => {
+          finishTest();
+          toast.show({
+            placement: 'top',
+            duration: 4500,
+            render: ({ id: toastId }) => (
+              <Toast nativeID={toastId} action="error" variant="solid">
+                <ToastTitle>{`${server.name} test failed`}</ToastTitle>
+                <ToastDescription>
+                  {e instanceof Error ? e.message : 'Moviebox test failed'}
+                </ToastDescription>
+              </Toast>
+            ),
+          });
+        });
+    },
+    [testingId, finishTest, toast],
   );
 
   return (
@@ -219,7 +265,7 @@ export const ServerSettingsScreen = () => {
           URL, custom pattern, and scraper pipeline all work end-to-end.
           (Testing an in-progress add/edit draft has its own copy of this in
           `ServerFormModal`.) */}
-      {testTarget && (
+      {testTarget && !isMovieboxServer(testTarget) && (
         <Box className="absolute bottom-6 right-4 h-56 w-40 overflow-hidden rounded-lg border-2 border-primary bg-black">
           <WebViewScraper
             server={testTarget}

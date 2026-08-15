@@ -8,8 +8,12 @@ import {
   type DownloadTask,
 } from '@kesha-antonov/react-native-background-downloader';
 import type { ReactVideoSource } from 'react-native-video';
-import type { MediaItem } from '@/src/types';
+import { getTitle, type MediaItem } from '@/src/types';
 import { originOf } from '@/src/utils/streamUrl';
+import {
+  MOVIEBOX_PLAYBACK_HEADERS,
+  type ServerResolver,
+} from '@/src/services/MovieboxService';
 import {
   fetchHlsVariants,
   fetchMediaPlaylist,
@@ -94,6 +98,9 @@ export interface ResolveRequest {
   type: 'movie' | 'tv';
   season?: number;
   episode?: number;
+  /** Raw show/movie title — required for Moviebox search. */
+  title?: string;
+  resolver?: ServerResolver;
 }
 
 export interface ResolvedStream {
@@ -122,6 +129,7 @@ export interface EnqueueOptions {
    * the user's Settings default). Empty/undefined skips subtitle download.
    */
   subtitleLanguage?: string;
+  resolver?: ServerResolver;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,10 +172,16 @@ const jobIdFor = (
   return `${media}-${item.id}${suffix}-q${qualityHeight}`;
 };
 
-const buildHeaders = (serverUrl: string): Record<string, string> => ({
-  Referer: `${serverUrl}/`,
-  Origin: originOf(serverUrl),
-});
+const buildHeaders = (
+  serverUrl: string,
+  resolver?: ServerResolver,
+): Record<string, string> =>
+  resolver === 'moviebox'
+    ? { ...MOVIEBOX_PLAYBACK_HEADERS }
+    : {
+        Referer: `${serverUrl}/`,
+        Origin: originOf(serverUrl),
+      };
 
 // ---------------------------------------------------------------------------
 // Service
@@ -375,7 +389,7 @@ class DownloadServiceImpl {
       totalBytes: 0,
       localDir,
       subtitleLanguage: opts.subtitleLanguage?.trim() || undefined,
-      headers: buildHeaders(opts.serverUrl),
+      headers: buildHeaders(opts.serverUrl, opts.resolver),
       createdAt: now,
       updatedAt: now,
     };
@@ -440,6 +454,9 @@ class DownloadServiceImpl {
       episode: job.episode,
       title: job.title,
       subtitleLanguage: job.subtitleLanguage,
+      resolver: job.headers.Referer?.includes('moviebox.ph')
+        ? 'moviebox'
+        : undefined,
     }).catch((e) => log('resume: process failed', e));
   }
 
@@ -513,6 +530,8 @@ class DownloadServiceImpl {
           type: job.item.media_type === 'tv' ? 'tv' : 'movie',
           season: job.season,
           episode: job.episode,
+          title: getTitle(job.item),
+          resolver: opts.resolver,
         });
         streamUri = resolved.videoUrl;
         this.updateJob(id, {
