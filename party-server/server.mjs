@@ -1,7 +1,8 @@
 /**
  * Flick watch-party room server.
- * Syncs TMDB identity + a host playback clock. Relays stream bytes for the
- * web player with the host’s Referer/Origin (browsers cannot set Referer).
+ * Syncs TMDB identity + a host playback clock. The web companion prefers a
+ * Moviebox CDN file (no Railway video proxy). `/media` is a last-resort
+ * Referer/Origin relay for the host’s scraped stream.
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
@@ -318,6 +319,223 @@ const serveMedia = async (code, req, res) => {
   }
 };
 
+const MOVIEBOX_API = 'https://h5-api.aoneroom.com/wefeed-h5api-bff';
+const MOVIEBOX_STREAM = 'https://h5.aoneroom.com/wefeed-h5-bff';
+const MOVIEBOX_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+  Referer: 'https://moviebox.ph/',
+  Origin: 'https://moviebox.ph',
+  'X-Client-Info': '{"timezone":"Asia/Dhaka"}',
+  'X-Request-Lang': 'en',
+  Accept: 'application/json',
+  'Content-Type': 'application/json',
+};
+
+/** @type {{ token: string, at: number }} */
+const movieboxAuth = { token: '', at: 0 };
+
+const movieboxFetch = async (url, init = {}, timeoutMs = 15000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const getMovieboxToken = async () => {
+  if (movieboxAuth.token && Date.now() - movieboxAuth.at < 25 * 60 * 1000) {
+    return movieboxAuth.token;
+  }
+  const resp = await movieboxFetch(`${MOVIEBOX_API}/home?host=moviebox.ph`, {
+    headers: MOVIEBOX_HEADERS,
+  });
+  const xUser = resp.headers.get('x-user');
+  if (xUser) {
+    try {
+      movieboxAuth.token = JSON.parse(xUser).token || '';
+    } catch {
+      movieboxAuth.token = '';
+    }
+  }
+  movieboxAuth.at = Date.now();
+  return movieboxAuth.token;
+};
+
+const normalizeTitle = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\bs\d+(?:\s*-\s*s\d+)?\b/gi, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+const parseSeasonTag = (title) => {
+  const range = String(title).match(/\bS(\d+)\s*-\s*S(\d+)\b/i);
+  if (range) {
+    return { from: Number(range[1]), to: Number(range[2]), exact: null };
+  }
+  const exact = String(title).match(/\bS(\d+)\b/i);
+  if (exact) {
+    const n = Number(exact[1]);
+    return { from: n, to: n, exact: n };
+  }
+  return { from: null, to: null, exact: null };
+};
+
+const scoreMovieboxItem = (item, content) => {
+  const want = normalizeTitle(content.title);
+  const got = normalizeTitle(item.title);
+  if (!want || !got) return 0;
+  let score = 0;
+  if (got === want) score += 100;
+  else if (got.includes(want) || want.includes(got)) score += 70;
+  else {
+    const wantTokens = new Set(want.split(' ').filter(Boolean));
+    const gotTokens = got.split(' ').filter(Boolean);
+    const overlap = gotTokens.filter((t) => wantTokens.has(t)).length;
+    if (overlap === 0) return 0;
+    score += (overlap / Math.max(wantTokens.size, gotTokens.length)) * 50;
+  }
+  const isTv = content.mediaType === 'tv';
+  if (isTv && item.subjectType === 2) score += 20;
+  if (!isTv && item.subjectType === 1) score += 20;
+  const title = String(item.title || '');
+  if (/\[english\]/i.test(title)) score += 15;
+  if (/\[(hindi|tagalog|tamil|telugu|spanish|french)\]/i.test(title)) score -= 25;
+  if (isTv && content.season != null) {
+    const tag = parseSeasonTag(title);
+    if (tag.exact === content.season) score += 40;
+    else if (
+      tag.from != null &&
+      content.season >= tag.from &&
+      content.season <= tag.to
+    ) {
+      score += 25;
+    }
+  }
+  return score;
+};
+
+const movieboxPlayParams = (item, content) => {
+  if (content.mediaType !== 'tv') return { se: 0, ep: 0 };
+  const episode = Number(content.episode) || 1;
+  const season = Number(content.season) || 1;
+  const tag = parseSeasonTag(item.title);
+  if (tag.exact != null) return { se: 1, ep: episode };
+  return { se: season, ep: episode };
+};
+
+const pickMovieboxStream = (data) => {
+  const streams = (data?.streams || []).filter((s) => s?.url);
+  streams.sort(
+    (a, b) => Number(b.resolutions || 0) - Number(a.resolutions || 0),
+  );
+  if (streams[0]) {
+    const url = String(streams[0].url);
+    const format = String(streams[0].format || '');
+    const kind =
+      /\.m3u8(\?|#|$)/i.test(url) || /m3u8|hls/i.test(format) ? 'hls' : 'file';
+    return { url, kind };
+  }
+  const hls = (data?.hls || []).find((h) => h?.url || h?.src);
+  if (hls) return { url: String(hls.url || hls.src), kind: 'hls' };
+  return null;
+};
+
+const searchMoviebox = async (content) => {
+  const token = await getMovieboxToken();
+  const headers = {
+    ...MOVIEBOX_HEADERS,
+    Authorization: token ? `Bearer ${token}` : '',
+  };
+  let best = null;
+  let bestScore = 0;
+  for (let page = 1; page <= 3; page++) {
+    const resp = await movieboxFetch(`${MOVIEBOX_API}/subject/search`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        keyword: content.title,
+        page,
+        perPage: 20,
+      }),
+    });
+    if (!resp.ok) break;
+    const json = await resp.json();
+    const items = json?.data?.items || json?.data?.list || [];
+    if (!items.length) break;
+    for (const raw of items) {
+      const item = raw?.subject && raw.subject.title ? raw.subject : raw;
+      if (!item?.subjectId || !item?.detailPath) continue;
+      const score = scoreMovieboxItem(item, content);
+      if (score > bestScore) {
+        best = item;
+        bestScore = score;
+      }
+    }
+    if (bestScore >= 120) break;
+  }
+  return bestScore >= 70 ? best : null;
+};
+
+const playMoviebox = async (item, content) => {
+  const { se, ep } = movieboxPlayParams(item, content);
+  const playUrl =
+    `${MOVIEBOX_STREAM}/web/subject/play?subjectId=${encodeURIComponent(item.subjectId)}` +
+    `&se=${se}&ep=${ep}&detailPath=${encodeURIComponent(item.detailPath)}`;
+  const playerUrl =
+    `https://netfilm.world/spa/videoPlayPage/movies/${item.detailPath}` +
+    `?id=${item.subjectId}&type=/movie/detail&detailSe=${se}&detailEp=${ep}&lang=en`;
+  const resp = await movieboxFetch(playUrl, {
+    headers: {
+      'User-Agent': MOVIEBOX_HEADERS['User-Agent'],
+      Accept: 'application/json, text/plain, */*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      Origin: 'https://h5.aoneroom.com',
+      Referer: `https://h5.aoneroom.com/spa/videoPlayPage/movies/${item.detailPath}?id=${item.subjectId}&type=/movie/detail&detailSe=${se}&detailEp=${ep}&lang=en`,
+    },
+  });
+  if (!resp.ok) return { playerUrl, stream: null };
+  const json = await resp.json();
+  return { playerUrl, stream: pickMovieboxStream(json?.data) };
+};
+
+const resolveMoviebox = async (content) => {
+  const item = await searchMoviebox(content);
+  if (!item) return null;
+  const { playerUrl, stream } = await playMoviebox(item, content);
+  return {
+    url: stream?.url || null,
+    kind: stream?.kind || 'file',
+    playerUrl,
+  };
+};
+
+const serveMoviebox = async (code, res) => {
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room?.content?.title) {
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  try {
+    const resolved = await resolveMoviebox(room.content);
+    if (!resolved?.url && !resolved?.playerUrl) {
+      res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false }));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, ...resolved }));
+  } catch {
+    res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+  }
+};
+
 const videasyCandidates = (content) => {
   const ids = [String(content.tmdbId)];
   if (content.imdbId) ids.push(String(content.imdbId));
@@ -435,6 +653,12 @@ const serveStatic = (req, res) => {
   const mediaMatch = url.pathname.match(/^\/media\/([A-Za-z0-9]+)\/?$/);
   if (mediaMatch && (req.method === 'GET' || req.method === 'HEAD')) {
     void serveMedia(mediaMatch[1], req, res);
+    return;
+  }
+
+  const movieboxMatch = url.pathname.match(/^\/moviebox\/([A-Za-z0-9]+)\/?$/);
+  if (movieboxMatch && req.method === 'GET') {
+    void serveMoviebox(movieboxMatch[1], res);
     return;
   }
 

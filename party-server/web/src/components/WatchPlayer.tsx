@@ -52,7 +52,8 @@ export const WatchPlayer = () => {
   const lastSourceKey = useRef('');
   const failedSourceKey = useRef('');
   const lastSubUrl = useRef('');
-  const lastVideasyKey = useRef('');
+  const lastWebKey = useRef('');
+  const webResolvedRef = useRef(false);
   const roomRef = useRef<PartyRoom | null>(null);
   const clockRef = useRef(clock);
   const seekingRef = useRef(false);
@@ -136,7 +137,11 @@ export const WatchPlayer = () => {
   }, [playFollowingHost, predicted]);
 
   const loadSource = useCallback(
-    (source: PartySource | null | undefined, embedUrl: string | null | undefined) => {
+    (
+      source: PartySource | null | undefined,
+      embedUrl: string | null | undefined,
+      opts?: { direct?: boolean },
+    ) => {
       const current = roomRef.current;
       if (!source?.uri || !current) {
         lastSourceKey.current = '';
@@ -144,7 +149,7 @@ export const WatchPlayer = () => {
         showWaiting('Waiting for the host’s stream…');
         return;
       }
-      const key = `${source.kind}|${source.uri}`;
+      const key = `${opts?.direct ? 'direct' : 'proxy'}|${source.kind}|${source.uri}`;
       if (key === lastSourceKey.current && modeRef.current === 'video') {
         applyClock();
         return;
@@ -166,15 +171,18 @@ export const WatchPlayer = () => {
           video.removeAttribute('src');
           video.load();
           setMode('iframe');
+          modeRef.current = 'iframe';
           setIframeUrl(embedUrl);
           setCues([]);
           send({ type: 'buffering', buffering: false });
         } else {
           showWaiting('Stream blocked in this browser — Open in Flick.');
-          setRoomError('This CDN blocked the proxy (Referer still 403, or IP-locked).');
+          setRoomError('This CDN blocked the stream in the browser.');
         }
       };
-      const playUrl = mediaProxyUrl(current.code, source.uri);
+      const playUrl = opts?.direct
+        ? source.uri
+        : mediaProxyUrl(current.code, source.uri);
       video.onerror = onFail;
       const isHls = source.kind === 'hls' || /\.m3u8(\?|#|$)/i.test(source.uri);
       if (isHls && Hls.isSupported()) {
@@ -203,34 +211,68 @@ export const WatchPlayer = () => {
     [applyClock, send, showWaiting],
   );
 
+  const playIframe = (url: string) => {
+    lastSourceKey.current = '';
+    destroyHls();
+    setCues([]);
+    setMode('iframe');
+    modeRef.current = 'iframe';
+    setIframeUrl(url);
+  };
+
   const playRoom = useCallback(
     async (current: PartyRoom) => {
       const vkey = `${current.content.tmdbId}|${current.content.imdbId ?? ''}|${current.content.season ?? ''}|${current.content.episode ?? ''}`;
-      if (lastVideasyKey.current === vkey) {
-        if (modeRef.current !== 'iframe') {
+      if (lastWebKey.current === vkey) {
+        if (modeRef.current !== 'iframe' && !webResolvedRef.current) {
           loadSource(current.source, current.embedUrl);
         }
         return;
+      }
+      try {
+        const res = await fetch(`/moviebox/${current.code}`);
+        if (res.ok) {
+          const data = (await res.json()) as {
+            url?: string;
+            kind?: 'hls' | 'file';
+            playerUrl?: string;
+          };
+          if (data.url) {
+            lastWebKey.current = vkey;
+            webResolvedRef.current = true;
+            loadSource(
+              { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
+              data.playerUrl || current.embedUrl,
+              { direct: true },
+            );
+            return;
+          }
+          if (data.playerUrl) {
+            lastWebKey.current = vkey;
+            webResolvedRef.current = true;
+            playIframe(data.playerUrl);
+            return;
+          }
+        }
+      } catch {
+        // Moviebox down — try Videasy, then the host proxy.
       }
       try {
         const res = await fetch(`/videasy/${current.code}`);
         if (res.ok) {
           const data = (await res.json()) as { url?: string };
           if (data.url) {
-            lastVideasyKey.current = vkey;
-            lastSourceKey.current = '';
-            destroyHls();
-            setCues([]);
-            setMode('iframe');
-            modeRef.current = 'iframe';
-            setIframeUrl(data.url);
+            lastWebKey.current = vkey;
+            webResolvedRef.current = true;
+            playIframe(data.url);
             return;
           }
         }
       } catch {
         // Videasy down or missing — use the host proxy.
       }
-      lastVideasyKey.current = vkey;
+      lastWebKey.current = vkey;
+      webResolvedRef.current = false;
       loadSource(current.source, current.embedUrl);
     },
     [loadSource],
@@ -316,7 +358,7 @@ export const WatchPlayer = () => {
             };
             setRoom(roomRef.current);
           }
-          if (modeRef.current !== 'iframe') {
+          if (modeRef.current !== 'iframe' && !webResolvedRef.current) {
             loadSource(msg.source, msg.embedUrl);
           }
           return;
@@ -333,7 +375,8 @@ export const WatchPlayer = () => {
           lastSourceKey.current = '';
           failedSourceKey.current = '';
           lastSubUrl.current = '';
-          lastVideasyKey.current = '';
+          lastWebKey.current = '';
+          webResolvedRef.current = false;
           setCues([]);
           if (roomRef.current) {
             roomRef.current = {
@@ -367,7 +410,8 @@ export const WatchPlayer = () => {
     [applyClock, loadSource, loadSubtitles, playRoom, showWaiting],
   );
 
-  // <video> only mounts after `room` is set. Videasy first, then host proxy.
+  // <video> only mounts after `room` is set. Moviebox file first, then
+  // Videasy, then the host proxy.
   useEffect(() => {
     if (!room) return;
     void playRoom(room);
