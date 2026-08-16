@@ -1,7 +1,7 @@
 /**
  * Flick watch-party room server.
  * Syncs TMDB identity + a host playback clock. Web companion waterfall:
- * original host URI → `/media` proxy → Moviebox → host embed URL.
+ * original host URI → `/media` proxy → Moviebox → Streamflix → host embed URL.
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
@@ -641,6 +641,138 @@ const resolveMoviebox = async (content, clientIp = '') => {
   };
 };
 
+const STREAMFLIX_KEY = Buffer.from('x7k9mPqT2rWvY8zA5bC3nF6hJ2lK4mN9', 'utf8');
+const STREAMFLIX_IV = STREAMFLIX_KEY.subarray(0, 16);
+const STREAMFLIX_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+
+const streamflixLog = (...args) => console.log('[Streamflix]', ...args);
+
+const isStreamUri = (uri) =>
+  /^https?:\/\//i.test(uri) && /\.(m3u8|mp4|webm|mkv)(\?|#|$)/i.test(uri);
+
+const encryptVidrockId = (data) => {
+  const cipher = crypto.createCipheriv('aes-256-cbc', STREAMFLIX_KEY, STREAMFLIX_IV);
+  const enc = Buffer.concat([cipher.update(String(data), 'utf8'), cipher.final()]);
+  return enc.toString('base64url');
+};
+
+const streamflixFetch = async (url, timeoutMs = 15000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      headers: {
+        'User-Agent': STREAMFLIX_UA,
+        Accept: 'application/json',
+        Referer: 'https://vidrock.net/',
+        Origin: 'https://vidrock.net',
+      },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const pickAtlasMp4 = async (listUrl) => {
+  try {
+    const res = await streamflixFetch(listUrl);
+    if (!res.ok) return null;
+    const qualities = await res.json();
+    if (!Array.isArray(qualities)) return null;
+    const highest = qualities
+      .filter((q) => typeof q?.url === 'string' && q.url)
+      .sort((a, b) => (b.resolution ?? 0) - (a.resolution ?? 0))[0];
+    return highest?.url && isStreamUri(highest.url) ? highest.url : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveStreamflix = async (content) => {
+  const tmdbId = Number(content.tmdbId);
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
+    streamflixLog('resolve: missing tmdbId');
+    return null;
+  }
+  const isTv =
+    content.mediaType === 'tv' &&
+    content.season != null &&
+    content.episode != null;
+  const payload = isTv
+    ? `${tmdbId}_${content.season}_${content.episode}`
+    : String(tmdbId);
+  const encoded = encryptVidrockId(payload);
+  const apiUrl = isTv
+    ? `https://vidrock.net/api/tv/${encoded}`
+    : `https://vidrock.net/api/movie/${encoded}`;
+  streamflixLog('resolve:', content.mediaType, tmdbId, payload);
+  const res = await streamflixFetch(apiUrl);
+  if (!res.ok) {
+    streamflixLog('resolve: http', res.status);
+    return null;
+  }
+  const body = await res.json();
+  if (!body || typeof body !== 'object') {
+    streamflixLog('resolve: empty body');
+    return null;
+  }
+  const hlsCandidates = [];
+  let atlasUrl = null;
+  for (const [name, data] of Object.entries(body)) {
+    const url = typeof data?.url === 'string' ? data.url.trim() : '';
+    if (!url) continue;
+    if (String(name).toLowerCase() === 'atlas') {
+      atlasUrl = url;
+      continue;
+    }
+    if (isStreamUri(url)) hlsCandidates.push(url);
+  }
+  if (hlsCandidates[0]) {
+    const url = hlsCandidates[0];
+    const kind = /\.m3u8(\?|#|$)/i.test(url) ? 'hls' : 'file';
+    streamflixLog('resolve: ok', kind);
+    return { url, kind };
+  }
+  if (atlasUrl) {
+    const mp4 = isStreamUri(atlasUrl) ? atlasUrl : await pickAtlasMp4(atlasUrl);
+    if (mp4) {
+      const kind = /\.m3u8(\?|#|$)/i.test(mp4) ? 'hls' : 'file';
+      streamflixLog('resolve: atlas', kind);
+      return { url: mp4, kind };
+    }
+  }
+  streamflixLog('resolve: no playable stream');
+  return null;
+};
+
+const serveStreamflix = async (code, res) => {
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room?.content?.tmdbId) {
+    streamflixLog('http: no room/tmdb', code);
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  try {
+    const resolved = await resolveStreamflix(room.content);
+    if (!resolved?.url) {
+      streamflixLog('http: 404', room.code, room.content.tmdbId);
+      res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false }));
+      return;
+    }
+    streamflixLog('http: 200', room.code, resolved.kind);
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, ...resolved }));
+  } catch (err) {
+    streamflixLog('http: 502', err instanceof Error ? err.message : err);
+    res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+  }
+};
+
 const serveMoviebox = async (code, req, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
   if (!room?.content?.title) {
@@ -805,6 +937,12 @@ const serveStatic = (req, res) => {
   const movieboxMatch = url.pathname.match(/^\/moviebox\/([A-Za-z0-9]+)\/?$/);
   if (movieboxMatch && req.method === 'GET') {
     void serveMoviebox(movieboxMatch[1], req, res);
+    return;
+  }
+
+  const streamflixMatch = url.pathname.match(/^\/streamflix\/([A-Za-z0-9]+)\/?$/);
+  if (streamflixMatch && req.method === 'GET') {
+    void serveStreamflix(streamflixMatch[1], res);
     return;
   }
 

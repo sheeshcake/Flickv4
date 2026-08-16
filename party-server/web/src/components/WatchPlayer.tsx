@@ -338,6 +338,41 @@ export const WatchPlayer = () => {
           // eslint-disable-next-line no-console
           console.log('[Moviebox]', 'fetch failed', err);
         }
+        void tryStreamflixThenEmbed();
+      };
+
+      const tryStreamflixThenEmbed = async () => {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[Streamflix]', 'fetch', current.code, current.content.tmdbId);
+          const res = await fetch(`/streamflix/${current.code}`);
+          if (res.ok) {
+            const data = (await res.json()) as {
+              url?: string;
+              kind?: 'hls' | 'file';
+            };
+            if (data.url) {
+              // eslint-disable-next-line no-console
+              console.log('[Streamflix]', 'direct', data.kind, data.url.split('?')[0]);
+              webResolvedRef.current = true;
+              loadSource(
+                { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
+                current.embedUrl,
+                {
+                  direct: true,
+                  onFail: playHostEmbed,
+                },
+              );
+              return;
+            }
+          } else {
+            // eslint-disable-next-line no-console
+            console.log('[Streamflix]', 'http', res.status);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.log('[Streamflix]', 'fetch failed', err);
+        }
         playHostEmbed();
       };
 

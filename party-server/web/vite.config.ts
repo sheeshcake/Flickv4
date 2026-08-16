@@ -20,6 +20,7 @@ export default defineConfig({
       '/subtitle': 'http://127.0.0.1:8787',
       '/videasy': 'http://127.0.0.1:8787',
       '/moviebox': 'http://127.0.0.1:8787',
+      '/streamflix': 'http://127.0.0.1:8787',
       '/health': 'http://127.0.0.1:8787',
       '/rooms': 'http://127.0.0.1:8787',
       '/ws': {
