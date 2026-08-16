@@ -15,7 +15,9 @@ import {
   ReactionOverlay,
   type FloatingReaction,
 } from '@/components/ReactionOverlay';
+import { CallGrid } from '@/components/CallGrid';
 import { useOverlayVisibility } from '@/hooks/useOverlayVisibility';
+import { usePartyRtc } from '@/hooks/usePartyRtc';
 import {
   codeFromPath,
   isPartyReaction,
@@ -58,6 +60,7 @@ export const WatchPlayer = () => {
   const [gateError, setGateError] = useState('');
   const [roomError, setRoomError] = useState('');
   const [room, setRoom] = useState<PartyRoom | null>(null);
+  const [memberId, setMemberId] = useState<string | null>(null);
   const [clock, setClock] = useState<PartyClock>({
     positionSeconds: 0,
     paused: true,
@@ -129,6 +132,10 @@ export const WatchPlayer = () => {
     const ws = wsRef.current;
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
   }, []);
+
+  const rtc = usePartyRtc(memberId, room, send);
+  const rtcOnMessageRef = useRef(rtc.onMessage);
+  rtcOnMessageRef.current = rtc.onMessage;
 
   const enqueueReaction = useCallback((from: string, emoji: string) => {
     if (!isPartyReaction(emoji)) return;
@@ -506,6 +513,10 @@ export const WatchPlayer = () => {
             const sources = data.sources ?? [];
             setStreamflixSources(sources);
             streamflixSourcesRef.current = sources;
+            const hostSourceId = current.source?.sourceId;
+            const byId = hostSourceId
+              ? sources.find((s) => s.id === hostSourceId)
+              : undefined;
             const hostUri = current.source?.uri;
             const match = hostUri
               ? sources.find((s) => s.url && s.url === hostUri)
@@ -513,9 +524,14 @@ export const WatchPlayer = () => {
             const firstEnglish = sources.find((s) =>
               /english/i.test(s.language || ''),
             );
-            const pick = match ?? firstEnglish ?? sources[0];
+            const pick = byId ?? match ?? firstEnglish ?? sources[0];
             if (pick) {
-              streamflixLog('pick', pick.name, pick.language || '');
+              streamflixLog(
+                'pick',
+                pick.name,
+                pick.language || '',
+                hostSourceId ? `host=${hostSourceId}` : '',
+              );
               await playStreamflixSource(current, pick, sources);
               return;
             }
@@ -619,6 +635,11 @@ export const WatchPlayer = () => {
       };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(String(ev.data)) as ServerMessage;
+        rtcOnMessageRef.current(msg);
+        if (msg.type === 'rtc-peers' && roomRef.current) {
+          roomRef.current = { ...roomRef.current, rtcMemberIds: msg.ids };
+          setRoom(roomRef.current);
+        }
         if (msg.type === 'error') {
           if (roomRef.current) setRoomError(msg.message);
           else setGateError(msg.message);
@@ -626,6 +647,7 @@ export const WatchPlayer = () => {
         }
         if (msg.type === 'joined') {
           roomRef.current = msg.room;
+          setMemberId(msg.memberId);
           setRoom(msg.room);
           setClock(msg.room.clock);
           if (hostIsPresent(msg.room)) {
@@ -657,13 +679,34 @@ export const WatchPlayer = () => {
             };
             setRoom(roomRef.current);
           }
+          const hostSourceId = msg.source?.sourceId;
+          const hostChanged =
+            !!hostSourceId && hostSourceId !== activeSourceIdRef.current;
+          if (hostChanged) {
+            guestPickedSourceRef.current = false;
+            webResolvedRef.current = false;
+          }
           if (
             roomRef.current &&
             modeRef.current !== 'iframe' &&
-            !webResolvedRef.current &&
+            (!webResolvedRef.current || hostChanged) &&
             !guestPickedSourceRef.current
           ) {
-            void playRoom(roomRef.current);
+            const listed = streamflixSourcesRef.current;
+            const listedMatch = hostSourceId
+              ? listed.find((s) => s.id === hostSourceId)
+              : undefined;
+            if (listedMatch) {
+              triedSourceIdsRef.current = new Set();
+              void playStreamflixSource(
+                roomRef.current,
+                listedMatch,
+                listed,
+              );
+            } else {
+              lastWebKey.current = '';
+              void playRoom(roomRef.current);
+            }
           }
           return;
         }
@@ -773,6 +816,7 @@ export const WatchPlayer = () => {
           return;
         }
         if (msg.type === 'ended') {
+          setMemberId(null);
           setRoomError(msg.reason || 'Room ended');
           showWaiting(msg.reason || 'Room ended');
         }
@@ -788,6 +832,7 @@ export const WatchPlayer = () => {
       loadSource,
       loadSubtitles,
       playRoom,
+      playStreamflixSource,
       showWaiting,
     ],
   );
@@ -1072,6 +1117,11 @@ export const WatchPlayer = () => {
             onClick={onInteract}
           />
         ) : null}
+        <CallGrid
+          localStream={rtc.localStream}
+          remotes={rtc.remotes}
+          camOff={rtc.camOff}
+        />
         <ReactionOverlay items={reactions} onExpire={expireReaction} />
         <PlayerOverlay
           visible={overlay.visible}
@@ -1091,6 +1141,7 @@ export const WatchPlayer = () => {
           }}
           onInteract={onInteract}
           onBack={() => {
+            rtc.leaveCall();
             send({ type: 'leave' });
             location.href = '/';
           }}
@@ -1119,6 +1170,15 @@ export const WatchPlayer = () => {
           reactionsOpen={reactionsOpen}
           onSelectReaction={sendReaction}
           onToggleFullscreen={toggleFullscreen}
+          inCall={rtc.joined}
+          muted={rtc.muted}
+          camOff={rtc.camOff}
+          onToggleCall={() => {
+            if (rtc.joined) rtc.leaveCall();
+            else void rtc.joinCall();
+          }}
+          onToggleMute={rtc.toggleMute}
+          onToggleCam={rtc.toggleCam}
         />
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />
         <MembersSheet
@@ -1131,6 +1191,7 @@ export const WatchPlayer = () => {
           code={room.code}
           members={room.members}
           onLeave={() => {
+            rtc.leaveCall();
             send({ type: 'leave' });
             location.href = '/';
           }}

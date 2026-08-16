@@ -37,10 +37,10 @@ const MEDIA_UA =
 
 /** @typedef {{ tmdbId: number, mediaType: 'movie'|'tv', title: string, posterPath?: string|null, season?: number, episode?: number, imdbId?: string|null }} PartyContent */
 /** @typedef {{ positionSeconds: number, paused: boolean, updatedAt: number }} PartyClock */
-/** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string }} PartySource */
+/** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string, sourceId?: string }} PartySource */
 /** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
 /** @typedef {{ id: string, displayName: string, kind: 'player'|'companion', role: 'host'|'guest', buffering: boolean, ws: import('ws').WebSocket }} Member */
-/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, browsing: boolean, mediaAllowedHosts: Set<string>, streamflixHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
+/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, browsing: boolean, rtcMemberIds: Set<string>, mediaAllowedHosts: Set<string>, streamflixHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -97,7 +97,8 @@ const publicRoom = (room) => ({
   subtitles: room.subtitles,
   browsing: Boolean(room.browsing),
   locked: Boolean(room.passwordHash),
-  members: [...room.members.values()].map((m) => ({
+  rtcMemberIds: [...(room.rtcMemberIds ?? [])],
+  members: [...room.members.values()].map((m) => ({)
     id: m.id,
     displayName: m.displayName,
     kind: m.kind,
@@ -1093,9 +1094,15 @@ wss.on('connection', (ws) => {
     if (!room) return;
     const leavingHost = isHost(room, memberId);
     room.members.delete(memberId);
+    const rtcIds = room.rtcMemberIds ?? new Set();
+    const wasInCall = rtcIds.delete(memberId);
+    room.rtcMemberIds = rtcIds;
     if (room.members.size === 0) {
       destroyRoom(room.code, 'Room empty');
       return;
+    }
+    if (wasInCall) {
+      broadcast(room, { type: 'rtc-peers', ids: [...rtcIds] });
     }
     if (leavingHost) {
       applyHostClock(room, { paused: true });
@@ -1163,6 +1170,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       mediaAllowedHosts: new Set(),
       streamflixHosts: new Set(),
       browsing: false,
+      rtcMemberIds: new Set(),
       members: new Map([[id, host]]),
       lastActive: Date.now(),
     };
@@ -1285,7 +1293,12 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       if (!isHost(room, memberId)) throw new Error('Only the host can set the source');
       const uri = String(msg.uri || '').slice(0, URI_MAX);
       if (!uri) throw new Error('Missing source');
-      if (!/^https?:\/\//i.test(uri) || !/\.(m3u8|mp4|webm|mkv)(\?|#|$)/i.test(uri)) {
+      const sourceId =
+        msg.sourceId != null ? String(msg.sourceId).slice(0, 80) : '';
+      const looksHttp = /^https?:\/\//i.test(uri);
+      const looksStream = /\.(m3u8|mp4|webm|mkv)(\?|#|$)/i.test(uri);
+      // Streamflix Vidrock URLs are often extensionless; sourceId marks them.
+      if (!looksHttp || (!looksStream && !sourceId)) {
         throw new Error('Source must be a stream URL (m3u8/mp4), not an embed page');
       }
       const kind = /\.m3u8(\?|#|$)/i.test(uri)
@@ -1306,6 +1319,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         kind,
         ...(referer ? { referer } : {}),
         ...(origin ? { origin } : {}),
+        ...(sourceId ? { sourceId } : {}),
       };
       seedMediaHosts(room, uri);
       if (msg.embedUrl !== undefined) {
@@ -1394,6 +1408,43 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         },
         memberId,
       );
+      return;
+    }
+    case 'rtc-join': {
+      if (!room.rtcMemberIds) room.rtcMemberIds = new Set();
+      room.rtcMemberIds.add(memberId);
+      touch(room);
+      broadcast(room, { type: 'rtc-peers', ids: [...room.rtcMemberIds] });
+      broadcast(room, { type: 'state', room: publicRoom(room) });
+      return;
+    }
+    case 'rtc-leave': {
+      if (!room.rtcMemberIds) room.rtcMemberIds = new Set();
+      room.rtcMemberIds.delete(memberId);
+      touch(room);
+      broadcast(room, { type: 'rtc-peers', ids: [...room.rtcMemberIds] });
+      broadcast(room, { type: 'state', room: publicRoom(room) });
+      return;
+    }
+    case 'rtc-signal': {
+      const to = String(msg.to || '');
+      if (!to || to === memberId) return;
+      const target = room.members.get(to);
+      if (!target) return;
+      const payload = msg.payload && typeof msg.payload === 'object' ? msg.payload : {};
+      const kind = payload.type;
+      if (kind !== 'offer' && kind !== 'answer' && kind !== 'ice') {
+        throw new Error('Bad rtc signal');
+      }
+      const next = { type: kind };
+      if (typeof payload.sdp === 'string') next.sdp = payload.sdp.slice(0, 16384);
+      if (payload.candidate != null) next.candidate = String(payload.candidate).slice(0, 1024);
+      if (payload.sdpMid != null) next.sdpMid = String(payload.sdpMid).slice(0, 32);
+      if (payload.sdpMLineIndex != null) {
+        const idx = Number(payload.sdpMLineIndex);
+        if (Number.isFinite(idx)) next.sdpMLineIndex = idx;
+      }
+      send(target.ws, { type: 'rtc-signal', from: memberId, payload: next });
       return;
     }
     case 'leave': {

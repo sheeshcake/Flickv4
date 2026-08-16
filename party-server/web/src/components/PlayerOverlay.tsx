@@ -1,4 +1,4 @@
-import { ArrowLeft, Maximize, MessageCircle, Minimize, Pause, Play, RotateCcw, RotateCw, Settings, SmilePlus } from 'lucide-react';
+import { ArrowLeft, Maximize, MessageCircle, Mic, MicOff, Minimize, Pause, Play, RotateCcw, RotateCw, Settings, SmilePlus, Video, VideoOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatTime, PARTY_REACTIONS } from '@/lib/party';
 import { cn } from '@/lib/utils';
@@ -26,6 +26,12 @@ interface PlayerOverlayProps {
   reactionsOpen: boolean;
   onSelectReaction: (emoji: string) => void;
   onToggleFullscreen: () => void;
+  inCall: boolean;
+  muted: boolean;
+  camOff: boolean;
+  onToggleCall: () => void;
+  onToggleMute: () => void;
+  onToggleCam: () => void;
 }
 
 const seekFraction = (el: HTMLElement, clientX: number) => {
@@ -55,6 +61,12 @@ export const PlayerOverlay = ({
   reactionsOpen,
   onSelectReaction,
   onToggleFullscreen,
+  inCall,
+  muted,
+  camOff,
+  onToggleCall,
+  onToggleMute,
+  onToggleCam,
 }: PlayerOverlayProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
 
@@ -105,6 +117,49 @@ export const PlayerOverlay = ({
           >
             {partyCode}
           </Button>
+          <Button
+            type="button"
+            variant={inCall ? 'default' : 'secondary'}
+            size="icon"
+            className="size-11"
+            onClick={() => {
+              onInteract();
+              onToggleCall();
+            }}
+            aria-label={inCall ? 'Leave camera' : 'Join camera'}
+          >
+            {inCall ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+          </Button>
+          {inCall ? (
+            <>
+              <Button
+                type="button"
+                variant={muted ? 'default' : 'secondary'}
+                size="icon"
+                className="size-11"
+                onClick={() => {
+                  onInteract();
+                  onToggleMute();
+                }}
+                aria-label={muted ? 'Unmute' : 'Mute'}
+              >
+                {muted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
+              </Button>
+              <Button
+                type="button"
+                variant={camOff ? 'default' : 'secondary'}
+                size="icon"
+                className="size-11"
+                onClick={() => {
+                  onInteract();
+                  onToggleCam();
+                }}
+                aria-label={camOff ? 'Camera on' : 'Camera off'}
+              >
+                {camOff ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+              </Button>
+            </>
+          ) : null}
           <Button
             type="button"
             variant="secondary"

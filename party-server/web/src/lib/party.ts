@@ -15,6 +15,17 @@ export interface PartyMember {
 export interface PartySource {
   uri: string;
   kind: 'hls' | 'file';
+  sourceId?: string;
+}
+
+export type PartyRtcSignalKind = 'offer' | 'answer' | 'ice';
+
+export interface PartyRtcSignalPayload {
+  type: PartyRtcSignalKind;
+  sdp?: string;
+  candidate?: string | null;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
 }
 
 export interface PartySubtitles {
@@ -45,6 +56,7 @@ export interface PartyRoom {
   subtitles?: PartySubtitles | null;
   locked?: boolean;
   browsing?: boolean;
+  rtcMemberIds?: string[];
 }
 
 export interface PublicRoomSummary {
@@ -90,6 +102,8 @@ export type ServerMessage =
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'chat'; from: string; text: string; at: number }
   | { type: 'reaction'; from: string; emoji: string; at: number }
+  | { type: 'rtc-peers'; ids: string[] }
+  | { type: 'rtc-signal'; from: string; payload: PartyRtcSignalPayload }
   | { type: 'error'; message: string }
   | { type: 'ended'; reason: string };
 
