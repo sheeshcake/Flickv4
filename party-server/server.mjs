@@ -666,20 +666,44 @@ const resolveMoviebox = async (content, clientIp = '') => {
   };
 };
 
-const STREAMFLIX_KEY = Buffer.from('x7k9mPqT2rWvY8zA5bC3nF6hJ2lK4mN9', 'utf8');
-const STREAMFLIX_IV = STREAMFLIX_KEY.subarray(0, 16);
+const STREAMFLIX_GCM_KEY = Buffer.from(
+  '7f3e9c2a8b5d1f4e6a9c3b7d2e5f8a1c4b6d9e2f5a8c1b4d7e9f2a5c8b1d4e7f',
+  'hex',
+);
 const STREAMFLIX_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36';
 
 const streamflixLog = (...args) => console.log('[Streamflix]', ...args);
 
 const isStreamUri = (uri) =>
   /^https?:\/\//i.test(uri) && /\.(m3u8|mp4|webm|mkv)(\?|#|$)/i.test(uri);
 
-const encryptVidrockId = (data) => {
-  const cipher = crypto.createCipheriv('aes-256-cbc', STREAMFLIX_KEY, STREAMFLIX_IV);
-  const enc = Buffer.concat([cipher.update(String(data), 'utf8'), cipher.final()]);
-  return enc.toString('base64url');
+const decryptVidrockUrl = (payload) => {
+  try {
+    const packed = Buffer.from(String(payload), 'base64url');
+    if (packed.length < 28) return null;
+    const nonce = packed.subarray(0, 12);
+    const tag = packed.subarray(packed.length - 16);
+    const ciphertext = packed.subarray(12, packed.length - 16);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', STREAMFLIX_GCM_KEY, nonce);
+    decipher.setAuthTag(tag);
+    const url = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+      .toString('utf8')
+      .trim();
+    return /^https?:\/\//i.test(url) ? url : null;
+  } catch (err) {
+    streamflixLog('decrypt: fail', err instanceof Error ? err.message : err);
+    return null;
+  }
+};
+
+const streamflixKind = (type, url) =>
+  String(type).toLowerCase() === 'hls' || /\.m3u8(\?|#|$)/i.test(url) ? 'hls' : 'file';
+
+const isEnglishSource = (data) => {
+  const language = String(data?.language || '').toLowerCase();
+  const flag = String(data?.flag || '').toLowerCase();
+  return language === 'english' || flag === 'us';
 };
 
 const streamflixFetch = async (url, timeoutMs = 15000) => {
@@ -725,7 +749,7 @@ const pickAtlasMp4 = async (listUrl) => {
     const highest = qualities
       .filter((q) => typeof q?.url === 'string' && q.url)
       .sort((a, b) => (b.resolution ?? 0) - (a.resolution ?? 0))[0];
-    if (!highest?.url || !isStreamUri(highest.url)) {
+    if (!highest?.url || !/^https?:\/\//i.test(highest.url)) {
       streamflixLog('atlas: no playable mp4', qualities.length);
       return null;
     }
@@ -747,14 +771,15 @@ const resolveStreamflix = async (content) => {
     content.mediaType === 'tv' &&
     content.season != null &&
     content.episode != null;
-  const payload = isTv
-    ? `${tmdbId}_${content.season}_${content.episode}`
-    : String(tmdbId);
-  const encoded = encryptVidrockId(payload);
   const apiUrl = isTv
-    ? `https://vidrock.net/api/tv/${encoded}`
-    : `https://vidrock.net/api/movie/${encoded}`;
-  streamflixLog('resolve:', content.mediaType, tmdbId, payload);
+    ? `https://vidrock.net/api/tv/${tmdbId}/${content.season}/${content.episode}`
+    : `https://vidrock.net/api/movie/${tmdbId}`;
+  streamflixLog(
+    'resolve:',
+    content.mediaType,
+    tmdbId,
+    isTv ? `${content.season}x${content.episode}` : 'movie',
+  );
   streamflixLog('resolve: GET', apiUrl);
   const res = await streamflixFetch(apiUrl);
   if (!res.ok) {
@@ -766,50 +791,51 @@ const resolveStreamflix = async (content) => {
     streamflixLog('resolve: empty body');
     return null;
   }
-  const entries = Object.entries(body);
+  const entries = Object.entries(body).sort(([aName, a], [bName, b]) => {
+    const aEn = isEnglishSource(a) ? 1 : 0;
+    const bEn = isEnglishSource(b) ? 1 : 0;
+    if (aEn !== bEn) return bEn - aEn;
+    if (String(aName).toLowerCase() === 'atlas') return 1;
+    if (String(bName).toLowerCase() === 'atlas') return -1;
+    return 0;
+  });
   streamflixLog(
     'resolve: servers',
     entries.length,
     entries.map(([name]) => name).join(',') || '(none)',
   );
-  const hlsCandidates = [];
-  let atlasUrl = null;
   for (const [name, data] of entries) {
-    const url = typeof data?.url === 'string' ? data.url.trim() : '';
-    if (!url) {
+    const packed = typeof data?.url === 'string' ? data.url.trim() : '';
+    if (!packed) {
       streamflixLog('resolve: skip empty', name);
       continue;
     }
-    if (String(name).toLowerCase() === 'atlas') {
-      atlasUrl = url;
-      streamflixLog('resolve: atlas list', shortStreamflixUrl(url));
+    const url = decryptVidrockUrl(packed);
+    if (!url) {
+      streamflixLog('resolve: skip encrypted', name);
       continue;
     }
-    if (isStreamUri(url)) {
-      hlsCandidates.push(url);
-      streamflixLog(
-        'resolve: candidate',
-        name,
-        /\.m3u8(\?|#|$)/i.test(url) ? 'hls' : 'file',
-        shortStreamflixUrl(url),
-      );
-    } else {
-      streamflixLog('resolve: skip non-stream', name, shortStreamflixUrl(url));
+    const kind = streamflixKind(data.type, url);
+    streamflixLog(
+      'resolve: candidate',
+      name,
+      data.language || data.flag,
+      kind,
+      shortStreamflixUrl(url),
+    );
+    if (
+      String(name).toLowerCase() === 'atlas' &&
+      !isStreamUri(url) &&
+      !/\.m3u8(\?|#|$)/i.test(url)
+    ) {
+      const mp4 = await pickAtlasMp4(url);
+      if (mp4) {
+        streamflixLog('resolve: atlas', streamflixKind(null, mp4), shortStreamflixUrl(mp4));
+        return { url: mp4, kind: streamflixKind(null, mp4) };
+      }
     }
-  }
-  if (hlsCandidates[0]) {
-    const url = hlsCandidates[0];
-    const kind = /\.m3u8(\?|#|$)/i.test(url) ? 'hls' : 'file';
-    streamflixLog('resolve: ok', kind, shortStreamflixUrl(url));
+    streamflixLog('resolve: ok', name, kind, shortStreamflixUrl(url));
     return { url, kind };
-  }
-  if (atlasUrl) {
-    const mp4 = isStreamUri(atlasUrl) ? atlasUrl : await pickAtlasMp4(atlasUrl);
-    if (mp4) {
-      const kind = /\.m3u8(\?|#|$)/i.test(mp4) ? 'hls' : 'file';
-      streamflixLog('resolve: atlas', kind, shortStreamflixUrl(mp4));
-      return { url: mp4, kind };
-    }
   }
   streamflixLog('resolve: no playable stream');
   return null;
