@@ -1,4 +1,5 @@
-import { StyleSheet } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ScrollView, StyleSheet } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { RTCView } from 'react-native-webrtc';
 import { Box } from '@/components/ui/box';
@@ -7,6 +8,9 @@ import { Icon } from '@/components/ui/icon';
 import { Focusable } from '@/src/components/Focusable';
 import type { PartyRtcRemote } from '@/src/hooks/usePartyRtc';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
+
+const SPEAK_HOLD_MS = 1000;
+const SPEAK_THRESHOLD = 0.04;
 
 interface PartyCallOverlayProps {
   localStreamURL: string | null;
@@ -21,13 +25,19 @@ const Tile = ({
   label,
   mirror,
   placeholder,
+  speaking,
 }: {
   streamURL: string | null;
   label: string;
   mirror?: boolean;
   placeholder?: boolean;
+  speaking?: boolean;
 }) => (
-  <Box className="h-28 w-20 overflow-hidden rounded-md border border-border bg-card">
+  <Box
+    className={`h-28 w-20 overflow-hidden rounded-md border bg-card ${
+      speaking ? 'border-primary' : 'border-border'
+    }`}
+  >
     {streamURL && !placeholder ? (
       <RTCView
         streamURL={streamURL}
@@ -57,16 +67,45 @@ export const PartyCallOverlay = ({
   hidden,
   onToggleHidden,
 }: PartyCallOverlayProps) => {
+  const [speakerId, setSpeakerId] = useState<string | null>(null);
+  const speakerUntilRef = useRef(0);
+
+  useEffect(() => {
+    if (remotes.length === 0) {
+      setSpeakerId(null);
+      speakerUntilRef.current = 0;
+      return;
+    }
+    const loudest = [...remotes].sort(
+      (a, b) => (b.audioLevel ?? 0) - (a.audioLevel ?? 0),
+    )[0];
+    const now = Date.now();
+    if (loudest && (loudest.audioLevel ?? 0) >= SPEAK_THRESHOLD) {
+      setSpeakerId(loudest.id);
+      speakerUntilRef.current = now + SPEAK_HOLD_MS;
+    } else if (now > speakerUntilRef.current) {
+      setSpeakerId(null);
+    }
+  }, [remotes]);
+
+  const sortedRemotes = useMemo(() => {
+    return [...remotes].sort((a, b) => {
+      if (a.id === speakerId) return -1;
+      if (b.id === speakerId) return 1;
+      return (b.audioLevel ?? 0) - (a.audioLevel ?? 0);
+    });
+  }, [remotes, speakerId]);
+
   if (!localStreamURL && remotes.length === 0) return null;
 
   return (
     <Box
       pointerEvents="box-none"
-      className="absolute top-16 right-3 z-30 items-end gap-2"
+      className="absolute top-16 right-3 z-30 max-h-[60%] items-end"
     >
       <Focusable
         onPress={onToggleHidden}
-        className="rounded-full bg-background/70 p-2"
+        className="mb-2 rounded-full bg-background/70 p-2"
         focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
       >
         <Icon
@@ -76,7 +115,10 @@ export const PartyCallOverlay = ({
         />
       </Focusable>
       {hidden ? null : (
-        <>
+        <ScrollView
+          style={{ maxHeight: 280 }}
+          contentContainerClassName="items-end gap-2"
+        >
           {localStreamURL ? (
             <Tile
               streamURL={localStreamURL}
@@ -85,14 +127,15 @@ export const PartyCallOverlay = ({
               placeholder={camOff}
             />
           ) : null}
-          {remotes.map((remote) => (
+          {sortedRemotes.map((remote) => (
             <Tile
               key={remote.id}
               streamURL={remote.streamURL}
               label={remote.name}
+              speaking={remote.id === speakerId}
             />
           ))}
-        </>
+        </ScrollView>
       )}
     </Box>
   );

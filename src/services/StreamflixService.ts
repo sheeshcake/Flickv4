@@ -215,15 +215,14 @@ const listVidrock = async (
     let url = decryptVidrockUrl(packed);
     if (!url) continue;
     let kind = kindOf(data.type, url);
-    if (
-      name.toLowerCase() === 'atlas' &&
-      !isPartyStreamUri(url) &&
-      !/\.m3u8(\?|#|$)/i.test(url)
-    ) {
+    if (!isPartyStreamUri(url) && !/\.m3u8(\?|#|$)/i.test(url)) {
       const mp4 = await pickAtlasMp4(url);
-      if (!mp4) continue;
-      url = mp4;
-      kind = partySourceKind(mp4);
+      if (mp4) {
+        url = mp4;
+        kind = partySourceKind(mp4);
+      } else if (name.toLowerCase() === 'atlas') {
+        continue;
+      }
     }
     const language = data.language || undefined;
     sources.push({

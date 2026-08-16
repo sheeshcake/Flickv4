@@ -29,7 +29,7 @@ export const PartySessionBar = ({
   placement?: 'stack' | 'tabs';
 }) => {
   const insets = useSafeAreaInsets();
-  const { room, role, leaveRoom } = useWatchParty();
+  const { room, role, leaveRoom, joinNotice } = useWatchParty();
 
   if (!room || role !== 'host') return null;
   if (placement === 'stack' && (!routeName || HIDDEN_STACK_ROUTES.has(routeName))) {
@@ -57,9 +57,11 @@ export const PartySessionBar = ({
               Party {room.code}
             </Text>
             <Text size="xs" numberOfLines={1} className="text-muted-foreground">
-              {room.browsing
-                ? 'Pick something to watch'
-                : room.content.title}
+              {joinNotice
+                ? `${joinNotice} joined`
+                : room.browsing
+                  ? 'Pick something to watch'
+                  : room.content.title}
             </Text>
           </Box>
         </HStack>

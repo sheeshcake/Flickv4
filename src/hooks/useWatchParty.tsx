@@ -60,6 +60,7 @@ interface WatchPartyContextValue {
   setDisplayName: (next: string) => Promise<string>;
   chat: PartyChatLine[];
   rtc: PartyRtcApi;
+  joinNotice: string | null;
   createRoom: (
     content: PartyContent,
     clock?: PartyClock,
@@ -87,6 +88,7 @@ const WatchPartyContext = createContext<WatchPartyContextValue>({
   setDisplayName: async () => 'Flick user',
   chat: [],
   rtc: idleRtc,
+  joinNotice: null,
   createRoom: async () => {
     throw new Error('Watch party is not configured');
   },
@@ -108,6 +110,8 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chat, setChat] = useState<PartyChatLine[]>([]);
+  const [joinNotice, setJoinNotice] = useState<string | null>(null);
+  const seenMembersRef = useRef<Set<string> | null>(null);
   const rtcRef = useRef<PartyRtcApi>(idleRtc);
   roomRef.current = room;
 
@@ -277,6 +281,31 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!room) {
+      seenMembersRef.current = null;
+      setJoinNotice(null);
+      return;
+    }
+    const nextIds = new Set(room.members.map((m) => m.id));
+    if (seenMembersRef.current == null) {
+      seenMembersRef.current = nextIds;
+      return;
+    }
+    for (const member of room.members) {
+      if (!seenMembersRef.current.has(member.id) && member.id !== memberId) {
+        setJoinNotice(member.displayName);
+      }
+    }
+    seenMembersRef.current = nextIds;
+  }, [memberId, room]);
+
+  useEffect(() => {
+    if (!joinNotice) return;
+    const timer = setTimeout(() => setJoinNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [joinNotice]);
+
   const rtc = usePartyRtc({
     enabled: enabled && connected && !!room,
     memberId,
@@ -310,6 +339,7 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       setDisplayName,
       chat,
       rtc,
+      joinNotice,
       createRoom,
       joinRoom,
       leaveRoom,
@@ -328,6 +358,7 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       setDisplayName,
       chat,
       rtc,
+      joinNotice,
       createRoom,
       joinRoom,
       leaveRoom,

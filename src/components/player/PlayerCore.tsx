@@ -190,6 +190,7 @@ export const PlayerCore = ({
     subscribe: subscribeParty,
     leaveRoom,
     rtc,
+    joinNotice,
   } = useWatchParty();
   const [partyOpen, setPartyOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -977,8 +978,7 @@ export const PlayerCore = ({
   useEffect(() => {
     if (partyRole !== 'host' || !partyRoom) return;
     const waiting = partyRoom.members.some(
-      (m) =>
-        m.buffering && m.id !== partyMemberId && m.kind !== 'companion',
+      (m) => m.buffering && m.id !== partyMemberId,
     );
     if (waiting && !pausedRef.current) {
       waitingForGuestsRef.current = true;
@@ -1371,7 +1371,11 @@ export const PlayerCore = ({
 
       {partyRoom && partyRole && !pipActive && (
         <PlayerChatToast
-          line={chatToast}
+          line={
+            joinNotice
+              ? { from: joinNotice, text: 'joined' }
+              : chatToast
+          }
           onOpen={() => setChatOpen(true)}
         />
       )}

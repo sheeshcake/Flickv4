@@ -24,6 +24,7 @@ export interface PartyRtcRemote {
   id: string;
   name: string;
   streamURL: string;
+  audioLevel?: number;
 }
 
 export interface PartyRtcApi {
@@ -388,6 +389,40 @@ export const usePartyRtc = ({
       }
     });
   }, [handleSignal, subscribe, syncPeers]);
+
+  useEffect(() => {
+    if (!joined) return;
+    const timer = setInterval(() => {
+      void (async () => {
+        const levels: Record<string, number> = {};
+        for (const [id, pc] of peersRef.current) {
+          try {
+            const stats = await pc.getStats();
+            stats.forEach((report) => {
+              const row = report as {
+                type?: string;
+                kind?: string;
+                audioLevel?: number;
+              };
+              if (row.type === 'inbound-rtp' && row.kind === 'audio') {
+                const level = Number(row.audioLevel ?? 0);
+                levels[id] = Math.max(levels[id] ?? 0, level);
+              }
+            });
+          } catch {
+            // ignore
+          }
+        }
+        setRemotes((prev) =>
+          prev.map((remote) => ({
+            ...remote,
+            audioLevel: levels[remote.id] ?? 0,
+          })),
+        );
+      })();
+    }, 250);
+    return () => clearInterval(timer);
+  }, [joined]);
 
   useEffect(() => {
     if (room && memberId) return;

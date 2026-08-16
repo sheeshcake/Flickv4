@@ -126,5 +126,9 @@ export const codeFromPath = (pathname: string): string => {
 export const mediaProxyUrl = (code: string, uri: string): string =>
   `/media/${code}?u=${encodeURIComponent(uri)}`;
 
+/** Host scraped on mobile via embed WebView (not Streamflix API). */
+export const isWebViewHostSource = (room: PartyRoom): boolean =>
+  Boolean(room.source?.uri && room.embedUrl && !room.source.sourceId);
+
 export const subtitleProxyUrl = (code: string, uri?: string): string =>
   uri ? `/subtitle/${code}?u=${encodeURIComponent(uri)}` : `/subtitle/${code}`;
