@@ -962,7 +962,9 @@ const serveSubtitle = async (code, req, res) => {
   }
   if (requested) {
     const host = hostnameOf(requested);
+    const published = Boolean(room?.subtitles?.url && room.subtitles.url === requested);
     const allowed =
+      published ||
       isStreamflixMediaHost(room, host) ||
       Boolean(host && room?.mediaAllowedHosts?.has(host.toLowerCase()));
     if (!allowed) {
@@ -992,9 +994,22 @@ const serveSubtitle = async (code, req, res) => {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
+    const subHost = parsed.hostname.toLowerCase();
+    const streamflix = isStreamflixMediaHost(room, subHost);
+    const upstreamHeaders = {
+      Accept: 'text/plain, text/vtt, application/x-subrip, */*',
+      'User-Agent': MEDIA_UA,
+    };
+    if (streamflix) {
+      upstreamHeaders.Referer = 'https://vidrock.net/';
+      upstreamHeaders.Origin = 'https://vidrock.net';
+    } else if (room?.source?.referer) {
+      upstreamHeaders.Referer = room.source.referer;
+      if (room.source.origin) upstreamHeaders.Origin = room.source.origin;
+    }
     const upstream = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: 'text/plain, text/vtt, application/x-subrip, */*' },
+      headers: upstreamHeaders,
     });
     clearTimeout(timer);
     if (!upstream.ok) {
@@ -1389,6 +1404,8 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
               ? Number(msg.subtitles.offsetSeconds)
               : 0,
           };
+          const subHost = hostnameOf(url);
+          if (subHost) allowMediaHost(room, subHost);
         }
       }
       touch(room);

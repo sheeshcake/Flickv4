@@ -416,6 +416,61 @@ export const WatchPlayer = () => {
     [],
   );
 
+  const loadSubtitleFile = useCallback(async (url: string, viaProxy?: boolean) => {
+    if (!url) return;
+    if (url === lastSubUrl.current) return;
+    setCues([]);
+    const code = roomRef.current?.code;
+    const hostUrl = roomRef.current?.subtitles?.url;
+    const tryUrls: string[] = [];
+    if (code && hostUrl && url === hostUrl) {
+      tryUrls.push(subtitleProxyUrl(code));
+    }
+    if (code) tryUrls.push(subtitleProxyUrl(code, url));
+    if (!viaProxy) tryUrls.push(url);
+    for (const href of tryUrls) {
+      try {
+        const res = await fetch(href);
+        if (!res.ok) continue;
+        const parsed = parseSubtitleText(await res.text());
+        if (!parsed.length) continue;
+        lastSubUrl.current = url;
+        setCues(parsed);
+        return;
+      } catch {
+        // CORS — try party-server caption fetch
+      }
+    }
+    lastSubUrl.current = '';
+  }, []);
+
+  const followAvailableSubtitles = useCallback(
+    (source: StreamflixWebSource | null, current: PartyRoom) => {
+      applySubtitleOptions(source, current);
+      if (guestPickedSubRef.current) return;
+      if (current.subtitles?.url) {
+        const offset = Number(current.subtitles.offsetSeconds);
+        if (Number.isFinite(offset)) setSubOffset(offset);
+        setSelectedSubId('host');
+        void loadSubtitleFile(current.subtitles.url);
+        return;
+      }
+      const tracks = source?.subtitles ?? [];
+      const pick =
+        tracks.find((t) => /english|\ben\b/i.test(t.label || '')) ?? tracks[0];
+      if (pick?.file) {
+        const idx = tracks.indexOf(pick);
+        setSelectedSubId(`stream:${idx}:${pick.file}`);
+        void loadSubtitleFile(pick.file, true);
+        return;
+      }
+      lastSubUrl.current = '';
+      setSelectedSubId(null);
+      setCues([]);
+    },
+    [applySubtitleOptions, loadSubtitleFile],
+  );
+
   const playViaProxy = useCallback(
     (current: PartyRoom) => {
       const playHostEmbed = () => {
@@ -438,8 +493,9 @@ export const WatchPlayer = () => {
           playHostEmbed();
         },
       });
+      followAvailableSubtitles(null, current);
     },
-    [loadSource, showWaiting],
+    [followAvailableSubtitles, loadSource, showWaiting],
   );
 
   const playStreamflixSource = useCallback(
@@ -468,15 +524,8 @@ export const WatchPlayer = () => {
           });
         }
         setActiveSourceId(resolved.id);
-        setSelectedSubId((prev) => {
-          if (prev?.startsWith('stream:')) {
-            lastSubUrl.current = '';
-            setCues([]);
-            return null;
-          }
-          return prev;
-        });
-        applySubtitleOptions(resolved, current);
+        if (!guestPickedSubRef.current) lastSubUrl.current = '';
+        followAvailableSubtitles(resolved, current);
         webResolvedRef.current = true;
         streamflixLog('play', resolved.name, resolved.kind, shortUrl(resolved.url));
         loadSource(
@@ -500,7 +549,7 @@ export const WatchPlayer = () => {
         playViaProxy(current);
       }
     },
-    [applySubtitleOptions, loadSource, playViaProxy, resolveListedSource],
+    [followAvailableSubtitles, loadSource, playViaProxy, resolveListedSource],
   );
 
   const playRoom = useCallback(
@@ -594,44 +643,17 @@ export const WatchPlayer = () => {
     [playStreamflixSource, playViaProxy, showWaiting],
   );
 
-  const loadSubtitleFile = useCallback(async (url: string, viaProxy?: boolean) => {
-    if (modeRef.current === 'iframe') {
-      lastSubUrl.current = '';
-      setCues([]);
-      return;
-    }
-    if (url === lastSubUrl.current) return;
-    lastSubUrl.current = url;
-    setCues([]);
-    const code = roomRef.current?.code;
-    const tryUrls = viaProxy && code
-      ? [subtitleProxyUrl(code, url)]
-      : [url, code ? subtitleProxyUrl(code, url) : ''].filter(Boolean);
-    for (const href of tryUrls) {
-      try {
-        const res = await fetch(href);
-        if (!res.ok) continue;
-        setCues(parseSubtitleText(await res.text()));
-        return;
-      } catch {
-        // CORS — try party-server caption fetch
-      }
-    }
-  }, []);
-
   const loadSubtitles = useCallback(
     async (sub: PartySubtitles | null | undefined) => {
-      if (guestPickedSubRef.current) return;
-      if (!sub?.url) {
-        lastSubUrl.current = '';
-        setCues([]);
-        return;
-      }
-      const offset = Number(sub.offsetSeconds);
-      if (Number.isFinite(offset)) setSubOffset(offset);
-      await loadSubtitleFile(sub.url);
+      const current = roomRef.current;
+      if (!current) return;
+      const active =
+        streamflixSourcesRef.current.find(
+          (s) => s.id === activeSourceIdRef.current,
+        ) ?? null;
+      followAvailableSubtitles(active, { ...current, subtitles: sub ?? null });
     },
-    [loadSubtitleFile],
+    [followAvailableSubtitles],
   );
 
   const connect = useCallback(
