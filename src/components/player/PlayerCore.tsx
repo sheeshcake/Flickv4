@@ -4,8 +4,10 @@ import { useIsFocused } from '@react-navigation/native';
 import Video, {
   SelectedTrackType,
   TextTrackType,
+  type AudioTrack,
   type BufferConfig,
   type ISO639_1,
+  type OnAudioTracksData,
   type OnLoadData,
   type OnProgressData,
   type OnPictureInPictureStatusChangedData,
@@ -24,7 +26,14 @@ import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer
 import { PartyLobbyModal } from '@/src/components/party/PartyLobbyModal';
 import { PlayerChatDrawer } from '@/src/components/party/PlayerChatDrawer';
 import { PlayerChatToast } from '@/src/components/party/PlayerChatToast';
+import { PartyCallOverlay } from '@/src/components/party/PartyCallOverlay';
 import { PlayerPartyDrawer } from '@/src/components/party/PlayerPartyDrawer';
+import { PlayerReactionOverlay } from '@/src/components/party/PlayerReactionOverlay';
+import {
+  appendFloatingReaction,
+  isPartyReaction,
+  type FloatingReaction,
+} from '@/src/components/party/partyReactions';
 import { WatchPartyIntroModal } from '@/src/components/party/WatchPartyIntroModal';
 import { partyContentFromItem } from '@/src/party/content';
 import {
@@ -63,7 +72,12 @@ import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
 import { useVideoQuality } from '@/src/hooks/useVideoQuality';
 import { File } from 'expo-file-system';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
-import { playbackHeadersFor } from '@/src/services/MovieboxService';
+import { playbackHeadersFor } from '@/src/services/playbackHeaders';
+import type {
+  StreamflixSource,
+  StreamflixSubtitle,
+} from '@/src/services/StreamflixService';
+import type { WyzieSubtitle } from '@/src/services/WyzieService';
 import { writeNativeVttCache } from '@/src/utils/nativeSubtitleCache';
 import { WyzieService } from '@/src/services/WyzieService';
 import type { LocalDownloadedSubtitle } from '@/src/services/DownloadService';
@@ -79,6 +93,7 @@ interface PlayerCoreProps {
   imdbId?: string | null;
   resumeFrom?: number;
   onBack: () => void;
+  onLeaveParty?: () => void;
   /** TV only: called when the user picks a different episode from the drawer. */
   onSelectEpisode?: (season: number, episode: Episode) => void;
   /**
@@ -89,6 +104,10 @@ interface PlayerCoreProps {
    * where there's no scraper to re-run).
    */
   onSelectServer?: (serverId: string, resumeFrom: number) => void;
+  streamflixSources?: StreamflixSource[];
+  activeStreamflixSourceId?: string | null;
+  onSelectStreamflixSource?: (id: string, resumeFrom: number) => void;
+  extractorSubtitles?: StreamflixSubtitle[];
   /**
    * Called when the resolved stream fails to actually play (native
    * `<Video>` error) with the current playhead, so `PlayerScreen` can fail
@@ -147,8 +166,13 @@ export const PlayerCore = ({
   imdbId,
   resumeFrom,
   onBack,
+  onLeaveParty,
   onSelectEpisode,
   onSelectServer,
+  streamflixSources = [],
+  activeStreamflixSourceId,
+  onSelectStreamflixSource,
+  extractorSubtitles = [],
   onPlaybackFailed,
   localSubtitles,
 }: PlayerCoreProps) => {
@@ -161,16 +185,21 @@ export const PlayerCore = ({
     room: partyRoom,
     memberId: partyMemberId,
     chat: partyChat,
+    displayName: partyDisplayName,
     send: sendParty,
     subscribe: subscribeParty,
     leaveRoom,
+    rtc,
   } = useWatchParty();
   const [partyOpen, setPartyOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [chatToast, setChatToast] = useState<PartyChatLine | null>(null);
   const prevChatLen = useRef(0);
   const [partyIntroOpen, setPartyIntroOpen] = useState(false);
   const [partyLobbyOpen, setPartyLobbyOpen] = useState(false);
+  const [callTilesHidden, setCallTilesHidden] = useState(false);
   const waitingForGuestsRef = useRef(false);
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
@@ -212,6 +241,35 @@ export const PlayerCore = ({
       onSelectServer?.(id, currentTimeRef.current);
     },
     [onSelectServer],
+  );
+
+  const handleSelectStreamflixSource = useCallback(
+    (id: string) => {
+      onSelectStreamflixSource?.(id, currentTimeRef.current);
+    },
+    [onSelectStreamflixSource],
+  );
+
+  const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
+  const [selectedAudioIndex, setSelectedAudioIndex] = useState<number | null>(
+    null,
+  );
+  const onAudioTracks = useCallback((data: OnAudioTracksData) => {
+    setAudioTracks(data.audioTracks ?? []);
+  }, []);
+
+  const extraSubtitleTracks = useMemo<WyzieSubtitle[]>(
+    () =>
+      extractorSubtitles
+        .filter((t) => t.file)
+        .map((t, i) => ({
+          id: `stream:${i}:${t.file}`,
+          url: t.file,
+          display: `${t.label} (stream)`,
+          language: t.label.slice(0, 2).toLowerCase(),
+          format: 'srt',
+        })),
+    [extractorSubtitles],
   );
 
   // "Up Next" autoplay, gated on `onSelectEpisode` being provided (the
@@ -293,6 +351,7 @@ export const PlayerCore = ({
     defaultLanguage: subtitleSettings.defaultLanguage,
     localTracks: localSubtitles,
     format: 'srt',
+    extraTracks: extraSubtitleTracks,
   });
 
   // The picker list is identical in both render modes.
@@ -344,8 +403,18 @@ export const PlayerCore = ({
       kind: partySourceKind(uri),
       referer: headers.Referer.slice(0, PARTY_URI_MAX),
       origin: headers.Origin.slice(0, PARTY_URI_MAX),
+      ...(activeStreamflixSourceId
+        ? { sourceId: activeStreamflixSourceId.slice(0, 80) }
+        : {}),
     });
-  }, [partyRole, selectedVariantUri, masterUri, sendParty, activeServer]);
+  }, [
+    partyRole,
+    selectedVariantUri,
+    masterUri,
+    sendParty,
+    activeServer,
+    activeStreamflixSourceId,
+  ]);
 
   useEffect(() => {
     if (partyRole !== 'host') return;
@@ -508,7 +577,13 @@ export const PlayerCore = ({
     ? null
     : cueAt(currentTime - subtitleOffsetSeconds);
 
-  const { visible, show, toggle } = useControlsVisibility(isPlaying);
+  const { visible, show, toggle } = useControlsVisibility(
+    isPlaying && !reactionsOpen,
+  );
+
+  useEffect(() => {
+    if (!visible) setReactionsOpen(false);
+  }, [visible]);
 
   // Seconds left in the episode; `Infinity` until the player reports a real
   // duration so the Up Next card never flashes on load.
@@ -942,6 +1017,39 @@ export const PlayerCore = ({
     return () => clearTimeout(id);
   }, [partyChat, chatOpen]);
 
+  const enqueueReaction = useCallback((from: string, emoji: string) => {
+    if (!isPartyReaction(emoji)) return;
+    setReactions((prev) => appendFloatingReaction(prev, { from, emoji }));
+  }, []);
+
+  const expireReaction = useCallback((id: string) => {
+    setReactions((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  const sendReaction = useCallback(
+    (emoji: string) => {
+      if (!isPartyReaction(emoji)) return;
+      sendParty({ type: 'reaction', emoji });
+      enqueueReaction(partyDisplayName, emoji);
+    },
+    [enqueueReaction, partyDisplayName, sendParty],
+  );
+
+  useEffect(() => {
+    if (!rtc.joined) setCallTilesHidden(false);
+  }, [rtc.joined]);
+
+  useEffect(() => {
+    if (!partyRoom) {
+      setReactions([]);
+      setReactionsOpen(false);
+      return;
+    }
+    return subscribeParty((msg) => {
+      if (msg.type === 'reaction') enqueueReaction(msg.from, msg.emoji);
+    });
+  }, [enqueueReaction, partyRoom, subscribeParty]);
+
   // On Android TV, `TVEventHandler`'s raw remote-event feed and the native
   // focus engine's own "click the focused view" handling both react to the
   // same physical Select/D-pad press. With this hook always listening, a
@@ -957,6 +1065,7 @@ export const PlayerCore = ({
     episodesOpen ||
     partyOpen ||
     chatOpen ||
+    reactionsOpen ||
     partyIntroOpen ||
     partyLobbyOpen ||
     showUpNext ||
@@ -1041,6 +1150,12 @@ export const PlayerCore = ({
           enterPictureInPictureOnLeave
           onLoadStart={() => setStatus('loading')}
           onLoad={onLoad}
+          onAudioTracks={onAudioTracks}
+          selectedAudioTrack={
+            selectedAudioIndex != null
+              ? { type: SelectedTrackType.INDEX, value: selectedAudioIndex }
+              : undefined
+          }
           onError={onError}
           onEnd={onEnd}
           onProgress={onProgress}
@@ -1106,7 +1221,14 @@ export const PlayerCore = ({
             currentTime={displayTime}
             duration={duration}
             buffered={buffered}
-            onOverlayPress={toggle}
+            onOverlayPress={() => {
+              if (reactionsOpen) {
+                setReactionsOpen(false);
+                show();
+                return;
+              }
+              toggle();
+            }}
             onBack={onBack}
             onTogglePlay={togglePlay}
             onSeekBy={seekBy}
@@ -1157,6 +1279,16 @@ export const PlayerCore = ({
                   }
                 : undefined
             }
+            onOpenReactions={
+              partyRoom
+                ? () => {
+                    setReactionsOpen((open) => !open);
+                    show();
+                  }
+                : undefined
+            }
+            reactionsOpen={reactionsOpen}
+            onSelectReaction={sendReaction}
           />
         ) : (
           // TV: keep a focusable owner mounted while controls are hidden.
@@ -1180,6 +1312,20 @@ export const PlayerCore = ({
         servers={servers}
         activeServerId={activeServer.id}
         onSelectServer={onSelectServer ? handleSelectServer : undefined}
+        streamflixSources={streamflixSources}
+        activeStreamflixSourceId={activeStreamflixSourceId}
+        onSelectStreamflixSource={
+          onSelectStreamflixSource ? handleSelectStreamflixSource : undefined
+        }
+        audioTracks={audioTracks.map((t, i) => ({
+          index: t.index ?? i,
+          label:
+            t.title ||
+            t.language ||
+            `Track ${(t.index ?? i) + 1}`,
+        }))}
+        selectedAudioIndex={selectedAudioIndex}
+        onSelectAudio={setSelectedAudioIndex}
         variants={variants}
         selectedVariantUri={selectedVariantUri}
         onSelectQuality={onSelectQuality}
@@ -1209,6 +1355,20 @@ export const PlayerCore = ({
         />
       )}
 
+      {partyRoom && partyRole && !pipActive && rtc.joined && (
+        <PartyCallOverlay
+          localStreamURL={rtc.localStreamURL}
+          remotes={rtc.remotes}
+          camOff={rtc.camOff}
+          hidden={callTilesHidden}
+          onToggleHidden={() => setCallTilesHidden((prev) => !prev)}
+        />
+      )}
+
+      {partyRoom && partyRole && !pipActive && (
+        <PlayerReactionOverlay items={reactions} onExpire={expireReaction} />
+      )}
+
       {partyRoom && partyRole && !pipActive && (
         <PlayerChatToast
           line={chatToast}
@@ -1222,9 +1382,18 @@ export const PlayerCore = ({
             visible={partyOpen}
             room={partyRoom}
             role={partyRole}
+            rtc={rtc}
+            tilesHidden={callTilesHidden}
+            onToggleTilesHidden={() => setCallTilesHidden((prev) => !prev)}
             onLeave={() => {
               setPartyOpen(false);
               setChatOpen(false);
+              setReactionsOpen(false);
+              setReactions([]);
+              if (onLeaveParty) {
+                onLeaveParty();
+                return;
+              }
               leaveRoom();
               onBack();
             }}

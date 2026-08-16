@@ -37,6 +37,8 @@ interface UseSubtitlesArgs {
    * on Android with react-native-video.
    */
   format?: 'srt' | 'vtt';
+  /** Extractor sidecar tracks (Streamflix Videasy/Vidzee), shown above Wyzie. */
+  extraTracks?: WyzieSubtitle[];
 }
 
 const MAX_TRACKS = 20;
@@ -54,6 +56,7 @@ export const useSubtitles = ({
   defaultLanguage,
   localTracks,
   format = 'srt',
+  extraTracks = [],
 }: UseSubtitlesArgs) => {
   const [remoteTracks, setRemoteTracks] = useState<WyzieSubtitle[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -67,7 +70,7 @@ export const useSubtitles = ({
   const useLocal = (localTracks?.length ?? 0) > 0;
   const tracks: SubtitleTrack[] = useLocal
     ? (localTracks as LocalDownloadedSubtitle[])
-    : remoteTracks;
+    : [...extraTracks, ...remoteTracks];
 
   useEffect(() => {
     if (!enabled || !tmdbId || useLocal) {

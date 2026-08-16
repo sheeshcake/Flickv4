@@ -9,7 +9,7 @@ import {
   type ResolveRequest,
   type ResolvedStream,
 } from '@/src/services/DownloadService';
-import { MovieboxService } from '@/src/services/MovieboxService';
+import { StreamflixService } from '@/src/services/StreamflixService';
 
 /**
  * Off-screen harness that lets `DownloadService` resolve a stream URL by
@@ -33,14 +33,14 @@ export const DownloadResolverHost = () => {
 
   useEffect(() => {
     const resolver = (req: ResolveRequest) => {
-      if (req.resolver === 'moviebox') {
-        return MovieboxService.resolve({
-          title: req.title ?? '',
+      if (req.resolver === 'streamflix') {
+        return StreamflixService.resolve({
+          tmdbId: req.tmdbId,
           mediaType: req.type,
           season: req.season,
           episode: req.episode,
         }).then((resolved) => {
-          if (!resolved) throw new Error('Moviebox: no stream found');
+          if (!resolved) throw new Error('Streamflix: no stream found');
           return { videoUrl: resolved.uri, isWebM: false };
         });
       }

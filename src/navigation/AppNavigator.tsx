@@ -1,4 +1,9 @@
-import { NavigationContainer, DarkTheme } from '@react-navigation/native';
+import { useState } from 'react';
+import {
+  NavigationContainer,
+  DarkTheme,
+  createNavigationContainerRef,
+} from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SplashScreen } from '@/src/screens/SplashScreen';
 import { DetailScreen } from '@/src/screens/DetailScreen';
@@ -16,11 +21,13 @@ import { TabNavigator } from './TabNavigator';
 import { TVNavigator } from './TVNavigator';
 import { JoinPartyScreen } from '@/src/screens/JoinPartyScreen';
 import { PartyLinkHandler } from '@/src/components/party/PartyLinkHandler';
+import { PartySessionBar } from '@/src/components/party/PartySessionBar';
 import { isTVLayout } from '@/src/utils/tv';
 import { isTablet } from '@/src/utils/responsive';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 // Phones are locked to portrait everywhere; only the Player screen may rotate
 // to landscape. Tablets, TVs, and Mac Catalyst windows are free to rotate
@@ -43,9 +50,21 @@ const navTheme = {
 };
 
 export const AppNavigator = () => {
+  const [routeName, setRouteName] = useState<string | undefined>();
+  const syncRoute = () => {
+    if (!navigationRef.isReady()) return;
+    setRouteName(navigationRef.getCurrentRoute()?.name);
+  };
+
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer
+      ref={navigationRef}
+      theme={navTheme}
+      onReady={syncRoute}
+      onStateChange={syncRoute}
+    >
       <PartyLinkHandler />
+      <PartySessionBar routeName={routeName} />
       <Stack.Navigator
         initialRouteName="Splash"
         screenOptions={{

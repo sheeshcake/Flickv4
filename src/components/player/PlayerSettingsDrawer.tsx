@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet } from 'react-native';
 import {
+  AudioLines,
   Captions,
   ChevronLeft,
   ChevronRight,
   Gauge,
+  Layers,
   Ratio,
   Server,
   Settings2,
@@ -65,15 +67,34 @@ const formatBitrate = (bps: number): string => {
   return `${Math.round(bps / 1000)} kbps`;
 };
 
-type SettingsCategory = 'server' | 'quality' | 'aspect' | 'speed' | 'subtitles';
+type SettingsCategory =
+  | 'server'
+  | 'source'
+  | 'quality'
+  | 'aspect'
+  | 'speed'
+  | 'audio'
+  | 'subtitles';
 
 const CATEGORY_LABELS: Record<SettingsCategory, string> = {
   server: 'Server',
+  source: 'Source',
   quality: 'Video quality',
   aspect: 'Aspect ratio',
   speed: 'Playback speed',
+  audio: 'Audio',
   subtitles: 'Subtitles',
 };
+
+export interface StreamflixSourceOption {
+  id: string;
+  name: string;
+}
+
+export interface AudioTrackOption {
+  index: number;
+  label: string;
+}
 
 interface PlayerSettingsDrawerProps {
   visible: boolean;
@@ -84,6 +105,12 @@ interface PlayerSettingsDrawerProps {
    * download, where there's no scraper to re-run against a different
    * server). */
   onSelectServer?: (id: string) => void;
+  streamflixSources?: StreamflixSourceOption[];
+  activeStreamflixSourceId?: string | null;
+  onSelectStreamflixSource?: (id: string) => void;
+  audioTracks?: AudioTrackOption[];
+  selectedAudioIndex?: number | null;
+  onSelectAudio?: (index: number) => void;
   variants: Variant[];
   /** `null` means "Auto" (master ABR). */
   selectedVariantUri: string | null;
@@ -127,6 +154,12 @@ export const PlayerSettingsDrawer = ({
   servers,
   activeServerId,
   onSelectServer,
+  streamflixSources = [],
+  activeStreamflixSourceId,
+  onSelectStreamflixSource,
+  audioTracks = [],
+  selectedAudioIndex,
+  onSelectAudio,
   variants,
   selectedVariantUri,
   onSelectQuality,
@@ -169,6 +202,15 @@ export const PlayerSettingsDrawer = ({
       ? 'Off'
       : subtitleTracks.find((t) => t.id === selectedSubtitleId)?.label ??
         'On';
+  const activeSourceName =
+    streamflixSources.find((s) => s.id === activeStreamflixSourceId)?.name ??
+    streamflixSources[0]?.name ??
+    'Auto';
+  const audioValue =
+    selectedAudioIndex == null
+      ? audioTracks[0]?.label ?? 'Default'
+      : audioTracks.find((t) => t.index === selectedAudioIndex)?.label ??
+        'Default';
 
   return (
     <Box style={StyleSheet.absoluteFill} className="z-50">
@@ -207,16 +249,27 @@ export const PlayerSettingsDrawer = ({
         <ScrollView className="flex-1 px-4 pb-6">
           {activeCategory == null && (
             <VStack space="lg">
-              {onSelectServer && servers.length > 1 && (
+              {(onSelectServer && servers.length > 1) ||
+              (onSelectStreamflixSource && streamflixSources.length > 1) ? (
                 <SettingsSection title="Source">
-                  <SettingsMenuRow
-                    icon={Server}
-                    label="Server"
-                    value={activeServerName}
-                    onPress={() => setActiveCategory('server')}
-                  />
+                  {onSelectServer && servers.length > 1 && (
+                    <SettingsMenuRow
+                      icon={Server}
+                      label="Server"
+                      value={activeServerName}
+                      onPress={() => setActiveCategory('server')}
+                    />
+                  )}
+                  {onSelectStreamflixSource && streamflixSources.length > 1 && (
+                    <SettingsMenuRow
+                      icon={Layers}
+                      label="Source"
+                      value={activeSourceName}
+                      onPress={() => setActiveCategory('source')}
+                    />
+                  )}
                 </SettingsSection>
-              )}
+              ) : null}
 
               <SettingsSection title="Video">
                 {variants.length > 1 && (
@@ -236,6 +289,14 @@ export const PlayerSettingsDrawer = ({
               </SettingsSection>
 
               <SettingsSection title="Audio & subtitles">
+                {onSelectAudio && audioTracks.length > 1 && (
+                  <SettingsMenuRow
+                    icon={AudioLines}
+                    label="Audio"
+                    value={audioValue}
+                    onPress={() => setActiveCategory('audio')}
+                  />
+                )}
                 <SettingsMenuRow
                   icon={Captions}
                   label="Subtitles"
@@ -265,6 +326,44 @@ export const PlayerSettingsDrawer = ({
                   hasTVPreferredFocus={idx === 0}
                   onPress={() => {
                     onSelectServer?.(s.id);
+                    setActiveCategory(null);
+                  }}
+                />
+              ))}
+            </VStack>
+          )}
+
+          {activeCategory === 'source' && (
+            <VStack space="xs">
+              {streamflixSources.map((s, idx) => (
+                <OptionRow
+                  key={s.id}
+                  label={s.name}
+                  active={s.id === activeStreamflixSourceId}
+                  hasTVPreferredFocus={idx === 0}
+                  onPress={() => {
+                    onSelectStreamflixSource?.(s.id);
+                    setActiveCategory(null);
+                  }}
+                />
+              ))}
+            </VStack>
+          )}
+
+          {activeCategory === 'audio' && (
+            <VStack space="xs">
+              {audioTracks.map((track, idx) => (
+                <OptionRow
+                  key={track.index}
+                  label={track.label}
+                  active={
+                    selectedAudioIndex == null
+                      ? idx === 0
+                      : track.index === selectedAudioIndex
+                  }
+                  hasTVPreferredFocus={idx === 0}
+                  onPress={() => {
+                    onSelectAudio?.(track.index);
                     setActiveCategory(null);
                   }}
                 />

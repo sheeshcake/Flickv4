@@ -8,10 +8,8 @@ import {
   type ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  MOVIEBOX_SERVER_ID,
-  type ServerResolver,
-} from '@/src/services/MovieboxService';
+import { type ServerResolver } from '@/src/services/playbackHeaders';
+import { STREAMFLIX_SERVER_ID } from '@/src/services/StreamflixService';
 
 const STORAGE_KEY = 'flick.servers';
 
@@ -23,8 +21,8 @@ export interface PlaybackServer {
   /** Built-in servers cannot be deleted. */
   builtIn?: boolean;
   /**
-   * How this server resolves a stream. `moviebox` uses the aoneroom REST
-   * API (no WebView). Omitted/`webview` is the embed-page scraper.
+   * How this server resolves a stream. `streamflix` uses the Vidrock
+   * TMDB-id API (no WebView). Omitted/`webview` is the embed-page scraper.
    */
   resolver?: ServerResolver;
   /**
@@ -150,23 +148,28 @@ const mapRemoteServer = (s: RemoteServerJson): PlaybackServer => {
     ...(scraperTimeoutSeconds != null
       ? { scraperTimeoutSeconds }
       : {}),
-    ...(s.resolver === 'moviebox' ? { resolver: 'moviebox' as const } : {}),
+    ...(s.resolver === 'streamflix' ? { resolver: 'streamflix' as const } : {}),
   };
 };
 
-/** Always present — does not depend on the remote `list.json` fetch. */
-export const MOVIEBOX_SERVER: PlaybackServer = {
-  id: MOVIEBOX_SERVER_ID,
-  name: 'Moviebox',
-  url: 'https://moviebox.ph',
+export const STREAMFLIX_SERVER: PlaybackServer = {
+  id: STREAMFLIX_SERVER_ID,
+  name: 'Streamflix',
+  url: 'https://vidrock.net',
   builtIn: true,
-  resolver: 'moviebox',
+  resolver: 'streamflix',
 };
 
-const withLocalMoviebox = (list: PlaybackServer[]): PlaybackServer[] => [
-  MOVIEBOX_SERVER,
+const isLegacyMoviebox = (server: { id?: string; resolver?: string }) =>
+  server.id === 'moviebox' || server.resolver === 'moviebox';
+
+const withLocalResolvers = (list: PlaybackServer[]): PlaybackServer[] => [
+  STREAMFLIX_SERVER,
   ...list.filter(
-    (s) => s.id !== MOVIEBOX_SERVER.id && s.resolver !== 'moviebox',
+    (s) =>
+      s.id !== STREAMFLIX_SERVER.id &&
+      !isLegacyMoviebox(s) &&
+      s.resolver !== 'streamflix',
   ),
 ];
 
@@ -307,8 +310,12 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
               tvUrlPattern: s.tvUrlPattern ?? legacyPattern,
             };
           });
-        setCustomServers(custom);
-        setActiveId(parsed.activeId ?? '');
+        setCustomServers(custom.filter((s) => !isLegacyMoviebox(s)));
+        const nextActive =
+          parsed.activeId === 'moviebox' || parsed.activeId === 'moviebox.ph'
+            ? STREAMFLIX_SERVER_ID
+            : (parsed.activeId ?? '');
+        setActiveId(nextActive);
       })
       .catch(() => {})
       .finally(() => setCustomLoaded(true));
@@ -419,7 +426,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const servers = useMemo(
-    () => [...withLocalMoviebox(builtInServers), ...customServers],
+    () => [...withLocalResolvers(builtInServers), ...customServers],
     [builtInServers, customServers],
   );
 

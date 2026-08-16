@@ -2,12 +2,12 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-import * as Device from 'expo-device';
 import { WATCH_PARTY_CONFIG } from '@/src/config/env';
 import {
   WatchPartyClient,
@@ -25,8 +25,28 @@ import type {
 } from '@/src/party/protocol';
 import { companionPathForCode } from '@/src/party/protocol';
 import { getPartyHostKey, savePartyHostKey } from '@/src/party/hostKeys';
+import {
+  deviceDisplayName,
+  getPartyDisplayName,
+  savePartyDisplayName,
+} from '@/src/party/displayName';
+import { usePartyRtc, type PartyRtcApi } from '@/src/hooks/usePartyRtc';
 
 type Listener = (msg: ServerMessage) => void;
+
+const idleRtc: PartyRtcApi = {
+  available: false,
+  joined: false,
+  muted: false,
+  camOff: false,
+  localStreamURL: null,
+  remotes: [],
+  error: null,
+  joinCall: async () => {},
+  leaveCall: () => {},
+  toggleMute: () => {},
+  toggleCam: () => {},
+};
 
 interface WatchPartyContextValue {
   enabled: boolean;
@@ -37,7 +57,9 @@ interface WatchPartyContextValue {
   error: string | null;
   companionUrl: string | null;
   displayName: string;
+  setDisplayName: (next: string) => Promise<string>;
   chat: PartyChatLine[];
+  rtc: PartyRtcApi;
   createRoom: (
     content: PartyContent,
     clock?: PartyClock,
@@ -62,7 +84,9 @@ const WatchPartyContext = createContext<WatchPartyContextValue>({
   error: null,
   companionUrl: null,
   displayName: 'Flick user',
+  setDisplayName: async () => 'Flick user',
   chat: [],
+  rtc: idleRtc,
   createRoom: async () => {
     throw new Error('Watch party is not configured');
   },
@@ -74,13 +98,6 @@ const WatchPartyContext = createContext<WatchPartyContextValue>({
   subscribe: () => () => {},
 });
 
-const deviceDisplayName = (): string => {
-  const name = Device.deviceName?.trim();
-  if (name) return name.slice(0, 32);
-  if (Device.modelName) return Device.modelName.slice(0, 32);
-  return 'Flick user';
-};
-
 export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
   const enabled = WATCH_PARTY_CONFIG.enabled;
   const clientRef = useRef<WatchPartyClient | null>(null);
@@ -91,9 +108,26 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chat, setChat] = useState<PartyChatLine[]>([]);
+  const rtcRef = useRef<PartyRtcApi>(idleRtc);
   roomRef.current = room;
 
-  const displayName = useMemo(() => deviceDisplayName(), []);
+  const [displayName, setDisplayNameState] = useState(deviceDisplayName);
+  const displayNameRef = useRef(displayName);
+  displayNameRef.current = displayName;
+
+  useEffect(() => {
+    void getPartyDisplayName().then((name) => {
+      displayNameRef.current = name;
+      setDisplayNameState(name);
+    });
+  }, []);
+
+  const setDisplayName = useCallback(async (next: string) => {
+    const saved = await savePartyDisplayName(next);
+    displayNameRef.current = saved;
+    setDisplayNameState(saved);
+    return saved;
+  }, []);
 
   const role: PartyRole | null = useMemo(() => {
     if (!room || !memberId) return null;
@@ -132,6 +166,26 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
             source: null,
             embedUrl: null,
             subtitles: null,
+            browsing: false,
+          });
+        }
+        if (msg.type === 'browse' && roomRef.current) {
+          setRoom({
+            ...roomRef.current,
+            source: null,
+            embedUrl: null,
+            subtitles: null,
+            browsing: true,
+          });
+        }
+        if (msg.type === 'content' && roomRef.current) {
+          setRoom({
+            ...roomRef.current,
+            content: msg.content,
+            source: null,
+            embedUrl: null,
+            subtitles: null,
+            browsing: false,
           });
         }
         if (msg.type === 'source' && roomRef.current) {
@@ -147,7 +201,11 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
         if (msg.type === 'chat') {
           setChat((prev) => [...prev, { from: msg.from, text: msg.text, at: msg.at }]);
         }
+        if (msg.type === 'rtc-peers' && roomRef.current) {
+          setRoom({ ...roomRef.current, rtcMemberIds: msg.ids });
+        }
         if (msg.type === 'ended') {
+          rtcRef.current.leaveCall();
           setRoom(null);
           setMemberId(null);
           setConnected(false);
@@ -170,7 +228,7 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       const client = await ensureClient();
       setChat([]);
       const res = await client.create(
-        displayName,
+        displayNameRef.current,
         content,
         'player',
         clock,
@@ -181,7 +239,7 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       setRoom(res.room);
       return res.room;
     },
-    [displayName, ensureClient],
+    [ensureClient],
   );
 
   const joinRoom = useCallback(
@@ -194,23 +252,19 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       const client = await ensureClient();
       setChat([]);
       const hostKey = (await getPartyHostKey(code)) ?? undefined;
-      const res = await client.join(code, displayName, kind, hostKey, password);
+      const res = await client.join(
+        code,
+        displayNameRef.current,
+        kind,
+        hostKey,
+        password,
+      );
       setMemberId(res.memberId);
       setRoom(res.room);
       return res.room;
     },
-    [displayName, ensureClient],
+    [ensureClient],
   );
-
-  const leaveRoom = useCallback(() => {
-    clientRef.current?.send({ type: 'leave' });
-    clientRef.current?.disconnect();
-    clientRef.current = null;
-    setRoom(null);
-    setMemberId(null);
-    setConnected(false);
-    setChat([]);
-  }, []);
 
   const send = useCallback((msg: ClientMessage) => {
     clientRef.current?.send(msg);
@@ -223,6 +277,26 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
+  const rtc = usePartyRtc({
+    enabled: enabled && connected && !!room,
+    memberId,
+    room,
+    send,
+    subscribe,
+  });
+  rtcRef.current = rtc;
+
+  const leaveRoom = useCallback(() => {
+    rtcRef.current.leaveCall();
+    clientRef.current?.send({ type: 'leave' });
+    clientRef.current?.disconnect();
+    clientRef.current = null;
+    setRoom(null);
+    setMemberId(null);
+    setConnected(false);
+    setChat([]);
+  }, []);
+
   const value = useMemo(
     () => ({
       enabled,
@@ -233,7 +307,9 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       error,
       companionUrl,
       displayName,
+      setDisplayName,
       chat,
+      rtc,
       createRoom,
       joinRoom,
       leaveRoom,
@@ -249,7 +325,9 @@ export const WatchPartyProvider = ({ children }: { children: ReactNode }) => {
       error,
       companionUrl,
       displayName,
+      setDisplayName,
       chat,
+      rtc,
       createRoom,
       joinRoom,
       leaveRoom,

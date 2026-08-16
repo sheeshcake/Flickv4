@@ -14,6 +14,7 @@ import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
 import { ScrollView } from '@/components/ui/scroll-view';
 import { Focusable } from '@/src/components/Focusable';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
+import { PARTY_DISPLAY_NAME_MAX } from '@/src/party/displayName';
 import type { PartyClock, PartyContent } from '@/src/party/protocol';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
@@ -37,16 +38,29 @@ export const PartyLobbyModal = ({
   onPlayTogether,
   onClose,
 }: PartyLobbyModalProps) => {
-  const { createRoom, leaveRoom, room, companionUrl, error, enabled } =
-    useWatchParty();
+  const {
+    createRoom,
+    leaveRoom,
+    room,
+    companionUrl,
+    error,
+    enabled,
+    displayName,
+    setDisplayName,
+  } = useWatchParty();
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState(displayName);
   const [password, setPassword] = useState('');
   const [usedPassword, setUsedPassword] = useState(false);
   const clockRef = useRef(clock);
   clockRef.current = clock;
+
+  useEffect(() => {
+    if (visible) setNameDraft(displayName);
+  }, [visible, displayName]);
 
   useEffect(() => {
     if (visible) return;
@@ -62,6 +76,7 @@ export const PartyLobbyModal = ({
     setLocalError(null);
     const nextPassword = password.trim();
     try {
+      await setDisplayName(nameDraft);
       await createRoom(
         content,
         clockRef.current,
@@ -134,6 +149,21 @@ export const PartyLobbyModal = ({
                       ? `Create a room for ${content.title}. Friends can join from Flick or the web.`
                       : 'Create a room. Friends can join from Flick or the web.'}
                   </Text>
+                  <VStack space="xs">
+                    <Text size="sm" className="text-muted-foreground">
+                      Your name
+                    </Text>
+                    <Input>
+                      <InputField
+                        value={nameDraft}
+                        onChangeText={setNameDraft}
+                        placeholder="Shown to others in the room"
+                        autoCorrect={false}
+                        maxLength={PARTY_DISPLAY_NAME_MAX}
+                        editable={!busy}
+                      />
+                    </Input>
+                  </VStack>
                   <VStack space="xs">
                     <Text size="sm" className="text-muted-foreground">
                       Password (optional)

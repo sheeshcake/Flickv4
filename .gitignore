@@ -44,3 +44,4 @@ yarn-error.*
 
 # party companion Vite output
 party-server/public/
+streamflix-main/*

@@ -20,6 +20,22 @@ export const PARTY_CODE_LENGTH = 5;
 export const PARTY_MAX_MEMBERS = 8;
 export const PARTY_SCHEME = 'flick';
 
+export const PARTY_REACTIONS = [
+  '👍',
+  '❤️',
+  '😂',
+  '😮',
+  '👏',
+  '🎉',
+  '🔥',
+  '😢',
+] as const;
+export type PartyReactionEmoji = (typeof PARTY_REACTIONS)[number];
+export const isPartyReaction = (
+  emoji: string,
+): emoji is PartyReactionEmoji =>
+  (PARTY_REACTIONS as readonly string[]).includes(emoji);
+
 export type PartyClientKind = 'player' | 'companion';
 export type PartyRole = 'host' | 'guest';
 
@@ -60,6 +76,18 @@ export interface PartySource {
   referer?: string;
   /** Playback-server Origin the native player sends (web proxy only). */
   origin?: string;
+  /** Streamflix extractor row the host is playing (e.g. `vidrock-orion`). */
+  sourceId?: string;
+}
+
+export type PartyRtcSignalKind = 'offer' | 'answer' | 'ice';
+
+export interface PartyRtcSignalPayload {
+  type: PartyRtcSignalKind;
+  sdp?: string;
+  candidate?: string | null;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
 }
 
 export interface PartySubtitles {
@@ -79,6 +107,10 @@ export interface PartyRoom {
   embedUrl?: string | null;
   subtitles?: PartySubtitles | null;
   locked?: boolean;
+  /** Host left the player and is picking another title. */
+  browsing?: boolean;
+  /** Members who have opted into the in-party camera grid. */
+  rtcMemberIds?: string[];
 }
 
 export type ClientMessage =
@@ -102,6 +134,8 @@ export type ClientMessage =
   | { type: 'pause' }
   | { type: 'seek'; positionSeconds: number }
   | { type: 'episode'; season: number; episode: number }
+  | { type: 'browse' }
+  | { type: 'content'; content: PartyContent }
   | { type: 'heartbeat'; positionSeconds: number; paused: boolean }
   | { type: 'buffering'; buffering: boolean }
   | {
@@ -111,10 +145,15 @@ export type ClientMessage =
       embedUrl?: string;
       referer?: string;
       origin?: string;
+      sourceId?: string;
     }
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'control'; action: 'play' | 'pause' | 'seek'; positionSeconds?: number }
   | { type: 'chat'; text: string }
+  | { type: 'reaction'; emoji: string }
+  | { type: 'rtc-join' }
+  | { type: 'rtc-leave' }
+  | { type: 'rtc-signal'; to: string; payload: PartyRtcSignalPayload }
   | { type: 'leave' };
 
 export type ServerMessage =
@@ -123,10 +162,15 @@ export type ServerMessage =
   | { type: 'state'; room: PartyRoom }
   | { type: 'clock'; clock: PartyClock }
   | { type: 'episode'; season: number; episode: number }
+  | { type: 'browse' }
+  | { type: 'content'; content: PartyContent }
   | { type: 'source'; source: PartySource | null; embedUrl?: string | null }
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'control'; action: 'play' | 'pause' | 'seek'; positionSeconds?: number }
   | { type: 'chat'; from: string; text: string; at: number }
+  | { type: 'reaction'; from: string; emoji: string; at: number }
+  | { type: 'rtc-peers'; ids: string[] }
+  | { type: 'rtc-signal'; from: string; payload: PartyRtcSignalPayload }
   | { type: 'error'; message: string }
   | { type: 'ended'; reason: string };
 

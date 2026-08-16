@@ -10,10 +10,8 @@ import {
 import type { ReactVideoSource } from 'react-native-video';
 import { getTitle, type MediaItem } from '@/src/types';
 import { originOf } from '@/src/utils/streamUrl';
-import {
-  MOVIEBOX_PLAYBACK_HEADERS,
-  type ServerResolver,
-} from '@/src/services/MovieboxService';
+import type { ServerResolver } from '@/src/services/playbackHeaders';
+import { STREAMFLIX_PLAYBACK_HEADERS } from '@/src/services/StreamflixService';
 import {
   fetchHlsVariants,
   fetchMediaPlaylist,
@@ -98,7 +96,7 @@ export interface ResolveRequest {
   type: 'movie' | 'tv';
   season?: number;
   episode?: number;
-  /** Raw show/movie title — required for Moviebox search. */
+  /** Raw show/movie title. */
   title?: string;
   resolver?: ServerResolver;
 }
@@ -176,8 +174,8 @@ const buildHeaders = (
   serverUrl: string,
   resolver?: ServerResolver,
 ): Record<string, string> =>
-  resolver === 'moviebox'
-    ? { ...MOVIEBOX_PLAYBACK_HEADERS }
+  resolver === 'streamflix'
+    ? { ...STREAMFLIX_PLAYBACK_HEADERS }
     : {
         Referer: `${serverUrl}/`,
         Origin: originOf(serverUrl),
@@ -454,8 +452,8 @@ class DownloadServiceImpl {
       episode: job.episode,
       title: job.title,
       subtitleLanguage: job.subtitleLanguage,
-      resolver: job.headers.Referer?.includes('moviebox.ph')
-        ? 'moviebox'
+      resolver: job.headers.Referer?.includes('vidrock.net')
+        ? 'streamflix'
         : undefined,
     }).catch((e) => log('resume: process failed', e));
   }

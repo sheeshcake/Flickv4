@@ -38,6 +38,10 @@
 	<string>12.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Flick uses the camera so you can join a watch-party video call.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Flick uses the microphone so you can join a watch-party video call.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

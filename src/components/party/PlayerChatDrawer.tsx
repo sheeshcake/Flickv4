@@ -52,48 +52,50 @@ export const PlayerChatDrawer = ({
             <Icon as={X} className="text-foreground" />
           </Focusable>
         </HStack>
-        <ScrollView className="flex-1 px-4 pb-6">
+        <ScrollView className="flex-1 px-4">
           <Text size="sm" className="mb-3 text-muted-foreground">
             Messages stay in this room.
           </Text>
-          <Box className="mb-2 min-h-32 rounded-md border border-border p-2">
-            {chat.length === 0 ? (
-              <Text size="xs" className="text-muted-foreground">
-                No messages yet.
+          {chat.length === 0 ? (
+            <Text size="xs" className="text-muted-foreground">
+              No messages yet.
+            </Text>
+          ) : (
+            chat.map((line, i) => (
+              <Text
+                key={`${line.from}-${i}`}
+                size="sm"
+                className="mb-1 text-foreground"
+              >
+                <Text size="sm" bold className="text-foreground">
+                  {line.from}
+                </Text>{' '}
+                {line.text}
               </Text>
-            ) : (
-              chat.map((line, i) => (
-                <Text
-                  key={`${line.from}-${i}`}
-                  size="sm"
-                  className="mb-1 text-foreground"
-                >
-                  <Text size="sm" bold className="text-foreground">
-                    {line.from}
-                  </Text>{' '}
-                  {line.text}
-                </Text>
-              ))
-            )}
+            ))
+          )}
+        </ScrollView>
+        <HStack space="sm" className="items-center px-4 py-3">
+          <Box className="flex-1">
+            <Input>
+              <InputField
+                value={draft}
+                onChangeText={setDraft}
+                placeholder="Say something"
+                maxLength={200}
+                onSubmitEditing={sendDraft}
+                returnKeyType="send"
+              />
+            </Input>
           </Box>
-          <Input>
-            <InputField
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Say something"
-              maxLength={200}
-              onSubmitEditing={sendDraft}
-              returnKeyType="send"
-            />
-          </Input>
           <Focusable
             onPress={sendDraft}
-            className="mt-2 items-center rounded-md bg-foreground px-4 py-2"
+            className="items-center rounded-md bg-foreground px-4 py-2"
             focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
           >
             <Text className="font-semibold text-background">Send</Text>
           </Focusable>
-        </ScrollView>
+        </HStack>
       </Box>
     </Box>
   );
