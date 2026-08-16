@@ -98,7 +98,7 @@ const publicRoom = (room) => ({
   browsing: Boolean(room.browsing),
   locked: Boolean(room.passwordHash),
   rtcMemberIds: [...(room.rtcMemberIds ?? [])],
-  members: [...room.members.values()].map((m) => ({)
+  members: [...room.members.values()].map((m) => ({
     id: m.id,
     displayName: m.displayName,
     kind: m.kind,
@@ -979,12 +979,13 @@ const serveSubtitle = async (code, req, res) => {
 };
 
 const serveStatic = (req, res) => {
-  const url = new URL(req.url || '/', `http://${req.headers.host}`);
-  if (url.pathname === '/health') {
+  const pathOnly = String(req.url || '/').split('?')[0];
+  if (pathOnly === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, rooms: rooms.size }));
     return;
   }
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
   if (url.pathname === '/rooms' && req.method === 'GET') {
     res.writeHead(200, {
@@ -1465,6 +1466,6 @@ setInterval(() => {
   }
 }, 60_000).unref();
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`[flick-party] listening on :${PORT}`);
 });
