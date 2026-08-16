@@ -1,7 +1,7 @@
 /**
  * Flick watch-party room server.
  * Syncs TMDB identity + a host playback clock. Web companion waterfall:
- * Streamflix → `/media` proxy → Moviebox → host embed URL.
+ * Streamflix (source list) → `/media` proxy → host embed URL.
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
@@ -40,7 +40,7 @@ const MEDIA_UA =
 /** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string }} PartySource */
 /** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
 /** @typedef {{ id: string, displayName: string, kind: 'player'|'companion', role: 'host'|'guest', buffering: boolean, ws: import('ws').WebSocket }} Member */
-/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, mediaAllowedHosts: Set<string>, streamflixHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
+/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, browsing: boolean, mediaAllowedHosts: Set<string>, streamflixHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -95,6 +95,7 @@ const publicRoom = (room) => ({
   source: room.source,
   embedUrl: room.embedUrl,
   subtitles: room.subtitles,
+  browsing: Boolean(room.browsing),
   locked: Boolean(room.passwordHash),
   members: [...room.members.values()].map((m) => ({
     id: m.id,
@@ -149,6 +150,30 @@ const memberRoom = (memberId) => {
 };
 
 const isHost = (room, memberId) => room.hostId === memberId;
+
+const parsePartyContent = (raw) => {
+  if (!raw || typeof raw.tmdbId !== 'number' || !raw.mediaType) {
+    throw new Error('Missing content');
+  }
+  return {
+    tmdbId: raw.tmdbId,
+    mediaType: raw.mediaType === 'tv' ? 'tv' : 'movie',
+    title: String(raw.title || 'Untitled').slice(0, 200),
+    posterPath: raw.posterPath ?? null,
+    season: raw.season,
+    episode: raw.episode,
+    imdbId: raw.imdbId ? String(raw.imdbId).slice(0, 16) : null,
+  };
+};
+
+const clearRoomPlayback = (room) => {
+  room.clock = { positionSeconds: 0, paused: true, updatedAt: Date.now() };
+  room.source = null;
+  room.embedUrl = null;
+  room.subtitles = null;
+  room.mediaAllowedHosts = new Set();
+  room.streamflixHosts = new Set();
+};
 
 const applyHostClock = (room, patch) => {
   room.clock = {
@@ -386,292 +411,17 @@ const serveMedia = async (code, req, res) => {
   }
 };
 
-const MOVIEBOX_API = 'https://h5-api.aoneroom.com/wefeed-h5api-bff';
-const MOVIEBOX_STREAM = 'https://h5.aoneroom.com/wefeed-h5-bff';
-const MOVIEBOX_HEADERS = {
-  'User-Agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
-  Referer: 'https://moviebox.ph/',
-  Origin: 'https://moviebox.ph',
-  'X-Client-Info': '{"timezone":"Asia/Dhaka"}',
-  'X-Request-Lang': 'en',
-  Accept: 'application/json',
-  'Content-Type': 'application/json',
-};
-
-/** @type {{ token: string, at: number }} */
-const movieboxAuth = { token: '', at: 0 };
-
-const movieboxLog = (...args) => console.log('[Moviebox]', ...args);
-
-const clientIpFromReq = (req) => {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.trim()) {
-    return fwd.split(',')[0].trim();
-  }
-  if (Array.isArray(fwd) && fwd[0]) {
-    return String(fwd[0]).split(',')[0].trim();
-  }
-  const real = req.headers['x-real-ip'];
-  if (typeof real === 'string' && real.trim()) return real.trim();
-  return req.socket?.remoteAddress || '';
-};
-
-const geoHeaders = (clientIp) => {
-  if (!clientIp) return {};
-  return { 'X-Forwarded-For': clientIp, 'X-Real-IP': clientIp };
-};
-
-const shortMovieboxUrl = (url) => {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`;
-  } catch {
-    return String(url).slice(0, 120);
-  }
-};
-
-const movieboxFetch = async (url, init = {}, timeoutMs = 15000) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const getMovieboxToken = async (clientIp = '') => {
-  if (movieboxAuth.token && Date.now() - movieboxAuth.at < 25 * 60 * 1000) {
-    movieboxLog('token: cached');
-    return movieboxAuth.token;
-  }
-  movieboxLog('token: fetching guest JWT');
-  const resp = await movieboxFetch(`${MOVIEBOX_API}/home?host=moviebox.ph`, {
-    headers: { ...MOVIEBOX_HEADERS, ...geoHeaders(clientIp) },
-  });
-  const xUser = resp.headers.get('x-user');
-  if (xUser) {
-    try {
-      movieboxAuth.token = JSON.parse(xUser).token || '';
-    } catch {
-      movieboxAuth.token = '';
-    }
-  }
-  movieboxAuth.at = Date.now();
-  movieboxLog(movieboxAuth.token ? 'token: acquired' : 'token: missing');
-  return movieboxAuth.token;
-};
-
-const normalizeTitle = (value) =>
-  String(value || '')
-    .toLowerCase()
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\bs\d+(?:\s*-\s*s\d+)?\b/gi, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-
-const parseSeasonTag = (title) => {
-  const range = String(title).match(/\bS(\d+)\s*-\s*S(\d+)\b/i);
-  if (range) {
-    return { from: Number(range[1]), to: Number(range[2]), exact: null };
-  }
-  const exact = String(title).match(/\bS(\d+)\b/i);
-  if (exact) {
-    const n = Number(exact[1]);
-    return { from: n, to: n, exact: n };
-  }
-  return { from: null, to: null, exact: null };
-};
-
-const scoreMovieboxItem = (item, content) => {
-  const want = normalizeTitle(content.title);
-  const got = normalizeTitle(item.title);
-  if (!want || !got) return 0;
-  let score = 0;
-  if (got === want) score += 100;
-  else if (got.includes(want) || want.includes(got)) score += 70;
-  else {
-    const wantTokens = new Set(want.split(' ').filter(Boolean));
-    const gotTokens = got.split(' ').filter(Boolean);
-    const overlap = gotTokens.filter((t) => wantTokens.has(t)).length;
-    if (overlap === 0) return 0;
-    score += (overlap / Math.max(wantTokens.size, gotTokens.length)) * 50;
-  }
-  const isTv = content.mediaType === 'tv';
-  if (isTv && item.subjectType === 2) score += 20;
-  if (!isTv && item.subjectType === 1) score += 20;
-  const title = String(item.title || '');
-  if (/\[english\]/i.test(title)) score += 15;
-  if (/\[(hindi|tagalog|tamil|telugu|spanish|french)\]/i.test(title)) score -= 25;
-  if (isTv && content.season != null) {
-    const tag = parseSeasonTag(title);
-    if (tag.exact === content.season) score += 40;
-    else if (
-      tag.from != null &&
-      content.season >= tag.from &&
-      content.season <= tag.to
-    ) {
-      score += 25;
-    }
-  }
-  return score;
-};
-
-const movieboxPlayParams = (item, content) => {
-  if (content.mediaType !== 'tv') return { se: 0, ep: 0 };
-  const episode = Number(content.episode) || 1;
-  const season = Number(content.season) || 1;
-  const tag = parseSeasonTag(item.title);
-  if (tag.exact != null) return { se: 1, ep: episode };
-  return { se: season, ep: episode };
-};
-
-const pickMovieboxStream = (data) => {
-  const streams = (data?.streams || []).filter((s) => s?.url);
-  streams.sort(
-    (a, b) => Number(b.resolutions || 0) - Number(a.resolutions || 0),
-  );
-  if (streams[0]) {
-    const url = String(streams[0].url);
-    const format = String(streams[0].format || '');
-    const kind =
-      /\.m3u8(\?|#|$)/i.test(url) || /m3u8|hls/i.test(format) ? 'hls' : 'file';
-    return { url, kind };
-  }
-  const hls = (data?.hls || []).find((h) => h?.url || h?.src);
-  if (hls) return { url: String(hls.url || hls.src), kind: 'hls' };
-  return null;
-};
-
-const searchMoviebox = async (content, clientIp = '') => {
-  const token = await getMovieboxToken(clientIp);
-  const headers = {
-    ...MOVIEBOX_HEADERS,
-    ...geoHeaders(clientIp),
-    Authorization: token ? `Bearer ${token}` : '',
-  };
-  let best = null;
-  let bestScore = 0;
-  for (let page = 1; page <= 3; page++) {
-    movieboxLog('search: page', page, `"${content.title}"`);
-    const resp = await movieboxFetch(`${MOVIEBOX_API}/subject/search`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        keyword: content.title,
-        page,
-        perPage: 20,
-      }),
-    });
-    if (!resp.ok) {
-      movieboxLog('search: page', page, 'failed', resp.status);
-      break;
-    }
-    const json = await resp.json();
-    const items = json?.data?.items || json?.data?.list || [];
-    movieboxLog('search: page', page, 'hits', items.length);
-    if (!items.length) break;
-    for (const raw of items) {
-      const item = raw?.subject && raw.subject.title ? raw.subject : raw;
-      if (!item?.subjectId || !item?.detailPath) continue;
-      const score = scoreMovieboxItem(item, content);
-      if (score > bestScore) {
-        best = item;
-        bestScore = score;
-        movieboxLog('search: best so far', item.title, `score=${Math.round(score)}`);
-      }
-    }
-    if (bestScore >= 120) break;
-  }
-  if (bestScore >= 70 && best) {
-    movieboxLog(
-      'search: matched',
-      best.title,
-      `score=${Math.round(bestScore)}`,
-      best.detailPath,
-    );
-    return best;
-  }
-  movieboxLog(
-    'search: no match',
-    `"${content.title}"`,
-    `bestScore=${Math.round(bestScore)}`,
-  );
-  return null;
-};
-
-const playMoviebox = async (item, content, clientIp = '') => {
-  const { se, ep } = movieboxPlayParams(item, content);
-  movieboxLog('play:', item.title, `se=${se}`, `ep=${ep}`, item.detailPath);
-  const playUrl =
-    `${MOVIEBOX_STREAM}/web/subject/play?subjectId=${encodeURIComponent(item.subjectId)}` +
-    `&se=${se}&ep=${ep}&detailPath=${encodeURIComponent(item.detailPath)}`;
-  const playerUrl =
-    `https://netfilm.world/spa/videoPlayPage/movies/${item.detailPath}` +
-    `?id=${item.subjectId}&type=/movie/detail&detailSe=${se}&detailEp=${ep}&lang=en`;
-  const resp = await movieboxFetch(playUrl, {
-    headers: {
-      'User-Agent': MOVIEBOX_HEADERS['User-Agent'],
-      Accept: 'application/json, text/plain, */*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      Origin: 'https://h5.aoneroom.com',
-      Referer: `https://h5.aoneroom.com/spa/videoPlayPage/movies/${item.detailPath}?id=${item.subjectId}&type=/movie/detail&detailSe=${se}&detailEp=${ep}&lang=en`,
-      ...geoHeaders(clientIp),
-    },
-  });
-  if (!resp.ok) {
-    movieboxLog('play: failed', resp.status);
-    return { playerUrl, stream: null };
-  }
-  const json = await resp.json();
-  const stream = pickMovieboxStream(json?.data);
-  if (stream) {
-    const resolutions = (json?.data?.streams || [])
-      .map((s) => s.resolutions)
-      .filter(Boolean);
-    movieboxLog(
-      'play: stream',
-      stream.kind,
-      resolutions.length ? `qualities=${resolutions.join(',')}` : '',
-      shortMovieboxUrl(stream.url),
-    );
-  } else {
-    movieboxLog('play: no stream on subject', item.subjectId);
-  }
-  return { playerUrl, stream };
-};
-
-const resolveMoviebox = async (content, clientIp = '') => {
-  movieboxLog(
-    'resolve:',
-    content.mediaType,
-    `"${content.title}"`,
-    content.mediaType === 'tv'
-      ? `S${content.season ?? '?'}E${content.episode ?? '?'}`
-      : '',
-    clientIp ? `ip=${clientIp}` : '',
-  );
-  const item = await searchMoviebox(content, clientIp);
-  if (!item) {
-    movieboxLog('resolve: no match');
-    return null;
-  }
-  const { playerUrl, stream } = await playMoviebox(item, content, clientIp);
-  movieboxLog(stream?.url ? 'resolve: ok' : 'resolve: player page only');
-  return {
-    url: stream?.url || null,
-    kind: stream?.kind || 'file',
-    playerUrl,
-  };
-};
-
 const STREAMFLIX_GCM_KEY = Buffer.from(
   '7f3e9c2a8b5d1f4e6a9c3b7d2e5f8a1c4b6d9e2f5a8c1b4d7e9f2a5c8b1d4e7f',
   'hex',
 );
 const STREAMFLIX_UA =
   'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36';
+const VIDEASY_API = 'https://api.videasy.net';
+const VIDEASY_DEC = 'https://enc-dec.app/api/dec-videasy';
+const VIDZEE_PLAYER = 'https://player.vidzee.wtf';
+const VIDZEE_CORE = 'https://core.vidzee.wtf';
+const VIDZEE_PASS = '4f2a9c7d1e8b3a6f0d5c2e9a7b1f4d8c';
 
 const streamflixLog = (...args) => console.log('[Streamflix]', ...args);
 
@@ -706,16 +456,18 @@ const isEnglishSource = (data) => {
   return language === 'english' || flag === 'us';
 };
 
-const streamflixFetch = async (url, timeoutMs = 15000) => {
+const streamflixFetch = async (url, init = {}, timeoutMs = 15000) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
+      ...init,
       headers: {
         'User-Agent': STREAMFLIX_UA,
         Accept: 'application/json',
         Referer: 'https://vidrock.net/',
         Origin: 'https://vidrock.net',
+        ...init.headers,
       },
       signal: controller.signal,
     });
@@ -732,6 +484,13 @@ const shortStreamflixUrl = (url) => {
     return String(url).slice(0, 120);
   }
 };
+
+const slugId = (name) =>
+  String(name)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 
 const pickAtlasMp4 = async (listUrl) => {
   try {
@@ -761,12 +520,27 @@ const pickAtlasMp4 = async (listUrl) => {
   }
 };
 
-const resolveStreamflix = async (content) => {
-  const tmdbId = Number(content.tmdbId);
-  if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
-    streamflixLog('resolve: missing tmdbId');
-    return null;
+const publicSource = (source) => ({
+  id: source.id,
+  name: source.name,
+  language: source.language || '',
+  kind: source.kind,
+  url: source.url || '',
+  subtitles: Array.isArray(source.subtitles) ? source.subtitles : [],
+});
+
+const seedSourceHosts = (room, source) => {
+  const host = hostnameOf(source.url);
+  if (host) allowStreamflixHost(room, host);
+  for (const track of source.subtitles || []) {
+    const subHost = hostnameOf(track.file);
+    if (subHost) allowStreamflixHost(room, subHost);
   }
+};
+
+const listVidrock = async (content) => {
+  const tmdbId = Number(content.tmdbId);
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
   const isTv =
     content.mediaType === 'tv' &&
     content.season != null &&
@@ -774,23 +548,14 @@ const resolveStreamflix = async (content) => {
   const apiUrl = isTv
     ? `https://vidrock.net/api/tv/${tmdbId}/${content.season}/${content.episode}`
     : `https://vidrock.net/api/movie/${tmdbId}`;
-  streamflixLog(
-    'resolve:',
-    content.mediaType,
-    tmdbId,
-    isTv ? `${content.season}x${content.episode}` : 'movie',
-  );
-  streamflixLog('resolve: GET', apiUrl);
+  streamflixLog('vidrock: GET', apiUrl);
   const res = await streamflixFetch(apiUrl);
   if (!res.ok) {
-    streamflixLog('resolve: http', res.status);
-    return null;
+    streamflixLog('vidrock: http', res.status);
+    return [];
   }
   const body = await res.json();
-  if (!body || typeof body !== 'object') {
-    streamflixLog('resolve: empty body');
-    return null;
-  }
+  if (!body || typeof body !== 'object') return [];
   const entries = Object.entries(body).sort(([aName, a], [bName, b]) => {
     const aEn = isEnglishSource(a) ? 1 : 0;
     const bEn = isEnglishSource(b) ? 1 : 0;
@@ -799,49 +564,258 @@ const resolveStreamflix = async (content) => {
     if (String(bName).toLowerCase() === 'atlas') return -1;
     return 0;
   });
-  streamflixLog(
-    'resolve: servers',
-    entries.length,
-    entries.map(([name]) => name).join(',') || '(none)',
-  );
+  const sources = [];
   for (const [name, data] of entries) {
     const packed = typeof data?.url === 'string' ? data.url.trim() : '';
-    if (!packed) {
-      streamflixLog('resolve: skip empty', name);
-      continue;
-    }
-    const url = decryptVidrockUrl(packed);
-    if (!url) {
-      streamflixLog('resolve: skip encrypted', name);
-      continue;
-    }
-    const kind = streamflixKind(data.type, url);
-    streamflixLog(
-      'resolve: candidate',
-      name,
-      data.language || data.flag,
-      kind,
-      shortStreamflixUrl(url),
-    );
+    if (!packed) continue;
+    let url = decryptVidrockUrl(packed);
+    if (!url) continue;
+    let kind = streamflixKind(data.type, url);
     if (
       String(name).toLowerCase() === 'atlas' &&
       !isStreamUri(url) &&
       !/\.m3u8(\?|#|$)/i.test(url)
     ) {
       const mp4 = await pickAtlasMp4(url);
-      if (mp4) {
-        streamflixLog('resolve: atlas', streamflixKind(null, mp4), shortStreamflixUrl(mp4));
-        return { url: mp4, kind: streamflixKind(null, mp4) };
-      }
+      if (!mp4) continue;
+      url = mp4;
+      kind = streamflixKind(null, mp4);
     }
-    streamflixLog('resolve: ok', name, kind, shortStreamflixUrl(url));
-    return { url, kind };
+    sources.push({
+      id: `vidrock-${slugId(name)}`,
+      name: `${name} (Vidrock)`,
+      language: data.language || '',
+      kind,
+      url,
+      subtitles: [],
+      extractor: 'vidrock',
+    });
+    streamflixLog('vidrock: source', name, data.language, kind, shortStreamflixUrl(url));
   }
-  streamflixLog('resolve: no playable stream');
+  return sources;
+};
+
+const VIDEASY_SERVERS = [
+  { name: 'Neon', endpoint: 'mb-flix' },
+  { name: 'Yoru', endpoint: 'cdn', movieOnly: true },
+  { name: 'Cypher', endpoint: 'downloader2' },
+  { name: 'Sage', endpoint: '1movies' },
+  { name: 'Breach', endpoint: 'm4uhd' },
+  { name: 'Vyse', endpoint: 'hdmovie' },
+];
+
+const listVideasy = (content) => {
+  const tmdbId = Number(content.tmdbId);
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
+  const title = encodeURIComponent(content.title || '');
+  const year = '';
+  const imdb = content.imdbId || '';
+  return VIDEASY_SERVERS.filter(
+    (s) => !(s.movieOnly && content.mediaType !== 'movie'),
+  ).map((s) => {
+    const url =
+      content.mediaType === 'tv' &&
+      content.season != null &&
+      content.episode != null
+        ? `${VIDEASY_API}/${s.endpoint}/sources-with-title?title=${title}&mediaType=tv&year=${year}&tmdbId=${tmdbId}&imdbId=${imdb}&episodeId=${content.episode}&seasonId=${content.season}`
+        : `${VIDEASY_API}/${s.endpoint}/sources-with-title?title=${title}&mediaType=movie&year=${year}&tmdbId=${tmdbId}&imdbId=${imdb}`;
+    return {
+      id: `videasy-${slugId(s.name)}`,
+      name: `${s.name} (Videasy)`,
+      language: 'English',
+      kind: s.name === 'Cypher' ? 'file' : 'hls',
+      url: '',
+      subtitles: [],
+      extractor: 'videasy',
+      extractUrl: url,
+    };
+  });
+};
+
+const extractVideasy = async (source) => {
+  if (!source.extractUrl) return null;
+  streamflixLog('videasy: GET', source.name);
+  const encRes = await streamflixFetch(source.extractUrl, {
+    headers: { Referer: 'https://player.videasy.net/', Origin: 'https://player.videasy.net' },
+  });
+  if (!encRes.ok) {
+    streamflixLog('videasy: http', encRes.status);
+    return null;
+  }
+  const encData = await encRes.text();
+  const tmdbId = new URL(source.extractUrl).searchParams.get('tmdbId') || '';
+  const decRes = await streamflixFetch(VIDEASY_DEC, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: encData, id: tmdbId }),
+  });
+  if (!decRes.ok) {
+    streamflixLog('videasy: dec http', decRes.status);
+    return null;
+  }
+  const decJson = await decRes.json();
+  const result =
+    typeof decJson.result === 'string' ? JSON.parse(decJson.result) : decJson.result;
+  const url = result?.sources?.[0]?.url;
+  if (!url || !/^https?:\/\//i.test(url)) {
+    streamflixLog('videasy: no source', source.name);
+    return null;
+  }
+  const subtitles = (result.subtitles || [])
+    .filter((t) => t.url)
+    .map((t) => ({ label: t.lang || 'Unknown', file: t.url }));
+  streamflixLog('videasy: ok', source.name, shortStreamflixUrl(url), 'subs', subtitles.length);
+  return { ...source, url, subtitles };
+};
+
+const VIDZEE_SERVERS = [
+  { name: 'Nflix', index: 0 },
+  { name: 'Duke', index: 1 },
+  { name: 'Glory', index: 2 },
+  { name: 'Nazy', index: 3 },
+  { name: 'Atlas', index: 4 },
+  { name: 'Drag', index: 5 },
+  { name: 'Achilles', index: 6 },
+  { name: 'Viet', index: 7 },
+  { name: 'Hindi', index: 9 },
+  { name: 'Bengali', index: 10 },
+  { name: 'Tamil', index: 11 },
+  { name: 'Telugu', index: 12 },
+  { name: 'Malayalam', index: 13 },
+];
+
+const listVidzee = (content) => {
+  const tmdbId = Number(content.tmdbId);
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
+  const base =
+    content.mediaType === 'tv' &&
+    content.season != null &&
+    content.episode != null
+      ? `${VIDZEE_PLAYER}/api/server?id=${tmdbId}&ss=${content.season}&ep=${content.episode}`
+      : `${VIDZEE_PLAYER}/api/server?id=${tmdbId}`;
+  return VIDZEE_SERVERS.map((s) => ({
+    id: `vidzee-${slugId(s.name)}`,
+    name: `${s.name} (Vidzee)`,
+    language: ['Hindi', 'Bengali', 'Tamil', 'Telugu', 'Malayalam'].includes(s.name)
+      ? s.name
+      : 'English',
+    kind: s.name === 'Duke' ? 'file' : 'hls',
+    url: '',
+    subtitles: [],
+    extractor: 'vidzee',
+    extractUrl: `${base}&sr=${s.index}`,
+  }));
+};
+
+let vidzeeMasterKey = '';
+
+const getVidzeeMasterKey = async () => {
+  if (vidzeeMasterKey) return vidzeeMasterKey;
+  try {
+    const res = await streamflixFetch(`${VIDZEE_CORE}/api-key`, {
+      headers: { Origin: VIDZEE_PLAYER, Referer: `${VIDZEE_PLAYER}/` },
+    });
+    if (!res.ok) return null;
+    const data = Buffer.from((await res.text()).trim(), 'base64');
+    if (data.length < 28) return null;
+    const iv = data.subarray(0, 12);
+    const tag = data.subarray(12, 28);
+    const ciphertext = data.subarray(28);
+    const key = crypto.createHash('sha256').update(VIDZEE_PASS).digest();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    vidzeeMasterKey = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString(
+      'utf8',
+    );
+    return vidzeeMasterKey;
+  } catch (err) {
+    streamflixLog('vidzee: master key fail', err instanceof Error ? err.message : err);
+    return null;
+  }
+};
+
+const decryptVidzeeLink = (encLink, masterKey) => {
+  try {
+    const decoded = Buffer.from(String(encLink), 'base64').toString('utf8');
+    const [ivB64, ctB64] = decoded.split(':');
+    if (!ivB64 || !ctB64) return null;
+    const iv = Buffer.from(ivB64, 'base64');
+    const ciphertext = Buffer.from(ctB64, 'base64');
+    const keyBytes = Buffer.alloc(32);
+    Buffer.from(String(masterKey), 'utf8').copy(keyBytes);
+    const decipher = crypto.createDecipheriv('aes-256-cbc', keyBytes, iv);
+    const url = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+      .toString('utf8')
+      .trim();
+    return /^https?:\/\//i.test(url) ? url : null;
+  } catch (err) {
+    streamflixLog('vidzee: link decrypt fail', err instanceof Error ? err.message : err);
+    return null;
+  }
+};
+
+const extractVidzee = async (source) => {
+  if (!source.extractUrl) return null;
+  const masterKey = await getVidzeeMasterKey();
+  if (!masterKey) return null;
+  streamflixLog('vidzee: GET', source.name);
+  const res = await streamflixFetch(source.extractUrl, {
+    headers: { Origin: VIDZEE_PLAYER, Referer: `${VIDZEE_PLAYER}/` },
+  });
+  if (!res.ok) {
+    streamflixLog('vidzee: http', res.status);
+    return null;
+  }
+  const json = await res.json();
+  const encrypted = json.url?.[0]?.link;
+  if (!encrypted) return null;
+  const url = decryptVidzeeLink(encrypted, masterKey);
+  if (!url) return null;
+  const subtitles = (json.tracks || [])
+    .filter((t) => t.url)
+    .map((t) => ({ label: t.lang || 'Unknown', file: t.url }));
+  streamflixLog('vidzee: ok', source.name, shortStreamflixUrl(url), 'subs', subtitles.length);
+  return { ...source, url, subtitles };
+};
+
+const listStreamflixSources = async (content) => {
+  streamflixLog(
+    'list:',
+    content.mediaType,
+    content.tmdbId,
+    content.mediaType === 'tv' ? `${content.season}x${content.episode}` : 'movie',
+  );
+  let vidrock = [];
+  try {
+    vidrock = await listVidrock(content);
+  } catch (err) {
+    streamflixLog('vidrock: error', err instanceof Error ? err.message : err);
+  }
+  const sources = [...vidrock, ...listVideasy(content), ...listVidzee(content)];
+  streamflixLog(
+    'list: ok',
+    sources.length,
+    sources.map((s) => s.name).join(', ') || '(none)',
+  );
+  return sources;
+};
+
+const resolveStreamflixSource = async (source) => {
+  if (source.url) return source;
+  try {
+    if (source.extractor === 'videasy') return await extractVideasy(source);
+    if (source.extractor === 'vidzee') return await extractVidzee(source);
+  } catch (err) {
+    streamflixLog(
+      'resolveSource: error',
+      source.name,
+      err instanceof Error ? err.message : err,
+    );
+  }
   return null;
 };
 
-const serveStreamflix = async (code, res) => {
+const serveStreamflix = async (code, req, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
   if (!room?.content?.tmdbId) {
     streamflixLog('http: no room/tmdb', code);
@@ -850,58 +824,35 @@ const serveStreamflix = async (code, res) => {
     return;
   }
   try {
-    const resolved = await resolveStreamflix(room.content);
-    if (!resolved?.url) {
-      streamflixLog('http: 404', room.code, room.content.tmdbId);
-      res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false }));
+    const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+    const wantedId = reqUrl.searchParams.get('source');
+    const listed = await listStreamflixSources(room.content);
+    if (wantedId) {
+      const stub = listed.find((s) => s.id === wantedId);
+      if (!stub) {
+        res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false }));
+        return;
+      }
+      const resolved = await resolveStreamflixSource(stub);
+      if (!resolved?.url) {
+        res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false }));
+        return;
+      }
+      seedSourceHosts(room, resolved);
+      streamflixLog('http: source', room.code, resolved.name, shortStreamflixUrl(resolved.url));
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: true, source: publicSource(resolved) }));
       return;
     }
-    const host = hostnameOf(resolved.url);
-    if (host) allowStreamflixHost(room, host);
-    streamflixLog(
-      'http: 200',
-      room.code,
-      resolved.kind,
-      host || '(no host)',
-      shortStreamflixUrl(resolved.url),
-    );
+    const sources = listed.map(publicSource);
+    for (const source of sources) seedSourceHosts(room, source);
+    streamflixLog('http: 200', room.code, sources.length, 'sources');
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, ...resolved }));
+    res.end(JSON.stringify({ ok: true, sources }));
   } catch (err) {
     streamflixLog('http: 502', err instanceof Error ? err.message : err);
-    res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: false }));
-  }
-};
-
-const serveMoviebox = async (code, req, res) => {
-  const room = rooms.get(String(code || '').toUpperCase());
-  if (!room?.content?.title) {
-    movieboxLog('http: no room/title', code);
-    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: false }));
-    return;
-  }
-  const clientIp = clientIpFromReq(req);
-  try {
-    const resolved = await resolveMoviebox(room.content, clientIp);
-    if (!resolved?.url && !resolved?.playerUrl) {
-      movieboxLog('http: 404', room.code, room.content.title);
-      res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: false }));
-      return;
-    }
-    movieboxLog(
-      'http: 200',
-      room.code,
-      resolved.url ? 'file' : 'iframe',
-      resolved.kind,
-    );
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, ...resolved }));
-  } catch (err) {
-    movieboxLog('http: 502', err instanceof Error ? err.message : err);
     res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: false }));
   }
@@ -957,13 +908,26 @@ const serveVideasy = async (code, res) => {
   res.end(JSON.stringify({ ok: false }));
 };
 
-const serveSubtitle = async (code, res) => {
+const serveSubtitle = async (code, req, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
-  const url = room?.subtitles?.url;
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+  const requested = reqUrl.searchParams.get('u');
+  const url = requested || room?.subtitles?.url;
   if (!url) {
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('No subtitles');
     return;
+  }
+  if (requested) {
+    const host = hostnameOf(requested);
+    const allowed =
+      isStreamflixMediaHost(room, host) ||
+      Boolean(host && room?.mediaAllowedHosts?.has(host.toLowerCase()));
+    if (!allowed) {
+      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Subtitle host not allowed');
+      return;
+    }
   }
   let parsed;
   try {
@@ -1036,15 +1000,9 @@ const serveStatic = (req, res) => {
     return;
   }
 
-  const movieboxMatch = url.pathname.match(/^\/moviebox\/([A-Za-z0-9]+)\/?$/);
-  if (movieboxMatch && req.method === 'GET') {
-    void serveMoviebox(movieboxMatch[1], req, res);
-    return;
-  }
-
   const streamflixMatch = url.pathname.match(/^\/streamflix\/([A-Za-z0-9]+)\/?$/);
   if (streamflixMatch && req.method === 'GET') {
-    void serveStreamflix(streamflixMatch[1], res);
+    void serveStreamflix(streamflixMatch[1], req, res);
     return;
   }
 
@@ -1056,7 +1014,7 @@ const serveStatic = (req, res) => {
 
   const subMatch = url.pathname.match(/^\/subtitle\/([A-Za-z0-9]+)\/?$/);
   if (subMatch && req.method === 'GET') {
-    void serveSubtitle(subMatch[1], res);
+    void serveSubtitle(subMatch[1], req, res);
     return;
   }
 
@@ -1204,6 +1162,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       subtitles: null,
       mediaAllowedHosts: new Set(),
       streamflixHosts: new Set(),
+      browsing: false,
       members: new Map([[id, host]]),
       lastActive: Date.now(),
     };
@@ -1261,6 +1220,8 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
     case 'pause':
     case 'seek':
     case 'heartbeat':
+    case 'browse':
+    case 'content':
     case 'episode': {
       if (!isHost(room, memberId)) throw new Error('Only the host can control playback');
       if (msg.type === 'play') applyHostClock(room, { paused: false });
@@ -1288,14 +1249,31 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
           throw new Error('Bad episode');
         }
         room.content = { ...room.content, season, episode };
-        room.clock = { positionSeconds: 0, paused: true, updatedAt: Date.now() };
-        room.source = null;
-        room.embedUrl = null;
-        room.subtitles = null;
-        room.mediaAllowedHosts = new Set();
-        room.streamflixHosts = new Set();
+        room.browsing = false;
+        clearRoomPlayback(room);
         touch(room);
         broadcast(room, { type: 'episode', season, episode });
+        broadcast(room, { type: 'source', source: null, embedUrl: null });
+        broadcast(room, { type: 'subtitles', subtitles: null });
+        broadcast(room, { type: 'clock', clock: room.clock });
+        broadcast(room, { type: 'state', room: publicRoom(room) });
+      }
+      if (msg.type === 'browse') {
+        room.browsing = true;
+        clearRoomPlayback(room);
+        touch(room);
+        broadcast(room, { type: 'browse' });
+        broadcast(room, { type: 'source', source: null, embedUrl: null });
+        broadcast(room, { type: 'subtitles', subtitles: null });
+        broadcast(room, { type: 'clock', clock: room.clock });
+        broadcast(room, { type: 'state', room: publicRoom(room) });
+      }
+      if (msg.type === 'content') {
+        room.content = parsePartyContent(msg.content);
+        room.browsing = false;
+        clearRoomPlayback(room);
+        touch(room);
+        broadcast(room, { type: 'content', content: room.content });
         broadcast(room, { type: 'source', source: null, embedUrl: null });
         broadcast(room, { type: 'subtitles', subtitles: null });
         broadcast(room, { type: 'clock', clock: room.clock });

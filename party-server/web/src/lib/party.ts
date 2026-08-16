@@ -44,6 +44,7 @@ export interface PartyRoom {
   embedUrl?: string | null;
   subtitles?: PartySubtitles | null;
   locked?: boolean;
+  browsing?: boolean;
 }
 
 export interface PublicRoomSummary {
@@ -83,6 +84,8 @@ export type ServerMessage =
   | { type: 'state'; room: PartyRoom }
   | { type: 'clock'; clock: PartyClock }
   | { type: 'episode'; season: number; episode: number }
+  | { type: 'browse' }
+  | { type: 'content'; content: PartyContent }
   | { type: 'source'; source: PartySource | null; embedUrl?: string | null }
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'chat'; from: string; text: string; at: number }
@@ -108,3 +111,6 @@ export const codeFromPath = (pathname: string): string => {
 
 export const mediaProxyUrl = (code: string, uri: string): string =>
   `/media/${code}?u=${encodeURIComponent(uri)}`;
+
+export const subtitleProxyUrl = (code: string, uri?: string): string =>
+  uri ? `/subtitle/${code}?u=${encodeURIComponent(uri)}` : `/subtitle/${code}`;

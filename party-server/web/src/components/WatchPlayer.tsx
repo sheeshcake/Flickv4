@@ -6,6 +6,12 @@ import { JoinGate } from '@/components/JoinGate';
 import { MembersSheet } from '@/components/MembersSheet';
 import { PlayerOverlay } from '@/components/PlayerOverlay';
 import {
+  SettingsSheet,
+  type AudioOption,
+  type StreamflixWebSource,
+  type SubtitleOption,
+} from '@/components/SettingsSheet';
+import {
   ReactionOverlay,
   type FloatingReaction,
 } from '@/components/ReactionOverlay';
@@ -15,6 +21,7 @@ import {
   isPartyReaction,
   mediaProxyUrl,
   predictedHostTime,
+  subtitleProxyUrl,
   type PartyClock,
   type PartyRoom,
   type PartySource,
@@ -60,7 +67,16 @@ export const WatchPlayer = () => {
   const [waiting, setWaiting] = useState('Waiting for the host’s stream…');
   const [membersOpen, setMembersOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [streamflixSources, setStreamflixSources] = useState<StreamflixWebSource[]>(
+    [],
+  );
+  const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
+  const [audioTracks, setAudioTracks] = useState<AudioOption[]>([]);
+  const [selectedAudioId, setSelectedAudioId] = useState<number | null>(null);
+  const [localSubOptions, setLocalSubOptions] = useState<SubtitleOption[]>([]);
+  const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [toast, setToast] = useState<ChatLine | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -87,16 +103,22 @@ export const WatchPlayer = () => {
   const roomRef = useRef<PartyRoom | null>(null);
   const clockRef = useRef(clock);
   const seekingRef = useRef(false);
+  const streamflixSourcesRef = useRef<StreamflixWebSource[]>([]);
+  const triedSourceIdsRef = useRef<Set<string>>(new Set());
+  const guestPickedSourceRef = useRef(false);
+  const guestPickedSubRef = useRef(false);
+  const activeSourceIdRef = useRef<string | null>(null);
 
   const overlay = useOverlayVisibility(
     !clock.paused,
-    membersOpen || chatOpen || reactionsOpen,
+    membersOpen || chatOpen || reactionsOpen || settingsOpen,
   );
   const displayNameRef = useRef('Web');
 
   roomRef.current = room;
   clockRef.current = clock;
   modeRef.current = mode;
+  activeSourceIdRef.current = activeSourceId;
 
   const setStage = useCallback((el: HTMLDivElement | null) => {
     stageRef.current = el;
@@ -235,6 +257,8 @@ export const WatchPlayer = () => {
       lastSourceKey.current = key;
       destroyHls();
       setIframeUrl(null);
+      setAudioTracks([]);
+      setSelectedAudioId(null);
 
       const onFail = () => {
         watchLog('fail', opts?.direct ? 'direct' : 'proxy', shortUrl(source.uri));
@@ -282,6 +306,14 @@ export const WatchPlayer = () => {
           modeRef.current = 'video';
           applyClock();
         });
+        hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+          const tracks = (hls.audioTracks ?? []).map((t) => ({
+            id: t.id,
+            label: t.name || t.lang || `Track ${t.id + 1}`,
+          }));
+          setAudioTracks(tracks);
+          setSelectedAudioId(hls.audioTrack);
+        });
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (data?.fatal) onFail();
         });
@@ -293,6 +325,22 @@ export const WatchPlayer = () => {
       video.onloadedmetadata = () => {
         setDuration(video.duration || 0);
         applyClock();
+        const list = (
+          video as HTMLVideoElement & {
+            audioTracks?: { length: number; [i: number]: { label: string; language: string } };
+          }
+        ).audioTracks;
+        if (list && list.length > 1 && !hlsRef.current) {
+          const tracks: AudioOption[] = [];
+          for (let i = 0; i < list.length; i += 1) {
+            const track = list[i];
+            tracks.push({
+              id: i,
+              label: track.label || track.language || `Track ${i + 1}`,
+            });
+          }
+          setAudioTracks(tracks);
+        }
       };
     },
     [applyClock, send, showWaiting],
@@ -307,10 +355,43 @@ export const WatchPlayer = () => {
     setIframeUrl(url);
   };
 
-  const playRoom = useCallback(
-    async (current: PartyRoom) => {
-      const vkey = `${current.content.tmdbId}|${current.content.imdbId ?? ''}|${current.content.season ?? ''}|${current.content.episode ?? ''}`;
+  const applySubtitleOptions = useCallback(
+    (source: StreamflixWebSource | null, current: PartyRoom) => {
+      const extractor: SubtitleOption[] = (source?.subtitles ?? []).map((t, i) => ({
+        id: `stream:${i}:${t.file}`,
+        label: `${t.label} (stream)`,
+      }));
+      const host: SubtitleOption[] = current.subtitles?.url
+        ? [
+            {
+              id: 'host',
+              label: current.subtitles.display || 'Host subtitles',
+            },
+          ]
+        : [];
+      setLocalSubOptions([...extractor, ...host]);
+    },
+    [],
+  );
 
+  const resolveListedSource = useCallback(
+    async (
+      code: string,
+      source: StreamflixWebSource,
+    ): Promise<StreamflixWebSource | null> => {
+      if (source.url) return source;
+      const res = await fetch(
+        `/streamflix/${code}?source=${encodeURIComponent(source.id)}`,
+      );
+      if (!res.ok) return null;
+      const data = (await res.json()) as { source?: StreamflixWebSource };
+      return data.source?.url ? data.source : null;
+    },
+    [],
+  );
+
+  const playViaProxy = useCallback(
+    (current: PartyRoom) => {
       const playHostEmbed = () => {
         if (current.embedUrl) {
           playIframe(current.embedUrl);
@@ -319,67 +400,95 @@ export const WatchPlayer = () => {
         showWaiting('Stream blocked in this browser — Open in Flick.');
         setRoomError('This CDN blocked the stream in the browser.');
       };
-
-      const tryMovieboxThenEmbed = async () => {
-        try {
-          watchLog('[Moviebox]', 'fetch', current.code, current.content.title);
-          const res = await fetch(`/moviebox/${current.code}`);
-          if (res.ok) {
-            const data = (await res.json()) as {
-              url?: string;
-              kind?: 'hls' | 'file';
-              playerUrl?: string;
-            };
-            if (data.url) {
-              watchLog('[Moviebox]', 'direct', data.kind, shortUrl(data.url));
-              webResolvedRef.current = true;
-              loadSource(
-                { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
-                current.embedUrl,
-                {
-                  direct: true,
-                  onFail: () => {
-                    if (data.playerUrl) playIframe(data.playerUrl);
-                    else playHostEmbed();
-                  },
-                },
-              );
-              return;
-            }
-            if (data.playerUrl) {
-              watchLog('[Moviebox]', 'iframe', data.playerUrl);
-              webResolvedRef.current = true;
-              playIframe(data.playerUrl);
-              return;
-            }
-          } else {
-            watchLog('[Moviebox]', 'http', res.status);
-          }
-        } catch (err) {
-          watchLog('[Moviebox]', 'fetch failed', err);
-        }
+      if (!current.source?.uri) {
+        watchLog('proxy: no host source, using embed');
         playHostEmbed();
-      };
+        return;
+      }
+      watchLog('proxy: host source', current.source.kind, shortUrl(current.source.uri));
+      loadSource(current.source, current.embedUrl, {
+        onFail: () => {
+          watchLog('proxy: failed, using embed');
+          playHostEmbed();
+        },
+      });
+    },
+    [loadSource, showWaiting],
+  );
 
-      const playViaProxy = () => {
-        if (!current.source?.uri) {
-          watchLog('proxy: no host source, trying Moviebox');
-          void tryMovieboxThenEmbed();
+  const playStreamflixSource = useCallback(
+    async (
+      current: PartyRoom,
+      source: StreamflixWebSource,
+      sources: StreamflixWebSource[],
+    ) => {
+      try {
+        const resolved = await resolveListedSource(current.code, source);
+        if (!resolved?.url) {
+          triedSourceIdsRef.current.add(source.id);
+          const next = sources.find((s) => !triedSourceIdsRef.current.has(s.id));
+          if (next) {
+            await playStreamflixSource(current, next, sources);
+            return;
+          }
+          playViaProxy(current);
           return;
         }
-        watchLog('proxy: host source', current.source.kind, shortUrl(current.source.uri));
-        loadSource(current.source, current.embedUrl, {
-          onFail: () => {
-            watchLog('proxy: failed, trying Moviebox');
-            void tryMovieboxThenEmbed();
-          },
+        if (resolved.url !== source.url) {
+          setStreamflixSources((prev) => {
+            const next = prev.map((s) => (s.id === resolved.id ? { ...s, ...resolved } : s));
+            streamflixSourcesRef.current = next;
+            return next;
+          });
+        }
+        setActiveSourceId(resolved.id);
+        setSelectedSubId((prev) => {
+          if (prev?.startsWith('stream:')) {
+            lastSubUrl.current = '';
+            setCues([]);
+            return null;
+          }
+          return prev;
         });
-      };
+        applySubtitleOptions(resolved, current);
+        webResolvedRef.current = true;
+        streamflixLog('play', resolved.name, resolved.kind, shortUrl(resolved.url));
+        loadSource(
+          { uri: resolved.url, kind: resolved.kind === 'hls' ? 'hls' : 'file' },
+          current.embedUrl,
+          {
+            onFail: () => {
+              streamflixLog('playback failed', resolved.name);
+              triedSourceIdsRef.current.add(resolved.id);
+              const next = sources.find((s) => !triedSourceIdsRef.current.has(s.id));
+              if (next) {
+                void playStreamflixSource(current, next, sources);
+                return;
+              }
+              playViaProxy(current);
+            },
+          },
+        );
+      } catch (err) {
+        streamflixLog('play failed', err);
+        playViaProxy(current);
+      }
+    },
+    [applySubtitleOptions, loadSource, playViaProxy, resolveListedSource],
+  );
+
+  const playRoom = useCallback(
+    async (current: PartyRoom) => {
+      if (current.browsing) {
+        showWaiting('Host is picking something else…');
+        return;
+      }
+      const vkey = `${current.content.tmdbId}|${current.content.imdbId ?? ''}|${current.content.season ?? ''}|${current.content.episode ?? ''}`;
 
       const tryStreamflixThenProxy = async () => {
         if (!current.content.tmdbId) {
           streamflixLog('skip: no tmdbId, using proxy');
-          playViaProxy();
+          playViaProxy(current);
           return;
         }
         try {
@@ -393,26 +502,24 @@ export const WatchPlayer = () => {
           );
           const res = await fetch(`/streamflix/${current.code}`);
           if (res.ok) {
-            const data = (await res.json()) as {
-              url?: string;
-              kind?: 'hls' | 'file';
-            };
-            if (data.url) {
-              streamflixLog('play via proxy', data.kind, shortUrl(data.url));
-              webResolvedRef.current = true;
-              loadSource(
-                { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
-                current.embedUrl,
-                {
-                  onFail: () => {
-                    streamflixLog('proxy playback failed, using host proxy');
-                    playViaProxy();
-                  },
-                },
-              );
+            const data = (await res.json()) as { sources?: StreamflixWebSource[] };
+            const sources = data.sources ?? [];
+            setStreamflixSources(sources);
+            streamflixSourcesRef.current = sources;
+            const hostUri = current.source?.uri;
+            const match = hostUri
+              ? sources.find((s) => s.url && s.url === hostUri)
+              : undefined;
+            const firstEnglish = sources.find((s) =>
+              /english/i.test(s.language || ''),
+            );
+            const pick = match ?? firstEnglish ?? sources[0];
+            if (pick) {
+              streamflixLog('pick', pick.name, pick.language || '');
+              await playStreamflixSource(current, pick, sources);
               return;
             }
-            streamflixLog('http ok but no url');
+            streamflixLog('http ok but no sources');
           } else {
             streamflixLog('http', res.status);
           }
@@ -420,7 +527,7 @@ export const WatchPlayer = () => {
           streamflixLog('fetch failed', err);
         }
         streamflixLog('fallback: host proxy');
-        playViaProxy();
+        playViaProxy(current);
       };
 
       if (lastWebKey.current === vkey) {
@@ -432,6 +539,10 @@ export const WatchPlayer = () => {
 
       lastWebKey.current = vkey;
       webResolvedRef.current = false;
+      triedSourceIdsRef.current = new Set();
+      guestPickedSourceRef.current = false;
+      guestPickedSubRef.current = false;
+      setSelectedSubId(null);
 
       if (current.content.tmdbId || current.source?.uri) {
         void tryStreamflixThenProxy();
@@ -440,23 +551,22 @@ export const WatchPlayer = () => {
 
       showWaiting('Waiting for the host’s stream…');
     },
-    [loadSource, showWaiting],
+    [playStreamflixSource, playViaProxy, showWaiting],
   );
 
-  const loadSubtitles = useCallback(async (sub: PartySubtitles | null | undefined) => {
-    if (!sub?.url || modeRef.current === 'iframe') {
+  const loadSubtitleFile = useCallback(async (url: string, viaProxy?: boolean) => {
+    if (modeRef.current === 'iframe') {
       lastSubUrl.current = '';
       setCues([]);
-      setSubOffset(0);
       return;
     }
-    const offset = Number(sub.offsetSeconds);
-    setSubOffset(Number.isFinite(offset) ? offset : 0);
-    if (sub.url === lastSubUrl.current) return;
-    lastSubUrl.current = sub.url;
+    if (url === lastSubUrl.current) return;
+    lastSubUrl.current = url;
     setCues([]);
     const code = roomRef.current?.code;
-    const tryUrls = [sub.url, code ? `/subtitle/${code}` : ''].filter(Boolean);
+    const tryUrls = viaProxy && code
+      ? [subtitleProxyUrl(code, url)]
+      : [url, code ? subtitleProxyUrl(code, url) : ''].filter(Boolean);
     for (const href of tryUrls) {
       try {
         const res = await fetch(href);
@@ -468,6 +578,21 @@ export const WatchPlayer = () => {
       }
     }
   }, []);
+
+  const loadSubtitles = useCallback(
+    async (sub: PartySubtitles | null | undefined) => {
+      if (guestPickedSubRef.current) return;
+      if (!sub?.url) {
+        lastSubUrl.current = '';
+        setCues([]);
+        return;
+      }
+      const offset = Number(sub.offsetSeconds);
+      if (Number.isFinite(offset)) setSubOffset(offset);
+      await loadSubtitleFile(sub.url);
+    },
+    [loadSubtitleFile],
+  );
 
   const connect = useCallback(
     (code: string, name: string, password?: string) => {
@@ -535,7 +660,8 @@ export const WatchPlayer = () => {
           if (
             roomRef.current &&
             modeRef.current !== 'iframe' &&
-            !webResolvedRef.current
+            !webResolvedRef.current &&
+            !guestPickedSourceRef.current
           ) {
             void playRoom(roomRef.current);
           }
@@ -545,8 +671,67 @@ export const WatchPlayer = () => {
           if (roomRef.current) {
             roomRef.current = { ...roomRef.current, subtitles: msg.subtitles };
             setRoom(roomRef.current);
+            const active = streamflixSourcesRef.current.find(
+              (s) => s.id === activeSourceIdRef.current,
+            );
+            applySubtitleOptions(active ?? null, roomRef.current);
           }
-          void loadSubtitles(msg.subtitles);
+          if (!guestPickedSubRef.current) void loadSubtitles(msg.subtitles);
+          return;
+        }
+        if (msg.type === 'browse') {
+          lastSourceKey.current = '';
+          failedSourceKey.current = '';
+          lastSubUrl.current = '';
+          lastWebKey.current = '';
+          webResolvedRef.current = false;
+          guestPickedSourceRef.current = false;
+          guestPickedSubRef.current = false;
+          triedSourceIdsRef.current = new Set();
+          setStreamflixSources([]);
+          streamflixSourcesRef.current = [];
+          setActiveSourceId(null);
+          setSelectedSubId(null);
+          setCues([]);
+          if (roomRef.current) {
+            roomRef.current = {
+              ...roomRef.current,
+              browsing: true,
+              source: null,
+              embedUrl: null,
+              subtitles: null,
+            };
+            setRoom(roomRef.current);
+          }
+          showWaiting('Host is picking something else…');
+          return;
+        }
+        if (msg.type === 'content') {
+          lastSourceKey.current = '';
+          failedSourceKey.current = '';
+          lastSubUrl.current = '';
+          lastWebKey.current = '';
+          webResolvedRef.current = false;
+          guestPickedSourceRef.current = false;
+          guestPickedSubRef.current = false;
+          triedSourceIdsRef.current = new Set();
+          setStreamflixSources([]);
+          streamflixSourcesRef.current = [];
+          setActiveSourceId(null);
+          setSelectedSubId(null);
+          setCues([]);
+          if (roomRef.current) {
+            roomRef.current = {
+              ...roomRef.current,
+              content: msg.content,
+              browsing: false,
+              source: null,
+              embedUrl: null,
+              subtitles: null,
+            };
+            setRoom(roomRef.current);
+          }
+          showWaiting('Host switched title — waiting for stream…');
           return;
         }
         if (msg.type === 'episode') {
@@ -555,6 +740,13 @@ export const WatchPlayer = () => {
           lastSubUrl.current = '';
           lastWebKey.current = '';
           webResolvedRef.current = false;
+          guestPickedSourceRef.current = false;
+          guestPickedSubRef.current = false;
+          triedSourceIdsRef.current = new Set();
+          setStreamflixSources([]);
+          streamflixSourcesRef.current = [];
+          setActiveSourceId(null);
+          setSelectedSubId(null);
           setCues([]);
           if (roomRef.current) {
             roomRef.current = {
@@ -589,15 +781,23 @@ export const WatchPlayer = () => {
         setGateError('Could not connect to the party server.');
       };
     },
-    [applyClock, enqueueReaction, loadSource, loadSubtitles, playRoom, showWaiting],
+    [
+      applyClock,
+      applySubtitleOptions,
+      enqueueReaction,
+      loadSource,
+      loadSubtitles,
+      playRoom,
+      showWaiting,
+    ],
   );
 
-  // <video> only mounts after `room` is set. Original host URI first,
-  // then /media proxy, then Moviebox, then the host embed URL.
+  // <video> only mounts after `room` is set. Streamflix sources first,
+  // then /media proxy, then the host embed URL.
   useEffect(() => {
     if (!room) return;
     void playRoom(room);
-    void loadSubtitles(room.subtitles);
+    if (!guestPickedSubRef.current) void loadSubtitles(room.subtitles);
   }, [room, playRoom, loadSubtitles]);
 
   useEffect(() => {
@@ -633,13 +833,14 @@ export const WatchPlayer = () => {
     };
   }, []);
 
-  const sheetOpen = membersOpen || chatOpen;
+  const sheetOpen = membersOpen || chatOpen || settingsOpen;
   useEffect(() => {
     if (!sheetOpen) return;
     history.pushState({ partySheet: true }, '');
     const onPop = () => {
       setMembersOpen(false);
       setChatOpen(false);
+      setSettingsOpen(false);
     };
     window.addEventListener('popstate', onPop);
     return () => {
@@ -651,6 +852,7 @@ export const WatchPlayer = () => {
     if (open) return;
     setMembersOpen(false);
     setChatOpen(false);
+    setSettingsOpen(false);
     if (history.state && history.state.partySheet) {
       history.back();
     }
@@ -701,6 +903,61 @@ export const WatchPlayer = () => {
     video?.webkitEnterFullscreen?.();
   };
 
+  const handleSelectSource = useCallback(
+    (id: string) => {
+      const current = roomRef.current;
+      if (!current) return;
+      const source = streamflixSourcesRef.current.find((s) => s.id === id);
+      if (!source) return;
+      guestPickedSourceRef.current = true;
+      triedSourceIdsRef.current = new Set();
+      void playStreamflixSource(current, source, streamflixSourcesRef.current);
+    },
+    [playStreamflixSource],
+  );
+
+  const handleSelectAudio = useCallback((id: number) => {
+    setSelectedAudioId(id);
+    if (hlsRef.current) {
+      hlsRef.current.audioTrack = id;
+      return;
+    }
+    const list = (
+      videoRef.current as
+        | (HTMLVideoElement & {
+            audioTracks?: {
+              length: number;
+              [i: number]: { enabled: boolean };
+            };
+          })
+        | null
+    )?.audioTracks;
+    if (!list) return;
+    for (let i = 0; i < list.length; i += 1) {
+      list[i].enabled = i === id;
+    }
+  }, []);
+
+  const handleSelectSubtitle = useCallback(
+    (id: string | null) => {
+      guestPickedSubRef.current = true;
+      setSelectedSubId(id);
+      if (id == null) {
+        lastSubUrl.current = '';
+        setCues([]);
+        return;
+      }
+      if (id === 'host') {
+        const sub = roomRef.current?.subtitles;
+        if (sub?.url) void loadSubtitleFile(sub.url);
+        return;
+      }
+      const match = id.match(/^stream:\d+:(.+)$/);
+      if (match?.[1]) void loadSubtitleFile(match[1], true);
+    },
+    [loadSubtitleFile],
+  );
+
   if (!room) {
     return (
       <JoinGate
@@ -712,16 +969,26 @@ export const WatchPlayer = () => {
   }
 
   const t = mode === 'video' ? videoTime : predictedHostTime(clock, now);
-  const offset = Number.isFinite(Number(room.subtitles?.offsetSeconds))
-    ? Number(room.subtitles?.offsetSeconds)
-    : subOffset;
+  const hostOffset = Number(room.subtitles?.offsetSeconds);
+  const offset = guestPickedSubRef.current
+    ? subOffset
+    : Number.isFinite(hostOffset)
+      ? hostOffset
+      : subOffset;
   const cue = mode === 'video' ? cueAt(cues, t - offset) : null;
   const ep =
     room.content.mediaType === 'tv' && room.content.season != null
       ? `S${room.content.season} E${room.content.episode}`
       : undefined;
-  const cap =
-    room.subtitles && offset
+  const selectedSubLabel =
+    selectedSubId == null
+      ? undefined
+      : localSubOptions.find((s) => s.id === selectedSubId)?.label;
+  const cap = selectedSubLabel
+    ? offset
+      ? `${selectedSubLabel} ${offset > 0 ? '+' : ''}${offset}s`
+      : selectedSubLabel
+    : room.subtitles && offset
       ? `${room.subtitles.display} ${offset > 0 ? '+' : ''}${offset}s`
       : room.subtitles?.display;
   const subtitle = [ep, cap, clock.paused ? 'Paused' : 'Playing', 'Following host']
@@ -847,6 +1114,7 @@ export const WatchPlayer = () => {
           }}
           onOpenMembers={() => setMembersOpen(true)}
           onOpenChat={() => setChatOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
           onToggleReactions={() => setReactionsOpen((open) => !open)}
           reactionsOpen={reactionsOpen}
           onSelectReaction={sendReaction}
@@ -876,6 +1144,25 @@ export const WatchPlayer = () => {
           container={sheetHost}
           chat={chat}
           onSend={(text) => send({ type: 'chat', text })}
+        />
+        <SettingsSheet
+          open={settingsOpen}
+          onOpenChange={(open) => {
+            setSettingsOpen(open);
+            if (!open) closeSheets(false);
+          }}
+          container={sheetHost}
+          sources={streamflixSources}
+          activeSourceId={activeSourceId}
+          onSelectSource={handleSelectSource}
+          audioTracks={audioTracks}
+          selectedAudioId={selectedAudioId}
+          onSelectAudio={handleSelectAudio}
+          subtitles={localSubOptions}
+          selectedSubtitleId={selectedSubId}
+          onSelectSubtitle={handleSelectSubtitle}
+          subtitleOffset={subOffset}
+          onChangeOffset={setSubOffset}
         />
       </div>
     </div>

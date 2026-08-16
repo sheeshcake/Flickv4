@@ -1,4 +1,4 @@
-import { ArrowLeft, Maximize, MessageCircle, Minimize, Pause, Play, RotateCcw, RotateCw, SmilePlus } from 'lucide-react';
+import { ArrowLeft, Maximize, MessageCircle, Minimize, Pause, Play, RotateCcw, RotateCw, Settings, SmilePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatTime, PARTY_REACTIONS } from '@/lib/party';
 import { cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ interface PlayerOverlayProps {
   onScrubEnd: (fraction: number) => void;
   onOpenMembers: () => void;
   onOpenChat: () => void;
+  onOpenSettings: () => void;
   onToggleReactions: () => void;
   reactionsOpen: boolean;
   onSelectReaction: (emoji: string) => void;
@@ -49,6 +50,7 @@ export const PlayerOverlay = ({
   onScrubEnd,
   onOpenMembers,
   onOpenChat,
+  onOpenSettings,
   onToggleReactions,
   reactionsOpen,
   onSelectReaction,
@@ -115,6 +117,19 @@ export const PlayerOverlay = ({
             aria-label="Chat"
           >
             <MessageCircle className="size-5" />
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-11"
+            onClick={() => {
+              onInteract();
+              onOpenSettings();
+            }}
+            aria-label="Settings"
+          >
+            <Settings className="size-5" />
           </Button>
           <Button
             type="button"
