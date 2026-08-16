@@ -1,6 +1,6 @@
-import { ArrowLeft, Maximize, MessageCircle, Minimize, Pause, Play, RotateCcw, RotateCw } from 'lucide-react';
+import { ArrowLeft, Maximize, MessageCircle, Minimize, Pause, Play, RotateCcw, RotateCw, SmilePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatTime } from '@/lib/party';
+import { formatTime, PARTY_REACTIONS } from '@/lib/party';
 import { cn } from '@/lib/utils';
 import logo from '@/assets/logo.png';
 
@@ -21,6 +21,9 @@ interface PlayerOverlayProps {
   onScrubEnd: (fraction: number) => void;
   onOpenMembers: () => void;
   onOpenChat: () => void;
+  onToggleReactions: () => void;
+  reactionsOpen: boolean;
+  onSelectReaction: (emoji: string) => void;
   onToggleFullscreen: () => void;
 }
 
@@ -46,6 +49,9 @@ export const PlayerOverlay = ({
   onScrubEnd,
   onOpenMembers,
   onOpenChat,
+  onToggleReactions,
+  reactionsOpen,
+  onSelectReaction,
   onToggleFullscreen,
 }: PlayerOverlayProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
@@ -112,6 +118,20 @@ export const PlayerOverlay = ({
           </Button>
           <Button
             type="button"
+            variant={reactionsOpen ? 'default' : 'secondary'}
+            size="icon"
+            className="size-11"
+            onClick={() => {
+              onInteract();
+              onToggleReactions();
+            }}
+            aria-label="Reactions"
+            aria-expanded={reactionsOpen}
+          >
+            <SmilePlus className="size-5" />
+          </Button>
+          <Button
+            type="button"
             variant="secondary"
             size="icon"
             className="size-11"
@@ -125,6 +145,26 @@ export const PlayerOverlay = ({
           </Button>
         </div>
       </div>
+
+      {reactionsOpen ? (
+        <div className="absolute top-20 right-3 z-20 rounded-xl border border-border bg-card/95 p-2 sm:right-6">
+          <div className="grid grid-cols-4 gap-1">
+            {PARTY_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="flex size-11 items-center justify-center rounded-full text-2xl hover:bg-primary/20"
+                onClick={() => {
+                  onInteract();
+                  onSelectReaction(emoji);
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="relative z-10 flex flex-1 items-center justify-center gap-8 sm:gap-10">
         <Button

@@ -23,6 +23,10 @@ const CODE_LENGTH = 5;
 const MAX_MEMBERS = 8;
 const IDLE_MS = 30 * 60 * 1000;
 const CHAT_MAX = 200;
+const REACTION_COOLDOWN_MS = 400;
+const PARTY_REACTIONS = new Set(['👍', '❤️', '😂', '😮', '👏', '🎉', '🔥', '😢']);
+/** @type {Map<string, number>} */
+const lastReactionAt = new Map();
 const URI_MAX = 8192;
 const SUBTITLE_MAX_BYTES = 1_500_000;
 const PLAYLIST_MAX_BYTES = 2_000_000;
@@ -886,6 +890,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (!memberId) return;
+    lastReactionAt.delete(memberId);
     const room = memberRoom(memberId);
     if (!room) return;
     const leavingHost = isHost(room, memberId);
@@ -1149,6 +1154,26 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         text,
         at: Date.now(),
       });
+      return;
+    }
+    case 'reaction': {
+      const emoji = String(msg.emoji || '').trim();
+      if (!PARTY_REACTIONS.has(emoji)) return;
+      const now = Date.now();
+      const prev = lastReactionAt.get(memberId) ?? 0;
+      if (now - prev < REACTION_COOLDOWN_MS) return;
+      lastReactionAt.set(memberId, now);
+      touch(room);
+      broadcast(
+        room,
+        {
+          type: 'reaction',
+          from: member.displayName,
+          emoji,
+          at: now,
+        },
+        memberId,
+      );
       return;
     }
     case 'leave': {

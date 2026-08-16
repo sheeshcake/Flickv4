@@ -58,6 +58,20 @@ export interface PublicRoomSummary {
   paused: boolean;
 }
 
+export const PARTY_REACTIONS = [
+  '👍',
+  '❤️',
+  '😂',
+  '😮',
+  '👏',
+  '🎉',
+  '🔥',
+  '😢',
+] as const;
+
+export const isPartyReaction = (emoji: string): boolean =>
+  (PARTY_REACTIONS as readonly string[]).includes(emoji);
+
 export const posterUrl = (posterPath: string | null | undefined): string | null => {
   if (!posterPath) return null;
   if (/^https?:\/\//i.test(posterPath)) return posterPath;
@@ -72,6 +86,7 @@ export type ServerMessage =
   | { type: 'source'; source: PartySource | null; embedUrl?: string | null }
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'chat'; from: string; text: string; at: number }
+  | { type: 'reaction'; from: string; emoji: string; at: number }
   | { type: 'error'; message: string }
   | { type: 'ended'; reason: string };
 

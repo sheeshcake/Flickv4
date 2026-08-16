@@ -5,9 +5,14 @@ import { ChatToast } from '@/components/ChatToast';
 import { JoinGate } from '@/components/JoinGate';
 import { MembersSheet } from '@/components/MembersSheet';
 import { PlayerOverlay } from '@/components/PlayerOverlay';
+import {
+  ReactionOverlay,
+  type FloatingReaction,
+} from '@/components/ReactionOverlay';
 import { useOverlayVisibility } from '@/hooks/useOverlayVisibility';
 import {
   codeFromPath,
+  isPartyReaction,
   mediaProxyUrl,
   predictedHostTime,
   type PartyClock,
@@ -36,6 +41,8 @@ export const WatchPlayer = () => {
   const [waiting, setWaiting] = useState('Waiting for the host’s stream…');
   const [membersOpen, setMembersOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [toast, setToast] = useState<ChatLine | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -62,7 +69,11 @@ export const WatchPlayer = () => {
   const clockRef = useRef(clock);
   const seekingRef = useRef(false);
 
-  const overlay = useOverlayVisibility(!clock.paused, membersOpen || chatOpen);
+  const overlay = useOverlayVisibility(
+    !clock.paused,
+    membersOpen || chatOpen || reactionsOpen,
+  );
+  const displayNameRef = useRef('Web');
 
   roomRef.current = room;
   clockRef.current = clock;
@@ -77,6 +88,35 @@ export const WatchPlayer = () => {
     const ws = wsRef.current;
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
   }, []);
+
+  const enqueueReaction = useCallback((from: string, emoji: string) => {
+    if (!isPartyReaction(emoji)) return;
+    setReactions((prev) => {
+      const next = [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          from,
+          emoji,
+          leftPct: 8 + Math.random() * 76,
+        },
+      ];
+      return next.length > 24 ? next.slice(next.length - 24) : next;
+    });
+  }, []);
+
+  const expireReaction = useCallback((id: string) => {
+    setReactions((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  const sendReaction = useCallback(
+    (emoji: string) => {
+      if (!isPartyReaction(emoji)) return;
+      send({ type: 'reaction', emoji });
+      enqueueReaction(displayNameRef.current, emoji);
+    },
+    [enqueueReaction, send],
+  );
 
   const predicted = useCallback(
     () => predictedHostTime(clockRef.current),
@@ -369,6 +409,7 @@ export const WatchPlayer = () => {
         return;
       }
       setGateError('');
+      displayNameRef.current = name || 'Web';
       wsRef.current?.close();
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(`${proto}//${location.host}`);
@@ -468,6 +509,10 @@ export const WatchPlayer = () => {
           setChat((prev) => [...prev, { from: msg.from, text: msg.text }]);
           return;
         }
+        if (msg.type === 'reaction') {
+          enqueueReaction(msg.from, msg.emoji);
+          return;
+        }
         if (msg.type === 'ended') {
           setRoomError(msg.reason || 'Room ended');
           showWaiting(msg.reason || 'Room ended');
@@ -477,7 +522,7 @@ export const WatchPlayer = () => {
         setGateError('Could not connect to the party server.');
       };
     },
-    [applyClock, loadSource, loadSubtitles, playRoom, showWaiting],
+    [applyClock, enqueueReaction, loadSource, loadSubtitles, playRoom, showWaiting],
   );
 
   // <video> only mounts after `room` is set. Original host URI first,
@@ -562,6 +607,10 @@ export const WatchPlayer = () => {
     const id = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(id);
   }, [chat, chatOpen]);
+
+  useEffect(() => {
+    if (!overlay.visible) setReactionsOpen(false);
+  }, [overlay.visible]);
 
   const toggleFullscreen = () => {
     const stage = stageRef.current;
@@ -689,6 +738,7 @@ export const WatchPlayer = () => {
             onClick={onInteract}
           />
         ) : null}
+        <ReactionOverlay items={reactions} onExpire={expireReaction} />
         <PlayerOverlay
           visible={overlay.visible}
           title={room.content.title || 'Watch party'}
@@ -698,7 +748,13 @@ export const WatchPlayer = () => {
           duration={duration}
           fullscreen={fullscreen}
           partyCode={room.code}
-          onToggleOverlay={overlay.toggle}
+          onToggleOverlay={() => {
+            if (reactionsOpen) {
+              setReactionsOpen(false);
+              return;
+            }
+            overlay.toggle();
+          }}
           onInteract={onInteract}
           onBack={() => {
             send({ type: 'leave' });
@@ -724,6 +780,9 @@ export const WatchPlayer = () => {
           }}
           onOpenMembers={() => setMembersOpen(true)}
           onOpenChat={() => setChatOpen(true)}
+          onToggleReactions={() => setReactionsOpen((open) => !open)}
+          reactionsOpen={reactionsOpen}
+          onSelectReaction={sendReaction}
           onToggleFullscreen={toggleFullscreen}
         />
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />

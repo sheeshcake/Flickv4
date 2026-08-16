@@ -60,3 +60,22 @@ button,
 [data-slot='button'] {
   touch-action: manipulation;
 }
+
+@keyframes party-reaction-float {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 1;
+  }
+  14% {
+    transform: translateY(-40px) scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-220px) scale(1);
+    opacity: 0;
+  }
+}
+
+.party-reaction {
+  animation: party-reaction-float 2.2s ease-out forwards;
+}
