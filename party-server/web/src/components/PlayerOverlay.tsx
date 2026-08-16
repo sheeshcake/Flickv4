@@ -1,4 +1,4 @@
-import { ArrowLeft, Maximize, MessageCircle, Mic, MicOff, Minimize, Pause, Play, RotateCcw, RotateCw, Settings, SmilePlus, Video, VideoOff } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Maximize, MessageCircle, Mic, MicOff, Minimize, Pause, Play, RotateCcw, RotateCw, Settings, SmilePlus, Video, VideoOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatTime, PARTY_REACTIONS } from '@/lib/party';
 import { cn } from '@/lib/utils';
@@ -32,6 +32,8 @@ interface PlayerOverlayProps {
   onToggleCall: () => void;
   onToggleMute: () => void;
   onToggleCam: () => void;
+  tilesHidden: boolean;
+  onToggleTilesHidden: () => void;
 }
 
 const seekFraction = (el: HTMLElement, clientX: number) => {
@@ -67,6 +69,8 @@ export const PlayerOverlay = ({
   onToggleCall,
   onToggleMute,
   onToggleCam,
+  tilesHidden,
+  onToggleTilesHidden,
 }: PlayerOverlayProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
 
@@ -157,6 +161,19 @@ export const PlayerOverlay = ({
                 aria-label={camOff ? 'Camera on' : 'Camera off'}
               >
                 {camOff ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+              </Button>
+              <Button
+                type="button"
+                variant={tilesHidden ? 'default' : 'secondary'}
+                size="icon"
+                className="size-11"
+                onClick={() => {
+                  onInteract();
+                  onToggleTilesHidden();
+                }}
+                aria-label={tilesHidden ? 'Show cameras' : 'Hide cameras'}
+              >
+                {tilesHidden ? <Eye className="size-5" /> : <EyeOff className="size-5" />}
               </Button>
             </>
           ) : null}

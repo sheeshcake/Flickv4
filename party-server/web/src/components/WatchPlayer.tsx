@@ -72,6 +72,7 @@ export const WatchPlayer = () => {
   const [chatOpen, setChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [callTilesHidden, setCallTilesHidden] = useState(false);
   const [streamflixSources, setStreamflixSources] = useState<StreamflixWebSource[]>(
     [],
   );
@@ -926,6 +927,10 @@ export const WatchPlayer = () => {
     if (!overlay.visible) setReactionsOpen(false);
   }, [overlay.visible]);
 
+  useEffect(() => {
+    if (!rtc.joined) setCallTilesHidden(false);
+  }, [rtc.joined]);
+
   const toggleFullscreen = () => {
     const stage = stageRef.current;
     const video = videoRef.current;
@@ -1121,6 +1126,8 @@ export const WatchPlayer = () => {
           localStream={rtc.localStream}
           remotes={rtc.remotes}
           camOff={rtc.camOff}
+          hidden={callTilesHidden}
+          onToggleHidden={() => setCallTilesHidden((prev) => !prev)}
         />
         <ReactionOverlay items={reactions} onExpire={expireReaction} />
         <PlayerOverlay
@@ -1179,6 +1186,8 @@ export const WatchPlayer = () => {
           }}
           onToggleMute={rtc.toggleMute}
           onToggleCam={rtc.toggleCam}
+          tilesHidden={callTilesHidden}
+          onToggleTilesHidden={() => setCallTilesHidden((prev) => !prev)}
         />
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />
         <MembersSheet

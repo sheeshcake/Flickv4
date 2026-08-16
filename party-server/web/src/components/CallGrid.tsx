@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import type { PartyRtcRemote } from '@/hooks/usePartyRtc';
+import { Button } from '@/components/ui/button';
 
 const Tile = ({
   stream,
@@ -47,27 +49,45 @@ export const CallGrid = ({
   localStream,
   remotes,
   camOff,
+  hidden,
+  onToggleHidden,
 }: {
   localStream: MediaStream | null;
   remotes: PartyRtcRemote[];
   camOff: boolean;
+  hidden: boolean;
+  onToggleHidden: () => void;
 }) => {
   if (!localStream && remotes.length === 0) return null;
 
   return (
-    <div className="pointer-events-none absolute top-16 right-3 z-20 flex flex-col gap-2">
-      {localStream ? (
-        <Tile
-          stream={localStream}
-          label="You"
-          muted
-          mirror
-          placeholder={camOff}
-        />
-      ) : null}
-      {remotes.map((remote) => (
-        <Tile key={remote.id} stream={remote.stream} label={remote.name} />
-      ))}
+    <div className="absolute top-16 right-3 z-20 flex flex-col items-end gap-2">
+      <Button
+        type="button"
+        variant="secondary"
+        size="icon"
+        className="size-9"
+        onClick={onToggleHidden}
+        aria-label={hidden ? 'Show cameras' : 'Hide cameras'}
+      >
+        {hidden ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+      </Button>
+      {hidden ? null : (
+        <>
+          {localStream ? (
+            <Tile
+              stream={localStream}
+              label="You"
+              muted
+              mirror
+              placeholder={camOff}
+            />
+          ) : null}
+          {remotes.map((remote) => (
+            <Tile key={remote.id} stream={remote.stream} label={remote.name} />
+          ))}
+        </>
+      )}
     </div>
   );
 };
