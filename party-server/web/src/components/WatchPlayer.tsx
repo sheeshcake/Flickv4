@@ -28,6 +28,25 @@ type Mode = 'none' | 'video' | 'iframe';
 const hostIsPresent = (room: PartyRoom) =>
   room.members.some((m) => m.id === room.hostId || m.role === 'host');
 
+const shortUrl = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url.slice(0, 120);
+  }
+};
+
+const watchLog = (...args: unknown[]) => {
+  // eslint-disable-next-line no-console
+  console.log('[Watch]', ...args);
+};
+
+const streamflixLog = (...args: unknown[]) => {
+  // eslint-disable-next-line no-console
+  console.log('[Streamflix]', ...args);
+};
+
 export const WatchPlayer = () => {
   const [gateError, setGateError] = useState('');
   const [roomError, setRoomError] = useState('');
@@ -218,6 +237,7 @@ export const WatchPlayer = () => {
       setIframeUrl(null);
 
       const onFail = () => {
+        watchLog('fail', opts?.direct ? 'direct' : 'proxy', shortUrl(source.uri));
         failedSourceKey.current = key;
         if (opts?.onFail) {
           void opts.onFail();
@@ -240,6 +260,11 @@ export const WatchPlayer = () => {
       const playUrl = opts?.direct
         ? source.uri
         : mediaProxyUrl(current.code, source.uri);
+      watchLog(
+        opts?.direct ? 'direct' : 'proxy',
+        source.kind,
+        shortUrl(source.uri),
+      );
       video.onerror = onFail;
       const isHls = source.kind === 'hls' || /\.m3u8(\?|#|$)/i.test(source.uri);
       const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'));
@@ -297,8 +322,7 @@ export const WatchPlayer = () => {
 
       const tryMovieboxThenEmbed = async () => {
         try {
-          // eslint-disable-next-line no-console
-          console.log('[Moviebox]', 'fetch', current.code, current.content.title);
+          watchLog('[Moviebox]', 'fetch', current.code, current.content.title);
           const res = await fetch(`/moviebox/${current.code}`);
           if (res.ok) {
             const data = (await res.json()) as {
@@ -307,8 +331,7 @@ export const WatchPlayer = () => {
               playerUrl?: string;
             };
             if (data.url) {
-              // eslint-disable-next-line no-console
-              console.log('[Moviebox]', 'direct', data.kind, data.url.split('?')[0]);
+              watchLog('[Moviebox]', 'direct', data.kind, shortUrl(data.url));
               webResolvedRef.current = true;
               loadSource(
                 { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
@@ -324,27 +347,50 @@ export const WatchPlayer = () => {
               return;
             }
             if (data.playerUrl) {
-              // eslint-disable-next-line no-console
-              console.log('[Moviebox]', 'iframe', data.playerUrl);
+              watchLog('[Moviebox]', 'iframe', data.playerUrl);
               webResolvedRef.current = true;
               playIframe(data.playerUrl);
               return;
             }
           } else {
-            // eslint-disable-next-line no-console
-            console.log('[Moviebox]', 'http', res.status);
+            watchLog('[Moviebox]', 'http', res.status);
           }
         } catch (err) {
-          // eslint-disable-next-line no-console
-          console.log('[Moviebox]', 'fetch failed', err);
+          watchLog('[Moviebox]', 'fetch failed', err);
         }
-        void tryStreamflixThenEmbed();
+        playHostEmbed();
       };
 
-      const tryStreamflixThenEmbed = async () => {
+      const playViaProxy = () => {
+        if (!current.source?.uri) {
+          watchLog('proxy: no host source, trying Moviebox');
+          void tryMovieboxThenEmbed();
+          return;
+        }
+        watchLog('proxy: host source', current.source.kind, shortUrl(current.source.uri));
+        loadSource(current.source, current.embedUrl, {
+          onFail: () => {
+            watchLog('proxy: failed, trying Moviebox');
+            void tryMovieboxThenEmbed();
+          },
+        });
+      };
+
+      const tryStreamflixThenProxy = async () => {
+        if (!current.content.tmdbId) {
+          streamflixLog('skip: no tmdbId, using proxy');
+          playViaProxy();
+          return;
+        }
         try {
-          // eslint-disable-next-line no-console
-          console.log('[Streamflix]', 'fetch', current.code, current.content.tmdbId);
+          streamflixLog(
+            'fetch',
+            current.code,
+            current.content.mediaType,
+            current.content.tmdbId,
+            current.content.season,
+            current.content.episode,
+          );
           const res = await fetch(`/streamflix/${current.code}`);
           if (res.ok) {
             const data = (await res.json()) as {
@@ -352,48 +398,34 @@ export const WatchPlayer = () => {
               kind?: 'hls' | 'file';
             };
             if (data.url) {
-              // eslint-disable-next-line no-console
-              console.log('[Streamflix]', 'direct', data.kind, data.url.split('?')[0]);
+              streamflixLog('play via proxy', data.kind, shortUrl(data.url));
               webResolvedRef.current = true;
               loadSource(
                 { uri: data.url, kind: data.kind === 'hls' ? 'hls' : 'file' },
                 current.embedUrl,
                 {
-                  direct: true,
-                  onFail: playHostEmbed,
+                  onFail: () => {
+                    streamflixLog('proxy playback failed, using host proxy');
+                    playViaProxy();
+                  },
                 },
               );
               return;
             }
+            streamflixLog('http ok but no url');
           } else {
-            // eslint-disable-next-line no-console
-            console.log('[Streamflix]', 'http', res.status);
+            streamflixLog('http', res.status);
           }
         } catch (err) {
-          // eslint-disable-next-line no-console
-          console.log('[Streamflix]', 'fetch failed', err);
+          streamflixLog('fetch failed', err);
         }
-        playHostEmbed();
-      };
-
-      const playViaProxy = () => {
-        loadSource(current.source, current.embedUrl, {
-          onFail: () => {
-            void tryMovieboxThenEmbed();
-          },
-        });
-      };
-
-      const playHostStream = () => {
-        loadSource(current.source, current.embedUrl, {
-          direct: true,
-          onFail: playViaProxy,
-        });
+        streamflixLog('fallback: host proxy');
+        playViaProxy();
       };
 
       if (lastWebKey.current === vkey) {
         if (modeRef.current !== 'iframe' && !webResolvedRef.current) {
-          playHostStream();
+          void tryStreamflixThenProxy();
         }
         return;
       }
@@ -401,8 +433,8 @@ export const WatchPlayer = () => {
       lastWebKey.current = vkey;
       webResolvedRef.current = false;
 
-      if (current.source?.uri) {
-        playHostStream();
+      if (current.content.tmdbId || current.source?.uri) {
+        void tryStreamflixThenProxy();
         return;
       }
 

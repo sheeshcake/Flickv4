@@ -1,7 +1,7 @@
 /**
  * Flick watch-party room server.
  * Syncs TMDB identity + a host playback clock. Web companion waterfall:
- * original host URI → `/media` proxy → Moviebox → Streamflix → host embed URL.
+ * Streamflix → `/media` proxy → Moviebox → host embed URL.
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
@@ -40,7 +40,7 @@ const MEDIA_UA =
 /** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string }} PartySource */
 /** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
 /** @typedef {{ id: string, displayName: string, kind: 'player'|'companion', role: 'host'|'guest', buffering: boolean, ws: import('ws').WebSocket }} Member */
-/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, mediaAllowedHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
+/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, mediaAllowedHosts: Set<string>, streamflixHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -188,6 +188,9 @@ const seedMediaHosts = (room, uri) => {
   room.mediaAllowedHosts = new Set();
   const host = hostnameOf(uri);
   if (host) room.mediaAllowedHosts.add(host);
+  if (room.streamflixHosts) {
+    for (const allowed of room.streamflixHosts) room.mediaAllowedHosts.add(allowed);
+  }
 };
 
 const allowMediaHost = (room, hostname) => {
@@ -195,6 +198,16 @@ const allowMediaHost = (room, hostname) => {
   if (!room.mediaAllowedHosts) room.mediaAllowedHosts = new Set();
   room.mediaAllowedHosts.add(hostname.toLowerCase());
 };
+
+const allowStreamflixHost = (room, hostname) => {
+  allowMediaHost(room, hostname);
+  if (!hostname) return;
+  if (!room.streamflixHosts) room.streamflixHosts = new Set();
+  room.streamflixHosts.add(hostname.toLowerCase());
+};
+
+const isStreamflixMediaHost = (room, hostname) =>
+  Boolean(hostname && room?.streamflixHosts?.has(hostname.toLowerCase()));
 
 const resolveAgainst = (base, maybeRelative) => {
   try {
@@ -208,11 +221,15 @@ const proxyMediaPath = (code, absoluteUrl) =>
   `/media/${code}?u=${encodeURIComponent(absoluteUrl)}`;
 
 const rewriteHlsPlaylist = (text, playlistUrl, code, room) => {
+  const streamflix = isStreamflixMediaHost(room, hostnameOf(playlistUrl));
   const rewriteAbs = (raw) => {
     const abs = resolveAgainst(playlistUrl, raw);
     if (!abs) return raw;
     const host = hostnameOf(abs);
-    if (host) allowMediaHost(room, host);
+    if (host) {
+      if (streamflix) allowStreamflixHost(room, host);
+      else allowMediaHost(room, host);
+    }
     return proxyMediaPath(code, abs);
   };
   return text
@@ -232,11 +249,6 @@ const looksLikePlaylistUrl = (parsed) => /\.m3u8(\?|#|$)/i.test(parsed.pathname)
 
 const serveMedia = async (code, req, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
-  if (!room?.source?.uri || !room.source.referer) {
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end('No stream');
-    return;
-  }
   const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
   const raw = reqUrl.searchParams.get('u') || '';
   let parsed;
@@ -253,6 +265,12 @@ const serveMedia = async (code, req, res) => {
     return;
   }
   const host = parsed.hostname.toLowerCase();
+  const streamflix = isStreamflixMediaHost(room, host);
+  if (!room || (!streamflix && (!room.source?.uri || !room.source.referer))) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('No stream');
+    return;
+  }
   if (isBlockedPrivateHost(host) || !room.mediaAllowedHosts?.has(host)) {
     res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('Host not allowed');
@@ -260,6 +278,9 @@ const serveMedia = async (code, req, res) => {
   }
 
   const playlistHint = looksLikePlaylistUrl(parsed);
+  if (streamflix && playlistHint) {
+    streamflixLog('proxy playlist', code, host, parsed.pathname);
+  }
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(),
@@ -272,9 +293,10 @@ const serveMedia = async (code, req, res) => {
     const upstreamHeaders = {
       Accept: '*/*',
       'User-Agent': MEDIA_UA,
-      Referer: room.source.referer,
+      Referer: streamflix ? 'https://vidrock.net/' : room.source.referer,
     };
-    if (room.source.origin) upstreamHeaders.Origin = room.source.origin;
+    if (streamflix) upstreamHeaders.Origin = 'https://vidrock.net';
+    else if (room.source.origin) upstreamHeaders.Origin = room.source.origin;
     if (req.headers.range) upstreamHeaders.Range = req.headers.range;
 
     const upstream = await fetch(parsed.href, {
@@ -284,7 +306,10 @@ const serveMedia = async (code, req, res) => {
       redirect: 'follow',
     });
     const finalHost = hostnameOf(upstream.url);
-    if (finalHost) allowMediaHost(room, finalHost);
+    if (finalHost) {
+      if (streamflix) allowStreamflixHost(room, finalHost);
+      else allowMediaHost(room, finalHost);
+    }
 
     const contentType = upstream.headers.get('content-type') || '';
     const treatAsPlaylist =
@@ -675,17 +700,39 @@ const streamflixFetch = async (url, timeoutMs = 15000) => {
   }
 };
 
+const shortStreamflixUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return String(url).slice(0, 120);
+  }
+};
+
 const pickAtlasMp4 = async (listUrl) => {
   try {
+    streamflixLog('atlas: fetch', shortStreamflixUrl(listUrl));
     const res = await streamflixFetch(listUrl);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      streamflixLog('atlas: http', res.status);
+      return null;
+    }
     const qualities = await res.json();
-    if (!Array.isArray(qualities)) return null;
+    if (!Array.isArray(qualities)) {
+      streamflixLog('atlas: not a list');
+      return null;
+    }
     const highest = qualities
       .filter((q) => typeof q?.url === 'string' && q.url)
       .sort((a, b) => (b.resolution ?? 0) - (a.resolution ?? 0))[0];
-    return highest?.url && isStreamUri(highest.url) ? highest.url : null;
-  } catch {
+    if (!highest?.url || !isStreamUri(highest.url)) {
+      streamflixLog('atlas: no playable mp4', qualities.length);
+      return null;
+    }
+    streamflixLog('atlas: pick', highest.resolution, shortStreamflixUrl(highest.url));
+    return highest.url;
+  } catch (err) {
+    streamflixLog('atlas: error', err instanceof Error ? err.message : err);
     return null;
   }
 };
@@ -708,6 +755,7 @@ const resolveStreamflix = async (content) => {
     ? `https://vidrock.net/api/tv/${encoded}`
     : `https://vidrock.net/api/movie/${encoded}`;
   streamflixLog('resolve:', content.mediaType, tmdbId, payload);
+  streamflixLog('resolve: GET', apiUrl);
   const res = await streamflixFetch(apiUrl);
   if (!res.ok) {
     streamflixLog('resolve: http', res.status);
@@ -718,28 +766,48 @@ const resolveStreamflix = async (content) => {
     streamflixLog('resolve: empty body');
     return null;
   }
+  const entries = Object.entries(body);
+  streamflixLog(
+    'resolve: servers',
+    entries.length,
+    entries.map(([name]) => name).join(',') || '(none)',
+  );
   const hlsCandidates = [];
   let atlasUrl = null;
-  for (const [name, data] of Object.entries(body)) {
+  for (const [name, data] of entries) {
     const url = typeof data?.url === 'string' ? data.url.trim() : '';
-    if (!url) continue;
-    if (String(name).toLowerCase() === 'atlas') {
-      atlasUrl = url;
+    if (!url) {
+      streamflixLog('resolve: skip empty', name);
       continue;
     }
-    if (isStreamUri(url)) hlsCandidates.push(url);
+    if (String(name).toLowerCase() === 'atlas') {
+      atlasUrl = url;
+      streamflixLog('resolve: atlas list', shortStreamflixUrl(url));
+      continue;
+    }
+    if (isStreamUri(url)) {
+      hlsCandidates.push(url);
+      streamflixLog(
+        'resolve: candidate',
+        name,
+        /\.m3u8(\?|#|$)/i.test(url) ? 'hls' : 'file',
+        shortStreamflixUrl(url),
+      );
+    } else {
+      streamflixLog('resolve: skip non-stream', name, shortStreamflixUrl(url));
+    }
   }
   if (hlsCandidates[0]) {
     const url = hlsCandidates[0];
     const kind = /\.m3u8(\?|#|$)/i.test(url) ? 'hls' : 'file';
-    streamflixLog('resolve: ok', kind);
+    streamflixLog('resolve: ok', kind, shortStreamflixUrl(url));
     return { url, kind };
   }
   if (atlasUrl) {
     const mp4 = isStreamUri(atlasUrl) ? atlasUrl : await pickAtlasMp4(atlasUrl);
     if (mp4) {
       const kind = /\.m3u8(\?|#|$)/i.test(mp4) ? 'hls' : 'file';
-      streamflixLog('resolve: atlas', kind);
+      streamflixLog('resolve: atlas', kind, shortStreamflixUrl(mp4));
       return { url: mp4, kind };
     }
   }
@@ -763,7 +831,15 @@ const serveStreamflix = async (code, res) => {
       res.end(JSON.stringify({ ok: false }));
       return;
     }
-    streamflixLog('http: 200', room.code, resolved.kind);
+    const host = hostnameOf(resolved.url);
+    if (host) allowStreamflixHost(room, host);
+    streamflixLog(
+      'http: 200',
+      room.code,
+      resolved.kind,
+      host || '(no host)',
+      shortStreamflixUrl(resolved.url),
+    );
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, ...resolved }));
   } catch (err) {
@@ -1101,6 +1177,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       embedUrl: null,
       subtitles: null,
       mediaAllowedHosts: new Set(),
+      streamflixHosts: new Set(),
       members: new Map([[id, host]]),
       lastActive: Date.now(),
     };
@@ -1190,6 +1267,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         room.embedUrl = null;
         room.subtitles = null;
         room.mediaAllowedHosts = new Set();
+        room.streamflixHosts = new Set();
         touch(room);
         broadcast(room, { type: 'episode', season, episode });
         broadcast(room, { type: 'source', source: null, embedUrl: null });
