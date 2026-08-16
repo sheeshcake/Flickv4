@@ -9,7 +9,6 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
@@ -273,6 +272,32 @@ const rewriteHlsPlaylist = (text, playlistUrl, code, room) => {
 
 const looksLikePlaylistUrl = (parsed) => /\.m3u8(\?|#|$)/i.test(parsed.pathname);
 
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** 1shows wraps MPEG-TS in a 1×1 PNG. Mobile players resync; HLS.js cannot. */
+const tsAfterPngPrefix = (buf) => {
+  if (buf.length < 16 || !buf.subarray(0, 8).equals(PNG_SIG)) return 0;
+  const iend = buf.indexOf('IEND', 8, 'latin1');
+  if (iend < 8 || iend + 8 >= buf.length) return 0;
+  return buf[iend + 8] === 0x47 ? iend + 8 : 0;
+};
+
+const readWebPrefix = async (body, minBytes) => {
+  if (!body || typeof body.getReader !== 'function') {
+    return { prefix: Buffer.alloc(0), reader: null };
+  }
+  const reader = body.getReader();
+  const parts = [];
+  let size = 0;
+  while (size < minBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(Buffer.from(value));
+    size += value.byteLength;
+  }
+  return { prefix: Buffer.concat(parts), reader };
+};
+
 const serveMedia = async (code, req, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
   const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
@@ -383,22 +408,39 @@ const serveMedia = async (code, req, res) => {
     const acceptRanges = upstream.headers.get('accept-ranges');
     if (acceptRanges) outHeaders['accept-ranges'] = acceptRanges;
 
-    res.writeHead(upstream.status, outHeaders);
     if (req.method === 'HEAD' || !upstream.body) {
+      res.writeHead(upstream.status, outHeaders);
+      res.end();
+      return;
+    }
+
+    const { prefix, reader } = await readWebPrefix(upstream.body, 96);
+    const skip = tsAfterPngPrefix(prefix);
+    const start = skip ? prefix.subarray(skip) : prefix;
+    if (skip) {
+      outHeaders['content-type'] = 'video/mp2t';
+      delete outHeaders['content-length'];
+      streamflixLog('proxy strip png', code, host, skip);
+    }
+    res.writeHead(upstream.status, outHeaders);
+    if (start.length) res.write(start);
+    if (!reader) {
       res.end();
       return;
     }
     try {
-      if (typeof Readable.fromWeb === 'function') {
-        const nodeStream = Readable.fromWeb(upstream.body);
-        nodeStream.on('error', () => res.destroy());
-        nodeStream.pipe(res);
-        return;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = Buffer.from(value);
+        if (!res.write(chunk)) {
+          await new Promise((resolve) => res.once('drain', resolve));
+        }
       }
+      res.end();
     } catch {
-      // fall through and buffer
+      res.destroy();
     }
-    res.end(Buffer.from(await upstream.arrayBuffer()));
   } catch {
     if (!res.headersSent) {
       res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
@@ -572,15 +614,14 @@ const listVidrock = async (content) => {
     let url = decryptVidrockUrl(packed);
     if (!url) continue;
     let kind = streamflixKind(data.type, url);
-    if (
-      String(name).toLowerCase() === 'atlas' &&
-      !isStreamUri(url) &&
-      !/\.m3u8(\?|#|$)/i.test(url)
-    ) {
+    if (!isStreamUri(url) && !/\.m3u8(\?|#|$)/i.test(url)) {
       const mp4 = await pickAtlasMp4(url);
-      if (!mp4) continue;
-      url = mp4;
-      kind = streamflixKind(null, mp4);
+      if (mp4) {
+        url = mp4;
+        kind = streamflixKind(null, mp4);
+      } else if (String(name).toLowerCase() === 'atlas') {
+        continue;
+      }
     }
     sources.push({
       id: `vidrock-${slugId(name)}`,
