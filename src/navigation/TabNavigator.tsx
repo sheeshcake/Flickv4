@@ -1,4 +1,8 @@
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import {
+  BottomTabBar,
+  createBottomTabNavigator,
+} from '@react-navigation/bottom-tabs';
+import { PartySessionBar } from '@/src/components/party/PartySessionBar';
 import {
   Download as DownloadIcon,
   Home as HomeIcon,
@@ -22,6 +26,12 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 export const TabNavigator = () => {
   return (
     <Tab.Navigator
+      tabBar={(props) => (
+        <>
+          <PartySessionBar placement="tabs" />
+          <BottomTabBar {...props} />
+        </>
+      )}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: '#E50914',

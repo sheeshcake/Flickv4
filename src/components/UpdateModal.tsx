@@ -172,7 +172,7 @@ export const UpdateModal = ({
     >
       <Box className="flex-1 bg-background/90">
         <Box className="flex-1 items-center justify-center px-6">
-          <Box className="w-full max-w-md rounded-2xl bg-card p-6">
+          <Box className="h-[90vh] w-full max-w-md overflow-hidden rounded-2xl bg-card p-6">
             <HStack className="mb-4 items-center justify-between">
               <Heading size="lg" bold className="text-foreground">
                 App Update
@@ -186,7 +186,7 @@ export const UpdateModal = ({
               </Focusable>
             </HStack>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
               {state === 'checking' && (
                 <VStack space="md" className="items-center py-8">
                   <Spinner size="large" color="#E50914" />
@@ -210,55 +210,14 @@ export const UpdateModal = ({
                   <Text size="sm" className="text-center text-muted-foreground">
                     Version {info?.currentVersion} is the latest.
                   </Text>
-                  <Focusable
-                    onPress={runCheck}
-                    className="mt-4 rounded-md border border-border px-4 py-3"
-                    focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
-                  >
-                    <Text className="text-foreground">Check again</Text>
-                  </Focusable>
                 </VStack>
               )}
 
-              {state === 'available' && info && (
-                <VStack space="md">
-                  <VersionSummary info={info} />
-
-                  <VStack space="sm" className="mt-2">
-                    <Focusable
-                      onPress={startUpdate}
-                      hasTVPreferredFocus
-                      className="items-center rounded-md bg-primary px-4 py-3"
-                      focusedClassName="border-2 border-foreground"
-                    >
-                      <Text className="font-semibold text-primary-foreground">
-                        {info.downloadUrl ? 'Download & install' : 'View on GitHub'}
-                      </Text>
-                    </Focusable>
-                    <Focusable
-                      onPress={openReleasePage}
-                      className="items-center rounded-md border border-border px-4 py-3"
-                      focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
-                    >
-                      <Text className="text-foreground">Release page</Text>
-                    </Focusable>
-                    {onSkipVersion && (
-                      <Pressable onPress={onSkipVersion}>
-                        <Box className="items-center py-2">
-                          <Text size="sm" className="text-muted-foreground">
-                            Skip this version
-                          </Text>
-                        </Box>
-                      </Pressable>
-                    )}
-                  </VStack>
-                </VStack>
-              )}
+              {state === 'available' && info && <VersionSummary info={info} />}
 
               {state === 'downloading' && info && (
                 <VStack space="md">
                   <VersionSummary info={info} />
-
                   <VStack space="sm" className="mt-2">
                     <HStack className="items-center justify-between">
                       <Text size="sm" className="text-foreground">
@@ -280,14 +239,6 @@ export const UpdateModal = ({
                         ? ` / ${updateService.formatFileSize(totalBytes)}`
                         : ''}
                     </Text>
-
-                    <Focusable
-                      onPress={cancelDownloadFlow}
-                      className="mt-2 items-center rounded-md border border-border px-4 py-3"
-                      focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
-                    >
-                      <Text className="text-foreground">Cancel</Text>
-                    </Focusable>
                   </VStack>
                 </VStack>
               )}
@@ -305,24 +256,10 @@ export const UpdateModal = ({
               {state === 'downloaded' && info && (
                 <VStack space="md">
                   <VersionSummary info={info} />
-
                   <Text size="xs" className="text-center text-muted-foreground">
                     Downloaded — install was cancelled or dismissed. You can
                     try again without re-downloading.
                   </Text>
-
-                  <VStack space="sm" className="mt-2">
-                    <Focusable
-                      onPress={retryInstall}
-                      hasTVPreferredFocus
-                      className="items-center rounded-md bg-primary px-4 py-3"
-                      focusedClassName="border-2 border-foreground"
-                    >
-                      <Text className="font-semibold text-primary-foreground">
-                        Install
-                      </Text>
-                    </Focusable>
-                  </VStack>
                 </VStack>
               )}
 
@@ -337,29 +274,98 @@ export const UpdateModal = ({
                   <Text size="sm" className="text-center text-muted-foreground">
                     {errorMessage || 'Please try again in a moment.'}
                   </Text>
-                  <Focusable
-                    onPress={info ? startUpdate : runCheck}
-                    className="mt-4 rounded-md bg-primary px-4 py-3"
-                    focusedClassName="border-2 border-foreground"
-                  >
-                    <Text className="font-semibold text-primary-foreground">
-                      Try again
-                    </Text>
-                  </Focusable>
-                  {info?.releaseUrl && (
-                    <Focusable
-                      onPress={openReleasePage}
-                      className="mt-1 rounded-md border border-border px-4 py-3"
-                      focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
-                    >
-                      <Text className="text-foreground">
-                        Open in browser instead
-                      </Text>
-                    </Focusable>
-                  )}
                 </VStack>
               )}
             </ScrollView>
+
+            {state === 'up-to-date' && (
+              <Focusable
+                onPress={runCheck}
+                className="mt-4 items-center rounded-md border border-border px-4 py-3"
+                focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+              >
+                <Text className="text-foreground">Check again</Text>
+              </Focusable>
+            )}
+
+            {state === 'available' && info && (
+              <VStack space="sm" className="mt-4">
+                <Focusable
+                  onPress={startUpdate}
+                  hasTVPreferredFocus
+                  className="items-center rounded-md bg-primary px-4 py-3"
+                  focusedClassName="border-2 border-foreground"
+                >
+                  <Text className="font-semibold text-primary-foreground">
+                    {info.downloadUrl ? 'Download & install' : 'View on GitHub'}
+                  </Text>
+                </Focusable>
+                <Focusable
+                  onPress={openReleasePage}
+                  className="items-center rounded-md border border-border px-4 py-3"
+                  focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                >
+                  <Text className="text-foreground">Release page</Text>
+                </Focusable>
+                {onSkipVersion && (
+                  <Pressable onPress={onSkipVersion}>
+                    <Box className="items-center py-2">
+                      <Text size="sm" className="text-muted-foreground">
+                        Skip this version
+                      </Text>
+                    </Box>
+                  </Pressable>
+                )}
+              </VStack>
+            )}
+
+            {state === 'downloading' && (
+              <Focusable
+                onPress={cancelDownloadFlow}
+                className="mt-4 items-center rounded-md border border-border px-4 py-3"
+                focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+              >
+                <Text className="text-foreground">Cancel</Text>
+              </Focusable>
+            )}
+
+            {state === 'downloaded' && (
+              <Focusable
+                onPress={retryInstall}
+                hasTVPreferredFocus
+                className="mt-4 items-center rounded-md bg-primary px-4 py-3"
+                focusedClassName="border-2 border-foreground"
+              >
+                <Text className="font-semibold text-primary-foreground">
+                  Install
+                </Text>
+              </Focusable>
+            )}
+
+            {state === 'error' && (
+              <VStack space="sm" className="mt-4">
+                <Focusable
+                  onPress={info ? startUpdate : runCheck}
+                  className="items-center rounded-md bg-primary px-4 py-3"
+                  focusedClassName="border-2 border-foreground"
+                >
+                  <Text className="font-semibold text-primary-foreground">
+                    Try again
+                  </Text>
+                </Focusable>
+                {info?.releaseUrl && (
+                  <Focusable
+                    onPress={openReleasePage}
+                    className="items-center rounded-md border border-border px-4 py-3"
+                    focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                  >
+                    <Text className="text-foreground">
+                      Open in browser instead
+                    </Text>
+                  </Focusable>
+                )}
+              </VStack>
+            )}
           </Box>
         </Box>
       </Box>

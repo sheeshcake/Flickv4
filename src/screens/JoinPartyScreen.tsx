@@ -15,6 +15,7 @@ import { Button, ButtonText, ButtonSpinner } from '@/components/ui/button';
 import { Focusable } from '@/src/components/Focusable';
 import { WatchPartyIntroModal } from '@/src/components/party/WatchPartyIntroModal';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
+import { PARTY_DISPLAY_NAME_MAX } from '@/src/party/displayName';
 import { mediaItemFromPartyContent } from '@/src/party/content';
 import { getTitle } from '@/src/types';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
@@ -27,8 +28,14 @@ export const JoinPartyScreen = ({
 }: RootStackScreenProps<'JoinParty'>) => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { enabled, joinRoom, leaveRoom } = useWatchParty();
+  const { enabled, joinRoom, leaveRoom, displayName, setDisplayName } =
+    useWatchParty();
+  const [nameDraft, setNameDraft] = useState(displayName);
   const [code, setCode] = useState(route.params?.code ?? '');
+
+  useEffect(() => {
+    setNameDraft(displayName);
+  }, [displayName]);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +55,7 @@ export const JoinPartyScreen = ({
       setBusy(true);
       setError(null);
       try {
+        await setDisplayName(nameDraft);
         const room = await joinRoom(
           trimmed,
           'player',
@@ -80,7 +88,7 @@ export const JoinPartyScreen = ({
         setBusy(false);
       }
     },
-    [enabled, joinRoom, leaveRoom, navigation],
+    [enabled, joinRoom, leaveRoom, nameDraft, navigation, setDisplayName],
   );
 
   useEffect(() => {
@@ -116,6 +124,22 @@ export const JoinPartyScreen = ({
               device, in sync.
             </Text>
           </HStack>
+
+          <VStack space="xs">
+            <Text size="sm" className="text-muted-foreground">
+              Your name
+            </Text>
+            <Input>
+              <InputField
+                value={nameDraft}
+                onChangeText={setNameDraft}
+                placeholder="Shown to others in the room"
+                autoCorrect={false}
+                maxLength={PARTY_DISPLAY_NAME_MAX}
+                editable={!busy}
+              />
+            </Input>
+          </VStack>
 
           <Input>
             <InputField

@@ -41,7 +41,7 @@ import { useServers } from '@/src/hooks/useServers';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { DownloadService } from '@/src/services/DownloadService';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
-import { playbackHeadersFor } from '@/src/services/MovieboxService';
+import { playbackHeadersFor } from '@/src/services/playbackHeaders';
 import { ensureDownloadPermissions } from '@/src/utils/downloadPermissions';
 import { getComingSoon } from '@/src/utils/comingSoon';
 import type { EpisodeDownloadState } from '@/src/components/SeasonEpisodePicker';
@@ -119,7 +119,7 @@ export const DetailScreen = ({
   const { enqueue, getJobFor, resume, remove, pause } = useDownloads();
   const { settings: subtitleSettings } = useSubtitleSettings();
 
-  const { enabled: partyEnabled } = useWatchParty();
+  const { enabled: partyEnabled, room: partyRoom } = useWatchParty();
   const [partyOpen, setPartyOpen] = useState(false);
   const [partyIntroOpen, setPartyIntroOpen] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
@@ -550,7 +550,11 @@ export const DetailScreen = ({
         onBack={() => navigation.goBack()}
         onPlay={play}
         onShare={onShare}
-        onStartParty={partyEnabled && !coming.comingSoon ? () => setPartyIntroOpen(true) : undefined}
+        onStartParty={
+          partyEnabled && !coming.comingSoon
+            ? () => (partyRoom ? setPartyOpen(true) : setPartyIntroOpen(true))
+            : undefined
+        }
         isInList={isInList}
         onToggleList={toggle}
         movieJob={movieJob}
@@ -797,7 +801,9 @@ export const DetailScreen = ({
               <ActionIcon
                 icon={Users}
                 label="Watch party"
-                onPress={() => setPartyIntroOpen(true)}
+                onPress={() =>
+                  partyRoom ? setPartyOpen(true) : setPartyIntroOpen(true)
+                }
               />
             )}
           </HStack>

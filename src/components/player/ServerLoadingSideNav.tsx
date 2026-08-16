@@ -11,6 +11,11 @@ import { Focusable } from '@/src/components/Focusable';
 import type { PlaybackServer } from '@/src/hooks/useServers';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
+export interface StreamflixLoadingSource {
+  id: string;
+  name: string;
+}
+
 interface ServerLoadingSideNavProps {
   servers: PlaybackServer[];
   activeServerId: string;
@@ -18,6 +23,10 @@ interface ServerLoadingSideNavProps {
    * `PlayerScreen`'s `tryNextServer`. */
   triedServerIds: Set<string>;
   onSelectServer: (id: string) => void;
+  streamflixSources?: StreamflixLoadingSource[];
+  tryingStreamflixSourceId?: string | null;
+  triedStreamflixIds?: Set<string>;
+  onSelectStreamflixSource?: (id: string) => void;
   /** Debug-mode only: Hide collapses this list; a Show chip brings it back. */
   canHide?: boolean;
 }
@@ -36,10 +45,15 @@ export const ServerLoadingSideNav = ({
   activeServerId,
   triedServerIds,
   onSelectServer,
+  streamflixSources = [],
+  tryingStreamflixSourceId,
+  triedStreamflixIds,
+  onSelectStreamflixSource,
   canHide = false,
 }: ServerLoadingSideNavProps) => {
   const [hidden, setHidden] = useState(false);
-  if (servers.length <= 1 && !canHide) return null;
+  const showSources = streamflixSources.length > 0 && !!onSelectStreamflixSource;
+  if (servers.length <= 1 && !showSources && !canHide) return null;
 
   if (canHide && hidden) {
     return (
@@ -124,6 +138,52 @@ export const ServerLoadingSideNav = ({
             );
           })}
         </VStack>
+        {showSources ? (
+          <VStack space="xs" className="p-2 pt-0">
+            <Text
+              size="2xs"
+              bold
+              className="px-2 pt-2 uppercase tracking-wide text-muted-foreground"
+            >
+              Sources
+            </Text>
+            {streamflixSources.map((s) => {
+              const active = s.id === tryingStreamflixSourceId;
+              const failed = !active && Boolean(triedStreamflixIds?.has(s.id));
+              return (
+                <Focusable
+                  key={s.id}
+                  onPress={() => !active && onSelectStreamflixSource?.(s.id)}
+                  className={`rounded-md px-3 py-3 ${active ? 'bg-primary/20' : ''}`}
+                  focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+                >
+                  <HStack className="items-center justify-between">
+                    <Text
+                      numberOfLines={1}
+                      className={
+                        active
+                          ? 'flex-1 font-semibold text-foreground'
+                          : 'flex-1 text-muted-foreground'
+                      }
+                    >
+                      {s.name}
+                    </Text>
+                    {active ? (
+                      <Spinner size="small" color="#E50914" />
+                    ) : failed ? (
+                      <HStack space="xs" className="items-center">
+                        <Icon as={X} size="xs" className="text-muted-foreground" />
+                        <Text size="2xs" className="text-muted-foreground">
+                          Failed
+                        </Text>
+                      </HStack>
+                    ) : null}
+                  </HStack>
+                </Focusable>
+              );
+            })}
+          </VStack>
+        ) : null}
       </ScrollView>
     </Box>
   );

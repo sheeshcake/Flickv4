@@ -15,6 +15,17 @@ export interface PartyMember {
 export interface PartySource {
   uri: string;
   kind: 'hls' | 'file';
+  sourceId?: string;
+}
+
+export type PartyRtcSignalKind = 'offer' | 'answer' | 'ice';
+
+export interface PartyRtcSignalPayload {
+  type: PartyRtcSignalKind;
+  sdp?: string;
+  candidate?: string | null;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
 }
 
 export interface PartySubtitles {
@@ -44,6 +55,8 @@ export interface PartyRoom {
   embedUrl?: string | null;
   subtitles?: PartySubtitles | null;
   locked?: boolean;
+  browsing?: boolean;
+  rtcMemberIds?: string[];
 }
 
 export interface PublicRoomSummary {
@@ -58,6 +71,20 @@ export interface PublicRoomSummary {
   paused: boolean;
 }
 
+export const PARTY_REACTIONS = [
+  '👍',
+  '❤️',
+  '😂',
+  '😮',
+  '👏',
+  '🎉',
+  '🔥',
+  '😢',
+] as const;
+
+export const isPartyReaction = (emoji: string): boolean =>
+  (PARTY_REACTIONS as readonly string[]).includes(emoji);
+
 export const posterUrl = (posterPath: string | null | undefined): string | null => {
   if (!posterPath) return null;
   if (/^https?:\/\//i.test(posterPath)) return posterPath;
@@ -69,9 +96,14 @@ export type ServerMessage =
   | { type: 'state'; room: PartyRoom }
   | { type: 'clock'; clock: PartyClock }
   | { type: 'episode'; season: number; episode: number }
+  | { type: 'browse' }
+  | { type: 'content'; content: PartyContent }
   | { type: 'source'; source: PartySource | null; embedUrl?: string | null }
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
   | { type: 'chat'; from: string; text: string; at: number }
+  | { type: 'reaction'; from: string; emoji: string; at: number }
+  | { type: 'rtc-peers'; ids: string[] }
+  | { type: 'rtc-signal'; from: string; payload: PartyRtcSignalPayload }
   | { type: 'error'; message: string }
   | { type: 'ended'; reason: string };
 
@@ -93,3 +125,6 @@ export const codeFromPath = (pathname: string): string => {
 
 export const mediaProxyUrl = (code: string, uri: string): string =>
   `/media/${code}?u=${encodeURIComponent(uri)}`;
+
+export const subtitleProxyUrl = (code: string, uri?: string): string =>
+  uri ? `/subtitle/${code}?u=${encodeURIComponent(uri)}` : `/subtitle/${code}`;

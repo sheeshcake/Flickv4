@@ -1,6 +1,6 @@
-import { ArrowLeft, Maximize, MessageCircle, Minimize, Pause, Play, RotateCcw, RotateCw } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Maximize, MessageCircle, Mic, MicOff, Minimize, Pause, Play, RotateCcw, RotateCw, Settings, SmilePlus, Video, VideoOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatTime } from '@/lib/party';
+import { formatTime, PARTY_REACTIONS } from '@/lib/party';
 import { cn } from '@/lib/utils';
 import logo from '@/assets/logo.png';
 
@@ -21,7 +21,19 @@ interface PlayerOverlayProps {
   onScrubEnd: (fraction: number) => void;
   onOpenMembers: () => void;
   onOpenChat: () => void;
+  onOpenSettings: () => void;
+  onToggleReactions: () => void;
+  reactionsOpen: boolean;
+  onSelectReaction: (emoji: string) => void;
   onToggleFullscreen: () => void;
+  inCall: boolean;
+  muted: boolean;
+  camOff: boolean;
+  onToggleCall: () => void;
+  onToggleMute: () => void;
+  onToggleCam: () => void;
+  tilesHidden: boolean;
+  onToggleTilesHidden: () => void;
 }
 
 const seekFraction = (el: HTMLElement, clientX: number) => {
@@ -46,7 +58,19 @@ export const PlayerOverlay = ({
   onScrubEnd,
   onOpenMembers,
   onOpenChat,
+  onOpenSettings,
+  onToggleReactions,
+  reactionsOpen,
+  onSelectReaction,
   onToggleFullscreen,
+  inCall,
+  muted,
+  camOff,
+  onToggleCall,
+  onToggleMute,
+  onToggleCam,
+  tilesHidden,
+  onToggleTilesHidden,
 }: PlayerOverlayProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
 
@@ -99,6 +123,62 @@ export const PlayerOverlay = ({
           </Button>
           <Button
             type="button"
+            variant={inCall ? 'default' : 'secondary'}
+            size="icon"
+            className="size-11"
+            onClick={() => {
+              onInteract();
+              onToggleCall();
+            }}
+            aria-label={inCall ? 'Leave camera' : 'Join camera'}
+          >
+            {inCall ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+          </Button>
+          {inCall ? (
+            <>
+              <Button
+                type="button"
+                variant={muted ? 'default' : 'secondary'}
+                size="icon"
+                className="size-11"
+                onClick={() => {
+                  onInteract();
+                  onToggleMute();
+                }}
+                aria-label={muted ? 'Unmute' : 'Mute'}
+              >
+                {muted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
+              </Button>
+              <Button
+                type="button"
+                variant={camOff ? 'default' : 'secondary'}
+                size="icon"
+                className="size-11"
+                onClick={() => {
+                  onInteract();
+                  onToggleCam();
+                }}
+                aria-label={camOff ? 'Camera on' : 'Camera off'}
+              >
+                {camOff ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+              </Button>
+              <Button
+                type="button"
+                variant={tilesHidden ? 'default' : 'secondary'}
+                size="icon"
+                className="size-11"
+                onClick={() => {
+                  onInteract();
+                  onToggleTilesHidden();
+                }}
+                aria-label={tilesHidden ? 'Show cameras' : 'Hide cameras'}
+              >
+                {tilesHidden ? <Eye className="size-5" /> : <EyeOff className="size-5" />}
+              </Button>
+            </>
+          ) : null}
+          <Button
+            type="button"
             variant="secondary"
             size="icon"
             className="size-11"
@@ -117,6 +197,33 @@ export const PlayerOverlay = ({
             className="size-11"
             onClick={() => {
               onInteract();
+              onOpenSettings();
+            }}
+            aria-label="Settings"
+          >
+            <Settings className="size-5" />
+          </Button>
+          <Button
+            type="button"
+            variant={reactionsOpen ? 'default' : 'secondary'}
+            size="icon"
+            className="size-11"
+            onClick={() => {
+              onInteract();
+              onToggleReactions();
+            }}
+            aria-label="Reactions"
+            aria-expanded={reactionsOpen}
+          >
+            <SmilePlus className="size-5" />
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-11"
+            onClick={() => {
+              onInteract();
               onToggleFullscreen();
             }}
             aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
@@ -125,6 +232,26 @@ export const PlayerOverlay = ({
           </Button>
         </div>
       </div>
+
+      {reactionsOpen ? (
+        <div className="absolute top-20 right-3 z-20 rounded-xl border border-border bg-card/95 p-2 sm:right-6">
+          <div className="grid grid-cols-4 gap-1">
+            {PARTY_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="flex size-11 items-center justify-center rounded-full text-2xl hover:bg-primary/20"
+                onClick={() => {
+                  onInteract();
+                  onSelectReaction(emoji);
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="relative z-10 flex flex-1 items-center justify-center gap-8 sm:gap-10">
         <Button

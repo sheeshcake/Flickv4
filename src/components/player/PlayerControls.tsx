@@ -10,6 +10,7 @@ import {
   RotateCw,
   MessageCircle,
   Settings2,
+  SmilePlus,
   Sun,
   Users,
   Volume2,
@@ -22,6 +23,7 @@ import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Center } from '@/components/ui/center';
 import { Focusable } from '@/src/components/Focusable';
+import { PlayerReactionPicker } from '@/src/components/party/PlayerReactionPicker';
 import { ProgressBar } from '@/src/components/player/ProgressBar';
 import { VerticalSlider } from '@/src/components/player/VerticalSlider';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
@@ -56,6 +58,9 @@ interface PlayerControlsProps {
   partyLocked?: boolean;
   onOpenParty?: () => void;
   onOpenChat?: () => void;
+  onOpenReactions?: () => void;
+  reactionsOpen?: boolean;
+  onSelectReaction?: (emoji: string) => void;
   /** Device media volume 0..1 (system volume when available). */
   volume: number;
   onVolumeChange: (value: number) => void;
@@ -113,6 +118,9 @@ export const PlayerControls = ({
   partyLocked,
   onOpenParty,
   onOpenChat,
+  onOpenReactions,
+  reactionsOpen,
+  onSelectReaction,
 }: PlayerControlsProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
   const showBrightness =
@@ -179,6 +187,21 @@ export const PlayerControls = ({
             <Icon as={MessageCircle} size="lg" className="text-foreground" />
           </Focusable>
         )}
+        {onOpenReactions && (
+          <Focusable
+            onPress={onOpenReactions}
+            className={`rounded-full p-2 ${reactionsOpen ? 'bg-primary' : 'bg-background/40'}`}
+            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
+          >
+            <Icon
+              as={SmilePlus}
+              size="lg"
+              className={
+                reactionsOpen ? 'text-primary-foreground' : 'text-foreground'
+              }
+            />
+          </Focusable>
+        )}
         {onOpenEpisodes && (
           <Focusable
             onPress={onOpenEpisodes}
@@ -241,6 +264,12 @@ export const PlayerControls = ({
           icon={Volume2}
         />
       </Box>
+
+      {reactionsOpen && onSelectReaction ? (
+        <Box className="absolute right-8 top-20 z-30" pointerEvents="box-none">
+          <PlayerReactionPicker onSelect={onSelectReaction} />
+        </Box>
+      ) : null}
 
       <VStack className="px-10 pb-1">
         <ProgressBar

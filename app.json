@@ -11,7 +11,11 @@
     "ios": {
       "supportsTablet": true,
       "icon": "./assets/applogo/ic_launcher.png",
-      "bundleIdentifier": "com.wfrdee.flick"
+      "bundleIdentifier": "com.wfrdee.flick",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Flick uses the camera so you can join a watch-party video call.",
+        "NSMicrophoneUsageDescription": "Flick uses the microphone so you can join a watch-party video call."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -25,7 +29,10 @@
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.ACCESS_WIFI_STATE",
-        "android.permission.REQUEST_INSTALL_PACKAGES"
+        "android.permission.REQUEST_INSTALL_PACKAGES",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "predictiveBackGestureEnabled": true,
       "package": "com.flickv4",
@@ -52,7 +59,14 @@
       "expo-screen-orientation",
       "./plugins/withLeanbackTv",
       "./plugins/withNotifeeAndroidMaven",
-      "./plugins/withMacCatalyst"
+      "./plugins/withMacCatalyst",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Flick uses the camera so you can join a watch-party video call.",
+          "microphonePermission": "Flick uses the microphone so you can join a watch-party video call."
+        }
+      ]
     ]
   }
 }
