@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Lock, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Download, Lock, Users } from 'lucide-react';
+import { GetAppDialog } from '@/components/GetAppDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -25,6 +27,7 @@ export const JoinGate = ({ initialCode, error, onJoin }: JoinGateProps) => {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [rooms, setRooms] = useState<PublicRoomSummary[]>([]);
+  const [appOpen, setAppOpen] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -67,10 +70,18 @@ export const JoinGate = ({ initialCode, error, onJoin }: JoinGateProps) => {
       <img src={logo} alt="Flick" className="mx-auto mb-4 h-14 w-auto" />
       <h1 className="mb-2 text-center text-3xl font-bold">Flick Watch Party</h1>
       <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
-        Video plays in this browser when the host’s stream allows it. Captions
-        follow the host. If the stream is blocked, we try the embed page, then
-        Open in Flick.
+        Browse titles and host a party, or join with a code. Video plays in this
+        browser when Streamflix (or the host’s stream) allows it.
       </p>
+      <div className="mb-6 flex flex-col gap-2">
+        <Button asChild variant="outline" className="w-full">
+          <Link to="/">Browse movies & TV</Link>
+        </Button>
+        <Button className="w-full" onClick={() => setAppOpen(true)}>
+          <Download className="size-4" />
+          Get the app
+        </Button>
+      </div>
 
       <section className="mb-6">
         <h2 className="mb-3 text-sm font-semibold text-muted-foreground">
@@ -135,7 +146,7 @@ export const JoinGate = ({ initialCode, error, onJoin }: JoinGateProps) => {
         <CardHeader>
           <CardTitle>Join room</CardTitle>
           <CardDescription>
-            Pick a live party or enter the code from the host’s phone.
+            Pick a live party or enter the code from the host.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -203,6 +214,7 @@ export const JoinGate = ({ initialCode, error, onJoin }: JoinGateProps) => {
           </form>
         </CardContent>
       </Card>
+      <GetAppDialog open={appOpen} onClose={() => setAppOpen(false)} />
     </div>
   );
 };

@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  appType: 'spa',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -19,7 +20,12 @@ export default defineConfig({
       '/media': 'http://127.0.0.1:8787',
       '/subtitle': 'http://127.0.0.1:8787',
       '/videasy': 'http://127.0.0.1:8787',
+      '/extract': 'http://127.0.0.1:8787',
+      '/play': 'http://127.0.0.1:8787',
+      '/wyzie': 'http://127.0.0.1:8787',
       '/streamflix': 'http://127.0.0.1:8787',
+      '/tmdb': 'http://127.0.0.1:8787',
+      '/app': 'http://127.0.0.1:8787',
       '/health': 'http://127.0.0.1:8787',
       '/rooms': 'http://127.0.0.1:8787',
       '/ws': {

@@ -79,3 +79,12 @@ button,
 .party-reaction {
   animation: party-reaction-float 2.2s ease-out forwards;
 }
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

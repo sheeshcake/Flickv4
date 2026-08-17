@@ -45,6 +45,12 @@ export interface PartyContent {
   imdbId?: string | null;
 }
 
+export interface PartyChatLine {
+  from: string;
+  text: string;
+  at?: number;
+}
+
 export interface PartyRoom {
   code: string;
   hostId: string;
@@ -73,6 +79,7 @@ export interface PublicRoomSummary {
 
 export const PARTY_REACTIONS = [
   '👍',
+  '👎',
   '❤️',
   '😂',
   '😮',
@@ -92,6 +99,7 @@ export const posterUrl = (posterPath: string | null | undefined): string | null 
 };
 
 export type ServerMessage =
+  | { type: 'created'; memberId: string; room: PartyRoom; hostKey: string }
   | { type: 'joined'; memberId: string; room: PartyRoom }
   | { type: 'state'; room: PartyRoom }
   | { type: 'clock'; clock: PartyClock }
@@ -100,12 +108,96 @@ export type ServerMessage =
   | { type: 'content'; content: PartyContent }
   | { type: 'source'; source: PartySource | null; embedUrl?: string | null }
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
+  | { type: 'control'; action: 'play' | 'pause' | 'seek'; positionSeconds?: number }
   | { type: 'chat'; from: string; text: string; at: number }
   | { type: 'reaction'; from: string; emoji: string; at: number }
   | { type: 'rtc-peers'; ids: string[] }
   | { type: 'rtc-signal'; from: string; payload: PartyRtcSignalPayload }
   | { type: 'error'; message: string }
   | { type: 'ended'; reason: string };
+
+export type ClientKind = 'player' | 'companion';
+
+export type ClientMessage =
+  | {
+      type: 'create';
+      displayName: string;
+      kind: ClientKind;
+      content: PartyContent;
+      clock?: PartyClock;
+      password?: string;
+    }
+  | {
+      type: 'join';
+      displayName: string;
+      kind: ClientKind;
+      code: string;
+      hostKey?: string;
+      password?: string;
+    }
+  | { type: 'play' }
+  | { type: 'pause' }
+  | { type: 'seek'; positionSeconds: number }
+  | { type: 'episode'; season: number; episode: number }
+  | { type: 'browse' }
+  | { type: 'content'; content: PartyContent }
+  | { type: 'heartbeat'; positionSeconds: number; paused: boolean }
+  | { type: 'buffering'; buffering: boolean }
+  | {
+      type: 'source';
+      uri: string;
+      kind: 'hls' | 'file';
+      embedUrl?: string;
+      sourceId?: string;
+    }
+  | { type: 'subtitles'; subtitles: PartySubtitles | null }
+  | { type: 'control'; action: 'play' | 'pause' | 'seek'; positionSeconds?: number }
+  | { type: 'chat'; text: string }
+  | { type: 'reaction'; emoji: string }
+  | { type: 'rtc-join' }
+  | { type: 'rtc-leave' }
+  | { type: 'rtc-signal'; to: string; payload: PartyRtcSignalPayload }
+  | { type: 'leave' };
+
+export const watchPath = (content: PartyContent): string =>
+  content.mediaType === 'tv' && content.season != null && content.episode != null
+    ? `/watch/tv/${content.tmdbId}/${content.season}/${content.episode}`
+    : `/watch/movie/${content.tmdbId}`;
+
+export const streamflixQueryUrl = (
+  content: PartyContent,
+  sourceId?: string,
+): string => {
+  const params = new URLSearchParams();
+  params.set('tmdbId', String(content.tmdbId));
+  params.set('mediaType', content.mediaType);
+  if (content.imdbId) params.set('imdbId', content.imdbId);
+  if (content.season != null) params.set('season', String(content.season));
+  if (content.episode != null) params.set('episode', String(content.episode));
+  if (sourceId) params.set('source', sourceId);
+  return `/streamflix?${params}`;
+};
+
+export const partyContentFromTitle = (
+  item: {
+    id: number;
+    media_type?: string;
+    title?: string;
+    name?: string;
+    poster_path?: string | null;
+  },
+  season?: number,
+  episode?: number,
+  imdbId?: string | null,
+): PartyContent => ({
+  tmdbId: item.id,
+  mediaType: item.media_type === 'tv' ? 'tv' : 'movie',
+  title: item.title || item.name || 'Untitled',
+  posterPath: item.poster_path ?? null,
+  season,
+  episode,
+  imdbId: imdbId ?? null,
+});
 
 export const predictedHostTime = (clock: PartyClock, now = Date.now()): number => {
   if (clock.paused) return clock.positionSeconds;

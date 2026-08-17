@@ -1,7 +1,8 @@
 /**
  * Flick watch-party room server.
- * Syncs TMDB identity + a host playback clock. Web companion waterfall:
- * Streamflix (source list) → `/media` proxy → host embed URL.
+ * Syncs TMDB identity + a host playback clock.
+ * Web guest waterfall: Streamflix → `/media` proxy → host embed.
+ * Web host/solo: browser lists/decrypts via `/extract`, plays through `/media`.
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
@@ -16,14 +17,52 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
+const loadEnvFile = (filePath) => {
+  if (!fs.existsSync(filePath)) return;
+  const text = fs.readFileSync(filePath, 'utf8');
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq < 1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim();
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+};
+loadEnvFile(path.join(__dirname, '.env'));
+loadEnvFile(path.join(__dirname, '..', '.env'));
+
 const PORT = Number(process.env.PORT) || 8787;
+const APP_VERSION = process.env.APP_VERSION?.trim() || '0.0.0';
+const TMDB_API_KEY =
+  process.env.TMDB_API_KEY || process.env.EXPO_PUBLIC_TMDB_API_KEY || '';
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+const WYZIE_BASE = (
+  process.env.WYZIE_BASE_URL ||
+  process.env.EXPO_PUBLIC_WYZIE_BASE_URL ||
+  'https://sub.wyzie.io'
+).replace(/\/+$/, '');
+const WYZIE_KEY =
+  process.env.WYZIE_API_KEY || process.env.EXPO_PUBLIC_WYZIE_API_KEY || '';
+const WYZIE_MAX_TRACKS = 20;
+const TMDB_TIMEOUT_MS = 15000;
+const GITHUB_OWNER =
+  process.env.GITHUB_REPO_OWNER ||
+  process.env.EXPO_PUBLIC_UPDATE_REPO_OWNER ||
+  'sheeshcake';
+const GITHUB_REPO =
+  process.env.GITHUB_REPO_NAME ||
+  process.env.EXPO_PUBLIC_UPDATE_REPO_NAME ||
+  'Flickv4';
+const APP_RELEASE_CACHE_MS = 10 * 60 * 1000;
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_LENGTH = 5;
 const MAX_MEMBERS = 8;
 const IDLE_MS = 30 * 60 * 1000;
 const CHAT_MAX = 200;
 const REACTION_COOLDOWN_MS = 400;
-const PARTY_REACTIONS = new Set(['👍', '❤️', '😂', '😮', '👏', '🎉', '🔥', '😢']);
+const PARTY_REACTIONS = new Set(['👍', '👎', '❤️', '😂', '😮', '👏', '🎉', '🔥', '😢']);
 /** @type {Map<string, number>} */
 const lastReactionAt = new Map();
 const URI_MAX = 8192;
@@ -39,7 +78,7 @@ const MEDIA_UA =
 /** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string, sourceId?: string }} PartySource */
 /** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
 /** @typedef {{ id: string, displayName: string, kind: 'player'|'companion', role: 'host'|'guest', buffering: boolean, ws: import('ws').WebSocket }} Member */
-/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, browsing: boolean, rtcMemberIds: Set<string>, mediaAllowedHosts: Set<string>, streamflixHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
+/** @typedef {{ code: string, hostId: string, hostKey: string, passwordHash: string|null, content: PartyContent, clock: PartyClock, source: PartySource|null, embedUrl: string|null, subtitles: PartySubtitles|null, browsing: boolean, playbackOnly?: boolean, rtcMemberIds: Set<string>, mediaAllowedHosts: Set<string>, streamflixHosts: Set<string>, members: Map<string, Member>, lastActive: number }} Room */
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
@@ -59,6 +98,51 @@ const uniqueCode = () => {
     if (!rooms.has(code)) return code;
   }
   return randomCode() + randomCode().slice(0, 1);
+};
+
+const uniquePlaybackCode = () => {
+  for (let i = 0; i < 20; i++) {
+    let tail = '';
+    for (let j = 0; j < 8; j++) {
+      tail += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+    }
+    const code = `P${tail}`;
+    if (!rooms.has(code)) return code;
+  }
+  return `P${Date.now().toString(36).toUpperCase()}`;
+};
+
+const createPlaybackSession = (content) => {
+  const code = uniquePlaybackCode();
+  /** @type {Room} */
+  const room = {
+    code,
+    hostId: '',
+    hostKey: '',
+    passwordHash: null,
+    content: {
+      tmdbId: content.tmdbId,
+      mediaType: content.mediaType === 'tv' ? 'tv' : 'movie',
+      title: String(content.title || 'Untitled').slice(0, 200),
+      posterPath: content.posterPath ?? null,
+      season: content.season,
+      episode: content.episode,
+      imdbId: content.imdbId ? String(content.imdbId).slice(0, 16) : null,
+    },
+    clock: { positionSeconds: 0, paused: true, updatedAt: Date.now() },
+    source: null,
+    embedUrl: null,
+    subtitles: null,
+    browsing: false,
+    playbackOnly: true,
+    rtcMemberIds: new Set(),
+    mediaAllowedHosts: new Set(),
+    streamflixHosts: new Set(),
+    members: new Map(),
+    lastActive: Date.now(),
+  };
+  rooms.set(code, room);
+  return room;
 };
 
 const PASSWORD_MAX = 64;
@@ -107,7 +191,9 @@ const publicRoom = (room) => ({
 });
 
 const publicRoomList = () =>
-  [...rooms.values()].map((room) => ({
+  [...rooms.values()]
+    .filter((room) => !room.playbackOnly)
+    .map((room) => ({
     code: room.code,
     title: room.content.title,
     posterPath: room.content.posterPath ?? null,
@@ -300,6 +386,7 @@ const readWebPrefix = async (body, minBytes) => {
 
 const serveMedia = async (code, req, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
+  if (room) touch(room);
   const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
   const raw = reqUrl.searchParams.get('u') || '';
   let parsed;
@@ -581,6 +668,311 @@ const seedSourceHosts = (room, source) => {
   }
 };
 
+const EXTRACT_ALLOW_HOSTS = [
+  'vidrock.net',
+  'api.videasy.net',
+  'enc-dec.app',
+  'player.vidzee.wtf',
+  'core.vidzee.wtf',
+];
+
+const hostMatchesAllow = (hostname, allowed) => {
+  const host = String(hostname || '').toLowerCase();
+  const needle = String(allowed || '').toLowerCase();
+  return host === needle || host.endsWith(`.${needle}`);
+};
+
+const isAllowedExtractHost = (hostname) => {
+  const host = String(hostname || '').toLowerCase();
+  if (!host || isBlockedPrivateHost(host)) return false;
+  return EXTRACT_ALLOW_HOSTS.some((allowed) => hostMatchesAllow(host, allowed));
+};
+
+const extractUpstreamHeaders = (hostname, reqHeaders) => {
+  const host = String(hostname || '').toLowerCase();
+  const headers = {
+    'User-Agent': STREAMFLIX_UA,
+    Accept: reqHeaders.accept || 'application/json',
+  };
+  if (hostMatchesAllow(host, 'vidrock.net')) {
+    headers.Referer = 'https://vidrock.net/';
+    headers.Origin = 'https://vidrock.net';
+  } else if (hostMatchesAllow(host, 'videasy.net') || hostMatchesAllow(host, 'enc-dec.app')) {
+    headers.Referer = 'https://player.videasy.net/';
+    headers.Origin = 'https://player.videasy.net';
+  } else if (hostMatchesAllow(host, 'vidzee.wtf')) {
+    headers.Referer = `${VIDZEE_PLAYER}/`;
+    headers.Origin = VIDZEE_PLAYER;
+  }
+  const contentType = reqHeaders['content-type'];
+  if (contentType) headers['Content-Type'] = contentType;
+  return headers;
+};
+
+const readRequestBody = (req, limit) =>
+  new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(new Error('too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+
+const serveExtract = async (req, res) => {
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.writeHead(405, { allow: 'GET, POST' });
+    res.end();
+    return;
+  }
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+  const raw = reqUrl.searchParams.get('u') || '';
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  if (!isAllowedExtractHost(parsed.hostname)) {
+    res.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  let body;
+  if (req.method === 'POST') {
+    try {
+      body = await readRequestBody(req, 1_000_000);
+    } catch {
+      res.writeHead(413, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false }));
+      return;
+    }
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const upstream = await fetch(parsed.href, {
+      method: req.method,
+      headers: extractUpstreamHeaders(parsed.hostname, req.headers),
+      body: req.method === 'POST' ? body : undefined,
+      signal: controller.signal,
+    });
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
+    res.writeHead(upstream.status, {
+      'content-type': contentType,
+      'cache-control': 'no-store',
+    });
+    res.end(buf);
+  } catch (err) {
+    streamflixLog('extract: fail', err instanceof Error ? err.message : err);
+    res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const servePlayCreate = async (req, res) => {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { allow: 'POST' });
+    res.end();
+    return;
+  }
+  let raw;
+  try {
+    raw = JSON.parse((await readRequestBody(req, 8000)).toString('utf8') || '{}');
+  } catch {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  let content;
+  try {
+    content = parsePartyContent({
+      tmdbId: Number(raw.tmdbId),
+      mediaType: raw.mediaType,
+      title: raw.title,
+      posterPath: raw.posterPath,
+      season: raw.season != null ? Number(raw.season) : undefined,
+      episode: raw.episode != null ? Number(raw.episode) : undefined,
+      imdbId: raw.imdbId,
+    });
+  } catch {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  const session = createPlaybackSession(content);
+  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ ok: true, session: session.code }));
+};
+
+const servePlaySource = async (code, req, res) => {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { allow: 'POST' });
+    res.end();
+    return;
+  }
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room) {
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  let raw;
+  try {
+    raw = JSON.parse((await readRequestBody(req, 32_000)).toString('utf8') || '{}');
+  } catch {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  const uri = String(raw.uri || '').slice(0, URI_MAX);
+  const host = hostnameOf(uri);
+  if (!/^https?:\/\//i.test(uri) || !host || isBlockedPrivateHost(host)) {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  const subtitles = Array.isArray(raw.subtitles)
+    ? raw.subtitles
+        .filter((t) => t && typeof t.file === 'string' && /^https?:\/\//i.test(t.file))
+        .slice(0, 40)
+        .map((t) => ({
+          label: String(t.label || 'Unknown').slice(0, 80),
+          file: String(t.file).slice(0, URI_MAX),
+        }))
+    : [];
+  seedSourceHosts(room, { url: uri, subtitles });
+  touch(room);
+  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ ok: true }));
+};
+
+const servePlaySubtitle = async (code, req, res) => {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { allow: 'POST' });
+    res.end();
+    return;
+  }
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room) {
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  let raw;
+  try {
+    raw = JSON.parse((await readRequestBody(req, 16_000)).toString('utf8') || '{}');
+  } catch {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  const uri = String(raw.url || '').slice(0, URI_MAX);
+  const host = hostnameOf(uri);
+  if (!/^https?:\/\//i.test(uri) || !host || isBlockedPrivateHost(host)) {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  allowMediaHost(room, host);
+  touch(room);
+  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ ok: true }));
+};
+
+const serveWyzieSearch = async (req, res) => {
+  if (req.method !== 'GET') {
+    res.writeHead(405, { allow: 'GET' });
+    res.end();
+    return;
+  }
+  if (!WYZIE_KEY) {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, tracks: [] }));
+    return;
+  }
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+  const tmdbId = Number(reqUrl.searchParams.get('tmdbId'));
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, tracks: [] }));
+    return;
+  }
+  const season = Number(reqUrl.searchParams.get('season'));
+  const episode = Number(reqUrl.searchParams.get('episode'));
+  const format = reqUrl.searchParams.get('format') === 'vtt' ? 'vtt' : 'srt';
+  const url = new URL(`${WYZIE_BASE}/search`);
+  url.searchParams.set('id', String(tmdbId));
+  url.searchParams.set('key', WYZIE_KEY);
+  url.searchParams.set('format', format);
+  if (Number.isFinite(season) && Number.isFinite(episode) && season > 0 && episode > 0) {
+    url.searchParams.set('season', String(season));
+    url.searchParams.set('episode', String(episode));
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const upstream = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': MEDIA_UA },
+      signal: controller.signal,
+    });
+    if (!upstream.ok) {
+      res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, tracks: [] }));
+      return;
+    }
+    const data = await upstream.json();
+    const list = Array.isArray(data) ? data : data && data.url ? [data] : [];
+    const tracks = [];
+    const seen = new Set();
+    for (const raw of list) {
+      const file = typeof raw?.url === 'string' ? raw.url : '';
+      if (!/^https?:\/\//i.test(file)) continue;
+      const language = String(raw.language || '').slice(0, 16);
+      const display = String(raw.display || raw.language || 'Unknown').slice(0, 80);
+      const cc = Boolean(raw.isHearingImpaired);
+      const key = `${language}-${display}-${cc ? 'cc' : 'n'}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tracks.push({
+        id: String(raw.id || `${language}-${tracks.length}`).slice(0, 80),
+        url: file.slice(0, URI_MAX),
+        display,
+        language,
+        isHearingImpaired: cc,
+      });
+      if (tracks.length >= WYZIE_MAX_TRACKS) break;
+    }
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    res.end(JSON.stringify({ ok: true, tracks }));
+  } catch {
+    res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, tracks: [] }));
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const listVidrock = async (content) => {
   const tmdbId = Number(content.tmdbId);
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
@@ -857,18 +1249,28 @@ const resolveStreamflixSource = async (source) => {
   return null;
 };
 
-const serveStreamflix = async (code, req, res) => {
-  const room = rooms.get(String(code || '').toUpperCase());
-  if (!room?.content?.tmdbId) {
-    streamflixLog('http: no room/tmdb', code);
-    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: false }));
-    return;
-  }
+const contentFromQuery = (reqUrl) => {
+  const tmdbId = Number(reqUrl.searchParams.get('tmdbId'));
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return null;
+  const mediaType = reqUrl.searchParams.get('mediaType') === 'tv' ? 'tv' : 'movie';
+  const season = Number(reqUrl.searchParams.get('season'));
+  const episode = Number(reqUrl.searchParams.get('episode'));
+  const imdbId = String(reqUrl.searchParams.get('imdbId') || '').trim() || null;
+  return {
+    tmdbId,
+    mediaType,
+    imdbId,
+    ...(mediaType === 'tv' && Number.isFinite(season) && Number.isFinite(episode)
+      ? { season, episode }
+      : {}),
+  };
+};
+
+const serveStreamflixForContent = async (content, wantedId, res, room) => {
+  if (room) touch(room);
+  const extra = room?.playbackOnly ? { session: room.code } : {};
   try {
-    const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
-    const wantedId = reqUrl.searchParams.get('source');
-    const listed = await listStreamflixSources(room.content);
+    const listed = await listStreamflixSources(content);
     if (wantedId) {
       const stub = listed.find((s) => s.id === wantedId);
       if (!stub) {
@@ -882,22 +1284,60 @@ const serveStreamflix = async (code, req, res) => {
         res.end(JSON.stringify({ ok: false }));
         return;
       }
-      seedSourceHosts(room, resolved);
-      streamflixLog('http: source', room.code, resolved.name, shortStreamflixUrl(resolved.url));
+      if (room) seedSourceHosts(room, resolved);
+      streamflixLog(
+        'http: source',
+        room?.code || 'solo',
+        resolved.name,
+        shortStreamflixUrl(resolved.url),
+      );
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ ok: true, source: publicSource(resolved) }));
+      res.end(JSON.stringify({ ok: true, source: publicSource(resolved), ...extra }));
       return;
     }
     const sources = listed.map(publicSource);
-    for (const source of sources) seedSourceHosts(room, source);
-    streamflixLog('http: 200', room.code, sources.length, 'sources');
+    if (room) {
+      for (const source of sources) seedSourceHosts(room, source);
+    }
+    streamflixLog('http: 200', room?.code || 'solo', sources.length, 'sources');
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: true, sources }));
+    res.end(JSON.stringify({ ok: true, sources, ...extra }));
   } catch (err) {
     streamflixLog('http: 502', err instanceof Error ? err.message : err);
     res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: false }));
   }
+};
+
+const serveStreamflixByQuery = async (req, res) => {
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+  const content = contentFromQuery(reqUrl);
+  if (!content) {
+    streamflixLog('http: no tmdb query');
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  const session = createPlaybackSession(content);
+  await serveStreamflixForContent(content, reqUrl.searchParams.get('source'), res, session);
+};
+
+const serveStreamflix = async (code, req, res) => {
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room?.content?.tmdbId) {
+    streamflixLog('http: no room/tmdb', code);
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false }));
+    return;
+  }
+  touch(room);
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+  await serveStreamflixForContent(
+    room.content,
+    reqUrl.searchParams.get('source'),
+    res,
+    room,
+  );
 };
 
 const videasyCandidates = (content) => {
@@ -952,6 +1392,7 @@ const serveVideasy = async (code, res) => {
 
 const serveSubtitle = async (code, req, res) => {
   const room = rooms.get(String(code || '').toUpperCase());
+  if (room) touch(room);
   const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
   const requested = reqUrl.searchParams.get('u');
   const url = requested || room?.subtitles?.url;
@@ -1034,14 +1475,164 @@ const serveSubtitle = async (code, req, res) => {
   }
 };
 
+const isAllowedTmdbPath = (pathname) => {
+  if (
+    pathname === '/trending/movie/week' ||
+    pathname === '/trending/tv/week' ||
+    pathname === '/discover/movie' ||
+    pathname === '/search/multi' ||
+    pathname === '/genre/movie/list'
+  ) {
+    return true;
+  }
+  return (
+    /^\/movie\/\d+$/.test(pathname) ||
+    /^\/movie\/\d+\/(videos|credits|similar|images|external_ids|release_dates)$/.test(
+      pathname,
+    ) ||
+    /^\/tv\/\d+$/.test(pathname) ||
+    /^\/tv\/\d+\/(videos|credits|similar|images|external_ids|content_ratings)$/.test(
+      pathname,
+    ) ||
+    /^\/tv\/\d+\/season\/\d+$/.test(pathname)
+  );
+};
+
+const serveTmdb = async (req, res) => {
+  if (req.method !== 'GET') {
+    res.writeHead(405, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ status_message: 'Method not allowed' }));
+    return;
+  }
+  if (!TMDB_API_KEY) {
+    res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ status_message: 'TMDB_API_KEY is not configured' }));
+    return;
+  }
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+  const tmdbPath = reqUrl.pathname.replace(/^\/tmdb/, '') || '/';
+  if (!isAllowedTmdbPath(tmdbPath)) {
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ status_message: 'Not found' }));
+    return;
+  }
+  const upstream = new URL(`${TMDB_BASE}${tmdbPath}`);
+  for (const [key, value] of reqUrl.searchParams.entries()) {
+    if (key === 'api_key') continue;
+    upstream.searchParams.set(key, value);
+  }
+  upstream.searchParams.set('api_key', TMDB_API_KEY);
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TMDB_TIMEOUT_MS);
+    const upstreamRes = await fetch(upstream, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    clearTimeout(timer);
+    const body = Buffer.from(await upstreamRes.arrayBuffer());
+    res.writeHead(upstreamRes.status, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'public, max-age=60',
+    });
+    res.end(body);
+  } catch {
+    res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ status_message: 'TMDB request failed' }));
+  }
+};
+
+/** @type {{ at: number, payload: object } | null} */
+let appReleaseCache = null;
+
+const findApkAsset = (assets) => {
+  const list = Array.isArray(assets) ? assets : [];
+  const preferred = list.find(
+    (a) =>
+      typeof a?.name === 'string' &&
+      a.name.endsWith('.apk') &&
+      (a.name.includes('release') ||
+        a.name.includes('universal') ||
+        !a.name.includes('debug')),
+  );
+  return preferred ?? list.find((a) => typeof a?.name === 'string' && a.name.endsWith('.apk')) ?? null;
+};
+
+const serveApp = async (_req, res) => {
+  const fallback = {
+    ok: true,
+    version: null,
+    appVersion: APP_VERSION,
+    androidApk: null,
+    releaseUrl: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+  };
+  if (appReleaseCache && Date.now() - appReleaseCache.at < APP_RELEASE_CACHE_MS) {
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'public, max-age=60',
+    });
+    res.end(JSON.stringify({ ...appReleaseCache.payload, appVersion: APP_VERSION }));
+    return;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const upstream = await fetch(
+      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+      {
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'Flick-Party',
+        },
+      },
+    );
+    clearTimeout(timer);
+    if (!upstream.ok) {
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'public, max-age=60',
+      });
+      res.end(JSON.stringify(fallback));
+      return;
+    }
+    const data = await upstream.json();
+    const apk = findApkAsset(data.assets);
+    const payload = {
+      ok: true,
+      version: String(data.tag_name || '').replace(/^v/, '') || null,
+      appVersion: APP_VERSION,
+      androidApk: apk?.browser_download_url || null,
+      releaseUrl: data.html_url || fallback.releaseUrl,
+    };
+    appReleaseCache = { at: Date.now(), payload };
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'public, max-age=60',
+    });
+    res.end(JSON.stringify(payload));
+  } catch {
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'public, max-age=60',
+    });
+    res.end(JSON.stringify(fallback));
+  }
+};
+
 const serveStatic = (req, res) => {
   const pathOnly = String(req.url || '/').split('?')[0];
   if (pathOnly === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, rooms: rooms.size }));
+    res.end(JSON.stringify({ ok: true, rooms: rooms.size, version: APP_VERSION }));
     return;
   }
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname.startsWith('/tmdb/') || url.pathname === '/tmdb') {
+    void serveTmdb(req, res);
+    return;
+  }
 
   if (url.pathname === '/rooms' && req.method === 'GET') {
     res.writeHead(200, {
@@ -1052,9 +1643,46 @@ const serveStatic = (req, res) => {
     return;
   }
 
+  if ((url.pathname === '/app' || url.pathname === '/app/') && req.method === 'GET') {
+    void serveApp(req, res);
+    return;
+  }
+
   const mediaMatch = url.pathname.match(/^\/media\/([A-Za-z0-9]+)\/?$/);
   if (mediaMatch && (req.method === 'GET' || req.method === 'HEAD')) {
     void serveMedia(mediaMatch[1], req, res);
+    return;
+  }
+
+  if ((url.pathname === '/extract' || url.pathname === '/extract/') && (req.method === 'GET' || req.method === 'POST')) {
+    void serveExtract(req, res);
+    return;
+  }
+
+  if ((url.pathname === '/play' || url.pathname === '/play/') && req.method === 'POST') {
+    void servePlayCreate(req, res);
+    return;
+  }
+
+  const playSourceMatch = url.pathname.match(/^\/play\/([A-Za-z0-9]+)\/source\/?$/);
+  if (playSourceMatch && req.method === 'POST') {
+    void servePlaySource(playSourceMatch[1], req, res);
+    return;
+  }
+
+  const playSubtitleMatch = url.pathname.match(/^\/play\/([A-Za-z0-9]+)\/subtitle\/?$/);
+  if (playSubtitleMatch && req.method === 'POST') {
+    void servePlaySubtitle(playSubtitleMatch[1], req, res);
+    return;
+  }
+
+  if ((url.pathname === '/wyzie' || url.pathname === '/wyzie/') && req.method === 'GET') {
+    void serveWyzieSearch(req, res);
+    return;
+  }
+
+  if ((url.pathname === '/streamflix' || url.pathname === '/streamflix/') && req.method === 'GET') {
+    void serveStreamflixByQuery(req, res);
     return;
   }
 
@@ -1076,10 +1704,16 @@ const serveStatic = (req, res) => {
     return;
   }
 
+  const spaPath = url.pathname.replace(/\/+$/, '') || '/';
   const isPartyPage =
-    url.pathname === '/' ||
-    url.pathname === '/index.html' ||
-    /^\/p\/[A-Za-z0-9]+\/?$/.test(url.pathname);
+    spaPath === '/' ||
+    spaPath === '/index.html' ||
+    spaPath === '/search' ||
+    spaPath === '/join' ||
+    /^\/title\/(movie|tv)\/\d+$/.test(spaPath) ||
+    /^\/watch\/movie\/\d+$/.test(spaPath) ||
+    /^\/watch\/tv\/\d+\/\d+\/\d+$/.test(spaPath) ||
+    /^\/p\/[A-Za-z0-9]+$/.test(spaPath);
 
   const filePath = isPartyPage
     ? path.join(PUBLIC_DIR, 'index.html')

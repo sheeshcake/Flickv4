@@ -1,4 +1,4 @@
-import { ArrowLeft, Eye, EyeOff, Maximize, MessageCircle, Mic, MicOff, Minimize, Pause, Play, RotateCcw, RotateCw, Settings, SmilePlus, Video, VideoOff } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Maximize, MessageCircle, Mic, MicOff, Minimize, Pause, Play, RotateCcw, RotateCw, Settings, Users, Video, VideoOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatTime, PARTY_REACTIONS } from '@/lib/party';
 import { cn } from '@/lib/utils';
@@ -12,7 +12,7 @@ interface PlayerOverlayProps {
   currentTime: number;
   duration: number;
   fullscreen: boolean;
-  partyCode: string;
+  partyCode?: string;
   onToggleOverlay: () => void;
   onInteract: () => void;
   onBack: () => void;
@@ -20,11 +20,10 @@ interface PlayerOverlayProps {
   onSeekBy: (seconds: number) => void;
   onScrubEnd: (fraction: number) => void;
   onOpenMembers: () => void;
+  onOpenParty?: () => void;
   onOpenChat: () => void;
   onOpenSettings: () => void;
-  onToggleReactions: () => void;
-  reactionsOpen: boolean;
-  onSelectReaction: (emoji: string) => void;
+  onSelectReaction?: (emoji: string) => void;
   onToggleFullscreen: () => void;
   inCall: boolean;
   muted: boolean;
@@ -57,10 +56,9 @@ export const PlayerOverlay = ({
   onSeekBy,
   onScrubEnd,
   onOpenMembers,
+  onOpenParty,
   onOpenChat,
   onOpenSettings,
-  onToggleReactions,
-  reactionsOpen,
   onSelectReaction,
   onToggleFullscreen,
   inCall,
@@ -110,31 +108,49 @@ export const PlayerOverlay = ({
           ) : null}
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <Button
-            type="button"
-            size="chip"
-            className="h-11 min-w-11 px-3"
-            onClick={() => {
-              onInteract();
-              onOpenMembers();
-            }}
-          >
-            {partyCode}
-          </Button>
-          <Button
-            type="button"
-            variant={inCall ? 'default' : 'secondary'}
-            size="icon"
-            className="size-11"
-            onClick={() => {
-              onInteract();
-              onToggleCall();
-            }}
-            aria-label={inCall ? 'Leave camera' : 'Join camera'}
-          >
-            {inCall ? <VideoOff className="size-5" /> : <Video className="size-5" />}
-          </Button>
-          {inCall ? (
+          {partyCode ? (
+            <Button
+              type="button"
+              size="chip"
+              className="h-11 min-w-11 px-3"
+              onClick={() => {
+                onInteract();
+                onOpenMembers();
+              }}
+            >
+              {partyCode}
+            </Button>
+          ) : onOpenParty ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              className="size-11"
+              onClick={() => {
+                onInteract();
+                onOpenParty();
+              }}
+              aria-label="Watch party"
+            >
+              <Users className="size-5" />
+            </Button>
+          ) : null}
+          {partyCode ? (
+            <Button
+              type="button"
+              variant={inCall ? 'default' : 'secondary'}
+              size="icon"
+              className="size-11"
+              onClick={() => {
+                onInteract();
+                onToggleCall();
+              }}
+              aria-label={inCall ? 'Leave camera' : 'Join camera'}
+            >
+              {inCall ? <VideoOff className="size-5" /> : <Video className="size-5" />}
+            </Button>
+          ) : null}
+          {partyCode && inCall ? (
             <>
               <Button
                 type="button"
@@ -177,19 +193,21 @@ export const PlayerOverlay = ({
               </Button>
             </>
           ) : null}
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon"
-            className="size-11"
-            onClick={() => {
-              onInteract();
-              onOpenChat();
-            }}
-            aria-label="Chat"
-          >
-            <MessageCircle className="size-5" />
-          </Button>
+          {partyCode ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              className="size-11"
+              onClick={() => {
+                onInteract();
+                onOpenChat();
+              }}
+              aria-label="Chat"
+            >
+              <MessageCircle className="size-5" />
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="secondary"
@@ -203,55 +221,8 @@ export const PlayerOverlay = ({
           >
             <Settings className="size-5" />
           </Button>
-          <Button
-            type="button"
-            variant={reactionsOpen ? 'default' : 'secondary'}
-            size="icon"
-            className="size-11"
-            onClick={() => {
-              onInteract();
-              onToggleReactions();
-            }}
-            aria-label="Reactions"
-            aria-expanded={reactionsOpen}
-          >
-            <SmilePlus className="size-5" />
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon"
-            className="size-11"
-            onClick={() => {
-              onInteract();
-              onToggleFullscreen();
-            }}
-            aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          >
-            {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
-          </Button>
         </div>
       </div>
-
-      {reactionsOpen ? (
-        <div className="absolute top-20 right-3 z-20 rounded-xl border border-border bg-card/95 p-2 sm:right-6">
-          <div className="grid grid-cols-4 gap-1">
-            {PARTY_REACTIONS.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className="flex size-11 items-center justify-center rounded-full text-2xl hover:bg-primary/20"
-                onClick={() => {
-                  onInteract();
-                  onSelectReaction(emoji);
-                }}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
 
       <div className="relative z-10 flex flex-1 items-center justify-center gap-8 sm:gap-10">
         <Button
@@ -296,26 +267,62 @@ export const PlayerOverlay = ({
       </div>
 
       <div className="relative z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8 sm:pb-4">
-        <button
-          type="button"
-          className="flex h-8 w-full items-center"
-          aria-label="Seek"
-          onPointerUp={(e) => {
-            const frac = seekFraction(e.currentTarget, e.clientX);
-            onInteract();
-            onScrubEnd(frac);
-          }}
-        >
-          <span className="block h-1.5 w-full rounded-full bg-white/20">
-            <span
-              className="block h-full rounded-full bg-primary"
-              style={{ width: `${progress * 100}%` }}
-            />
-          </span>
-        </button>
-        <div className="mt-0.5 flex justify-between text-xs">
-          <span>{formatTime(currentTime)}</span>
-          <span className="text-muted-foreground">{formatTime(duration)}</span>
+        {onSelectReaction ? (
+          <div className="mb-2 flex justify-center">
+            <div className="flex items-center gap-0.5 rounded-full border border-border bg-card/95 px-2 py-1">
+              {PARTY_REACTIONS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  className="flex size-9 items-center justify-center rounded-full text-lg hover:bg-primary/20"
+                  onClick={() => {
+                    onInteract();
+                    onSelectReaction(emoji);
+                  }}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <button
+              type="button"
+              className="flex h-11 w-full items-center"
+              aria-label="Seek"
+              onPointerUp={(e) => {
+                const frac = seekFraction(e.currentTarget, e.clientX);
+                onInteract();
+                onScrubEnd(frac);
+              }}
+            >
+              <span className="block h-1.5 w-full rounded-full bg-white/20">
+                <span
+                  className="block h-full rounded-full bg-primary"
+                  style={{ width: `${progress * 100}%` }}
+                />
+              </span>
+            </button>
+            <div className="mt-0.5 flex justify-between text-xs">
+              <span>{formatTime(currentTime)}</span>
+              <span className="text-muted-foreground">{formatTime(duration)}</span>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="size-11 shrink-0"
+            onClick={() => {
+              onInteract();
+              onToggleFullscreen();
+            }}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          >
+            {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
+          </Button>
         </div>
       </div>
     </div>
