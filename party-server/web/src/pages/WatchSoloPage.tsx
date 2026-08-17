@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useMatch, useParams } from 'react-router-dom';
 import { WatchPlayer } from '@/components/WatchPlayer';
 import { Button } from '@/components/ui/button';
 import { partyContentFromTitle, type PartyContent } from '@/lib/party';
 import { tmdb } from '@/lib/tmdb';
 
 export const WatchSoloPage = () => {
-  const { type, id, season, episode } = useParams();
-  const mediaType = type === 'tv' ? 'tv' : 'movie';
+  const { id, season, episode } = useParams();
+  const isTv = Boolean(useMatch('/watch/tv/:id/:season/:episode'));
+  const mediaType = isTv ? 'tv' : 'movie';
   const tmdbId = Number(id);
   const seasonNum = Number(season);
   const episodeNum = Number(episode);

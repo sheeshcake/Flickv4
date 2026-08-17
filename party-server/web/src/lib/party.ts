@@ -159,10 +159,15 @@ export type ClientMessage =
   | { type: 'rtc-signal'; to: string; payload: PartyRtcSignalPayload }
   | { type: 'leave' };
 
-export const watchPath = (content: PartyContent): string =>
-  content.mediaType === 'tv' && content.season != null && content.episode != null
-    ? `/watch/tv/${content.tmdbId}/${content.season}/${content.episode}`
-    : `/watch/movie/${content.tmdbId}`;
+export const watchPath = (content: PartyContent): string => {
+  if (content.mediaType === 'tv') {
+    if (content.season == null || content.episode == null) {
+      return `/title/tv/${content.tmdbId}`;
+    }
+    return `/watch/tv/${content.tmdbId}/${content.season}/${content.episode}`;
+  }
+  return `/watch/movie/${content.tmdbId}`;
+};
 
 export const streamflixQueryUrl = (
   content: PartyContent,

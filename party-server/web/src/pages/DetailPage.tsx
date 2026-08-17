@@ -114,6 +114,8 @@ export const DetailPage = () => {
   const year = item ? getReleaseDate(item)?.slice(0, 4) : undefined;
   const backdrop = tmdbImage(details?.backdrop_path, 'w1280');
   const firstEpisode = episodes[0];
+  const tvReady =
+    mediaType !== 'tv' || (selectedSeason != null && Boolean(firstEpisode));
 
   const contentFor = (season?: number, episode?: number) => {
     if (!item) return null;
@@ -121,6 +123,7 @@ export const DetailPage = () => {
   };
 
   const playTitle = async (season?: number, episode?: number) => {
+    if (mediaType === 'tv' && (season == null || episode == null)) return;
     const content = contentFor(season, episode);
     if (!content || busy) return;
     setBusy(true);
@@ -154,7 +157,8 @@ export const DetailPage = () => {
   };
 
   const lobbyContent = useMemo(() => {
-    if (mediaType === 'tv' && selectedSeason != null && firstEpisode) {
+    if (mediaType === 'tv') {
+      if (selectedSeason == null || !firstEpisode) return null;
       return contentFor(selectedSeason, firstEpisode.episode_number);
     }
     return contentFor();
@@ -204,7 +208,7 @@ export const DetailPage = () => {
               size="lg"
               className="bg-foreground text-background hover:bg-foreground/90"
               onClick={playDefault}
-              disabled={busy}
+              disabled={busy || !tvReady}
             >
               <Play className="size-5 fill-current" />
               {busy ? 'Starting…' : 'Play'}
@@ -213,12 +217,13 @@ export const DetailPage = () => {
               size="lg"
               variant="outline"
               onClick={() => {
-                if (role === 'host' && room && lobbyContent) {
+                if (!tvReady || !lobbyContent) return;
+                if (role === 'host' && room) {
                   send({ type: 'content', content: lobbyContent });
                 }
                 setLobbyOpen(true);
               }}
-              disabled={busy}
+              disabled={busy || !tvReady}
             >
               <Users className="size-5" />
               Watch party
