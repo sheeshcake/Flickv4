@@ -36,7 +36,7 @@ export const SAMPLE_VIDEO_URL =
 
 // GitHub repository the in-app updater polls for the latest release. Override
 // via `.env` if you fork the project into your own repo.
-// Watch-party WebSocket, e.g. wss://flick-party.up.railway.app
+// Watch-party WebSocket, e.g. wss://flickv4.nibbleph.dev
 export const WATCH_PARTY_CONFIG = {
   url: process.env.EXPO_PUBLIC_WATCH_PARTY_URL?.trim() || '',
   enabled: Boolean(process.env.EXPO_PUBLIC_WATCH_PARTY_URL?.trim()),

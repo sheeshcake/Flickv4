@@ -22,6 +22,7 @@ export const PARTY_SCHEME = 'flick';
 
 export const PARTY_REACTIONS = [
   '👍',
+  '👎',
   '❤️',
   '😂',
   '😮',
