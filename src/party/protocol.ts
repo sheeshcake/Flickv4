@@ -114,6 +114,18 @@ export interface PartyRoom {
   rtcMemberIds?: string[];
 }
 
+export interface PublicRoomSummary {
+  code: string;
+  title: string;
+  posterPath: string | null;
+  mediaType: 'movie' | 'tv';
+  season: number | null;
+  episode: number | null;
+  memberCount: number;
+  locked: boolean;
+  paused: boolean;
+}
+
 export type ClientMessage =
   | {
       type: 'create';
