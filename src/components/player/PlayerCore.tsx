@@ -194,7 +194,6 @@ export const PlayerCore = ({
   } = useWatchParty();
   const [partyOpen, setPartyOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [reactionsOpen, setReactionsOpen] = useState(false);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [chatToast, setChatToast] = useState<PartyChatLine | null>(null);
   const prevChatLen = useRef(0);
@@ -578,13 +577,7 @@ export const PlayerCore = ({
     ? null
     : cueAt(currentTime - subtitleOffsetSeconds);
 
-  const { visible, show, toggle } = useControlsVisibility(
-    isPlaying && !reactionsOpen,
-  );
-
-  useEffect(() => {
-    if (!visible) setReactionsOpen(false);
-  }, [visible]);
+  const { visible, show, toggle } = useControlsVisibility(isPlaying);
 
   // Seconds left in the episode; `Infinity` until the player reports a real
   // duration so the Up Next card never flashes on load.
@@ -1031,8 +1024,9 @@ export const PlayerCore = ({
       if (!isPartyReaction(emoji)) return;
       sendParty({ type: 'reaction', emoji });
       enqueueReaction(partyDisplayName, emoji);
+      show();
     },
-    [enqueueReaction, partyDisplayName, sendParty],
+    [enqueueReaction, partyDisplayName, sendParty, show],
   );
 
   useEffect(() => {
@@ -1042,7 +1036,6 @@ export const PlayerCore = ({
   useEffect(() => {
     if (!partyRoom) {
       setReactions([]);
-      setReactionsOpen(false);
       return;
     }
     return subscribeParty((msg) => {
@@ -1065,7 +1058,6 @@ export const PlayerCore = ({
     episodesOpen ||
     partyOpen ||
     chatOpen ||
-    reactionsOpen ||
     partyIntroOpen ||
     partyLobbyOpen ||
     showUpNext ||
@@ -1221,14 +1213,7 @@ export const PlayerCore = ({
             currentTime={displayTime}
             duration={duration}
             buffered={buffered}
-            onOverlayPress={() => {
-              if (reactionsOpen) {
-                setReactionsOpen(false);
-                show();
-                return;
-              }
-              toggle();
-            }}
+            onOverlayPress={toggle}
             onBack={onBack}
             onTogglePlay={togglePlay}
             onSeekBy={seekBy}
@@ -1279,16 +1264,7 @@ export const PlayerCore = ({
                   }
                 : undefined
             }
-            onOpenReactions={
-              partyRoom
-                ? () => {
-                    setReactionsOpen((open) => !open);
-                    show();
-                  }
-                : undefined
-            }
-            reactionsOpen={reactionsOpen}
-            onSelectReaction={sendReaction}
+            onSelectReaction={partyRoom ? sendReaction : undefined}
           />
         ) : (
           // TV: keep a focusable owner mounted while controls are hidden.
@@ -1392,7 +1368,6 @@ export const PlayerCore = ({
             onLeave={() => {
               setPartyOpen(false);
               setChatOpen(false);
-              setReactionsOpen(false);
               setReactions([]);
               if (onLeaveParty) {
                 onLeaveParty();

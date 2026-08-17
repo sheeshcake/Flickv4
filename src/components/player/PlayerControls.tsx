@@ -10,7 +10,6 @@ import {
   RotateCw,
   MessageCircle,
   Settings2,
-  SmilePlus,
   Sun,
   Users,
   Volume2,
@@ -58,8 +57,6 @@ interface PlayerControlsProps {
   partyLocked?: boolean;
   onOpenParty?: () => void;
   onOpenChat?: () => void;
-  onOpenReactions?: () => void;
-  reactionsOpen?: boolean;
   onSelectReaction?: (emoji: string) => void;
   /** Device media volume 0..1 (system volume when available). */
   volume: number;
@@ -118,8 +115,6 @@ export const PlayerControls = ({
   partyLocked,
   onOpenParty,
   onOpenChat,
-  onOpenReactions,
-  reactionsOpen,
   onSelectReaction,
 }: PlayerControlsProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
@@ -187,21 +182,6 @@ export const PlayerControls = ({
             <Icon as={MessageCircle} size="lg" className="text-foreground" />
           </Focusable>
         )}
-        {onOpenReactions && (
-          <Focusable
-            onPress={onOpenReactions}
-            className={`rounded-full p-2 ${reactionsOpen ? 'bg-primary' : 'bg-background/40'}`}
-            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
-          >
-            <Icon
-              as={SmilePlus}
-              size="lg"
-              className={
-                reactionsOpen ? 'text-primary-foreground' : 'text-foreground'
-              }
-            />
-          </Focusable>
-        )}
         {onOpenEpisodes && (
           <Focusable
             onPress={onOpenEpisodes}
@@ -265,13 +245,12 @@ export const PlayerControls = ({
         />
       </Box>
 
-      {reactionsOpen && onSelectReaction ? (
-        <Box className="absolute right-8 top-20 z-30" pointerEvents="box-none">
-          <PlayerReactionPicker onSelect={onSelectReaction} />
-        </Box>
-      ) : null}
-
-      <VStack className="px-10 pb-1">
+      <VStack space="sm" className="px-10 pb-1">
+        {onSelectReaction ? (
+          <Box className="items-center">
+            <PlayerReactionPicker onSelect={onSelectReaction} />
+          </Box>
+        ) : null}
         <ProgressBar
           progress={progress}
           buffered={buffered}

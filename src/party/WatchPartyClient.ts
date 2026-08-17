@@ -3,6 +3,7 @@ import {
   type PartyClientKind,
   type PartyClock,
   type PartyContent,
+  type PublicRoomSummary,
   type ServerMessage,
 } from '@/src/party/protocol';
 
@@ -178,5 +179,18 @@ export const wsUrlToHttpOrigin = (wsUrl: string): string => {
     return u.toString().replace(/\/$/, '');
   } catch {
     return wsUrl.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
+  }
+};
+
+export const fetchPublicRooms = async (
+  wsUrl: string,
+): Promise<PublicRoomSummary[]> => {
+  try {
+    const res = await fetch(`${wsUrlToHttpOrigin(wsUrl)}/rooms`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { rooms?: PublicRoomSummary[] };
+    return Array.isArray(data.rooms) ? data.rooms : [];
+  } catch {
+    return [];
   }
 };

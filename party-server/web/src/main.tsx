@@ -1,10 +1,16 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { WatchPlayer } from '@/components/WatchPlayer';
+import { BrowserRouter } from 'react-router-dom';
+import { App } from '@/App';
+import { SubtitleSettingsProvider } from '@/lib/subtitleSettings';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <WatchPlayer />
+    <BrowserRouter>
+      <SubtitleSettingsProvider>
+        <App />
+      </SubtitleSettingsProvider>
+    </BrowserRouter>
   </StrictMode>,
 );

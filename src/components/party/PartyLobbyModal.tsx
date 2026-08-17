@@ -139,7 +139,7 @@ export const PartyLobbyModal = ({
             <ScrollView className="shrink" showsVerticalScrollIndicator={false}>
               {!enabled ? (
                 <Text size="sm" className="text-muted-foreground">
-                  Set EXPO_PUBLIC_WATCH_PARTY_URL to your Railway room server to
+                  Set EXPO_PUBLIC_WATCH_PARTY_URL to your watch-party server to
                   enable watch party.
                 </Text>
               ) : !room ? (

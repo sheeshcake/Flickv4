@@ -35,8 +35,14 @@ export const parseSubtitleText = (raw: string): Cue[] => {
 };
 
 export const cueAt = (cues: Cue[], t: number): Cue | null => {
-  for (const c of cues) {
-    if (t >= c.start && t < c.end) return c;
+  let lo = 0;
+  let hi = cues.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const cue = cues[mid];
+    if (t < cue.start) hi = mid - 1;
+    else if (t >= cue.end) lo = mid + 1;
+    else return cue;
   }
   return null;
 };

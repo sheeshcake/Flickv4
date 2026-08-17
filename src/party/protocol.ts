@@ -22,6 +22,7 @@ export const PARTY_SCHEME = 'flick';
 
 export const PARTY_REACTIONS = [
   '👍',
+  '👎',
   '❤️',
   '😂',
   '😮',
@@ -111,6 +112,18 @@ export interface PartyRoom {
   browsing?: boolean;
   /** Members who have opted into the in-party camera grid. */
   rtcMemberIds?: string[];
+}
+
+export interface PublicRoomSummary {
+  code: string;
+  title: string;
+  posterPath: string | null;
+  mediaType: 'movie' | 'tv';
+  season: number | null;
+  episode: number | null;
+  memberCount: number;
+  locked: boolean;
+  paused: boolean;
 }
 
 export type ClientMessage =

@@ -87,7 +87,7 @@ export const SettingsScreen = () => {
           <MenuRow
             icon={Users}
             label="Join watch party"
-            value="Enter a room code"
+            value="Live rooms or a code"
             onPress={() => navigation.navigate('JoinParty', {})}
           />
           <HStack className="items-center rounded-lg bg-card px-4 py-4">
