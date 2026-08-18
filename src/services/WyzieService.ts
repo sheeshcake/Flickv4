@@ -21,6 +21,13 @@ export class WyzieError extends Error {
   }
 }
 
+/** Browser-like UA so Cloudflare (vdrk) does not 403 RN/okhttp fetches. */
+export const SUBTITLE_FETCH_HEADERS: Record<string, string> = {
+  Accept: 'text/vtt, text/plain, application/x-subrip, application/json, */*',
+  'User-Agent':
+    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36',
+};
+
 interface SearchParams {
   tmdbId: number;
   season?: number;
@@ -69,7 +76,7 @@ class WyzieServiceImpl {
 
     try {
       const response = await fetch(url.toString(), {
-        headers: { Accept: 'application/json' },
+        headers: { ...SUBTITLE_FETCH_HEADERS, Accept: 'application/json' },
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -88,11 +95,16 @@ class WyzieServiceImpl {
   }
 
   async fetchSubtitleText(url: string): Promise<string> {
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: SUBTITLE_FETCH_HEADERS });
     if (!response.ok) {
       throw new WyzieError(`Failed to download subtitle (${response.status})`);
     }
-    return response.text();
+    const text = await response.text();
+    const trimmed = text.replace(/^\uFEFF/, '').trim();
+    if (/^<!DOCTYPE html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
+      throw new WyzieError('Subtitle download returned HTML instead of cues.');
+    }
+    return text;
   }
 }
 

@@ -49,6 +49,7 @@ interface SettingsSheetProps {
   selectedSubtitleId: string | null;
   onSelectSubtitle: (id: string | null) => void;
   subtitlesLoading?: boolean;
+  subtitlesError?: string | null;
   subtitleOffset: number;
   onChangeOffset: (next: number) => void;
 }
@@ -262,6 +263,7 @@ export const SettingsSheet = ({
   selectedSubtitleId,
   onSelectSubtitle,
   subtitlesLoading,
+  subtitlesError,
   subtitleOffset,
   onChangeOffset,
 }: SettingsSheetProps) => {
@@ -370,7 +372,12 @@ export const SettingsSheet = ({
                   onClick={() => onSelectSubtitle(null)}
                 />
                 {subtitlesLoading ? (
-                  <p className="px-3 py-2 text-sm text-muted-foreground">Loading tracks…</p>
+                  <p className="px-3 py-2 text-sm text-muted-foreground">
+                    Loading more tracks…
+                  </p>
+                ) : null}
+                {subtitlesError ? (
+                  <p className="px-3 py-2 text-sm text-muted-foreground">{subtitlesError}</p>
                 ) : null}
                 {subtitles.map((track) => (
                   <OptionButton
@@ -380,7 +387,7 @@ export const SettingsSheet = ({
                     onClick={() => onSelectSubtitle(track.id)}
                   />
                 ))}
-                {!subtitlesLoading && subtitles.length === 0 ? (
+                {!subtitlesLoading && !subtitlesError && subtitles.length === 0 ? (
                   <p className="px-3 py-2 text-sm text-muted-foreground">
                     No subtitles found for this title.
                   </p>

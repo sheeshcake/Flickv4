@@ -12,7 +12,8 @@ import { Text } from '@/components/ui/text';
 import { Focusable } from '@/src/components/Focusable';
 import { UP_NEXT_LEAD_SECONDS } from '@/src/hooks/useNextEpisode';
 import { TMDBService } from '@/src/services/TMDBService';
-import type { Episode } from '@/src/types';
+import type { Episode, MediaItem } from '@/src/types';
+import { getReleaseDate, getTitle } from '@/src/types';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface UpNextOverlayProps {
@@ -142,3 +143,88 @@ export const SeriesEndOverlay = () => (
     </Text>
   </Center>
 );
+
+interface WatchNextOverlayProps {
+  item: MediaItem;
+  onPlay: () => void;
+  onClose: () => void;
+}
+
+/**
+ * Mobile-only tap-to-play card after a movie (or series finale) ends.
+ * No countdown — the user starts the recommended title or dismisses.
+ */
+export const WatchNextOverlay = ({
+  item,
+  onPlay,
+  onClose,
+}: WatchNextOverlayProps) => {
+  const poster = TMDBService.getImageUrl(item.poster_path, 'w185');
+  const year = getReleaseDate(item)?.slice(0, 4);
+
+  return (
+    <Box className="absolute inset-0">
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.85)']}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+
+      <Box className="absolute bottom-10 right-10 w-105 rounded-lg bg-card/95 p-4">
+        <Text size="xs" className="mb-2 text-muted-foreground">
+          Watch next
+        </Text>
+        <HStack space="md">
+          <Box className="h-28 w-20 overflow-hidden rounded-md bg-background">
+            {poster ? (
+              <Image
+                source={{ uri: poster }}
+                alt={getTitle(item)}
+                resizeMode="cover"
+                className="h-full w-full"
+              />
+            ) : (
+              <Center className="h-full w-full">
+                <Icon as={Play} className="text-muted-foreground" />
+              </Center>
+            )}
+          </Box>
+          <VStack className="flex-1 justify-center">
+            {year ? (
+              <Text size="2xs" className="text-muted-foreground">
+                {year}
+              </Text>
+            ) : null}
+            <Heading size="sm" className="text-foreground" numberOfLines={2}>
+              {getTitle(item)}
+            </Heading>
+          </VStack>
+        </HStack>
+
+        <HStack space="sm" className="mt-4 justify-end">
+          <Focusable
+            onPress={onClose}
+            className="flex-row items-center gap-1.5 rounded-md bg-secondary px-4 py-2"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <Icon as={X} size="sm" className="text-secondary-foreground" />
+            <Text size="sm" className="text-secondary-foreground">
+              Close
+            </Text>
+          </Focusable>
+          <Focusable
+            onPress={onPlay}
+            hasTVPreferredFocus
+            className="flex-row items-center gap-1.5 rounded-md bg-primary px-4 py-2"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <Icon as={Play} size="sm" className="text-primary-foreground" />
+            <Text size="sm" className="text-primary-foreground">
+              Play
+            </Text>
+          </Focusable>
+        </HStack>
+      </Box>
+    </Box>
+  );
+};

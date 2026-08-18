@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useMatch, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { WatchPlayer } from '@/components/WatchPlayer';
 import { Button } from '@/components/ui/button';
 import { partyContentFromTitle, type PartyContent } from '@/lib/party';
@@ -7,7 +7,7 @@ import { tmdb } from '@/lib/tmdb';
 
 export const WatchSoloPage = () => {
   const { id, season, episode } = useParams();
-  const isTv = Boolean(useMatch('/watch/tv/:id/:season/:episode'));
+  const isTv = season != null && episode != null;
   const mediaType = isTv ? 'tv' : 'movie';
   const tmdbId = Number(id);
   const seasonNum = Number(season);
@@ -78,7 +78,13 @@ export const WatchSoloPage = () => {
     );
   }
 
-  if (!content) {
+  if (
+    !content ||
+    content.tmdbId !== tmdbId ||
+    content.mediaType !== mediaType ||
+    (mediaType === 'tv' &&
+      (content.season !== seasonNum || content.episode !== episodeNum))
+  ) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background">
         <div className="size-10 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -86,5 +92,10 @@ export const WatchSoloPage = () => {
     );
   }
 
-  return <WatchPlayer content={content} />;
+  return (
+    <WatchPlayer
+      key={`${mediaType}-${tmdbId}-${season ?? ''}-${episode ?? ''}`}
+      content={content}
+    />
+  );
 };

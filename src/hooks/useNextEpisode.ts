@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSeasonEpisodes } from '@/src/hooks/useDetailData';
 import { TMDBService } from '@/src/services/TMDBService';
 import type { Episode, MediaItem, Season, TVShowDetails } from '@/src/types';
+import { getComingSoon } from '@/src/utils/comingSoon';
+
+const isAiredEpisode = (episode: Episode): boolean =>
+  !getComingSoon({ releaseDate: episode.air_date }).comingSoon;
 
 /**
  * How long before an episode's natural end the "Up Next" card should
@@ -124,6 +128,10 @@ export const useNextEpisode = (
       (e) => e.episode_number === episode! + 1,
     );
     if (sameSeasonNext) {
+      // Exists in TMDB but not aired yet — treat as nothing playable next.
+      if (!isAiredEpisode(sameSeasonNext)) {
+        return { nextEpisode: null, loading: false };
+      }
       return {
         nextEpisode: { season: season!, episode: sameSeasonNext },
         loading: false,
@@ -145,10 +153,12 @@ export const useNextEpisode = (
       nextSeasonEpisodes.find((e) => e.episode_number === 1) ??
       nextSeasonEpisodes[0];
 
+    if (!firstOfNext || !isAiredEpisode(firstOfNext)) {
+      return { nextEpisode: null, loading: false };
+    }
+
     return {
-      nextEpisode: firstOfNext
-        ? { season: nextSeasonNumber, episode: firstOfNext }
-        : null,
+      nextEpisode: { season: nextSeasonNumber, episode: firstOfNext },
       loading: false,
     };
   }, [
