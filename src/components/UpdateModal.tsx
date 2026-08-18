@@ -10,6 +10,7 @@ import { Text } from '@/components/ui/text';
 import { Icon } from '@/components/ui/icon';
 import { Spinner } from '@/components/ui/spinner';
 import { Pressable } from '@/components/ui/pressable';
+import { ChangelogSection } from '@/src/components/ChangelogMarkdown';
 import { Focusable } from '@/src/components/Focusable';
 import {
   updateService,
@@ -200,48 +201,37 @@ export const UpdateModal = ({
               )}
 
               {state === 'up-to-date' && (
-                <VStack space="md" className="items-center py-8">
-                  <Text size="3xl" className="text-primary">
-                    ✓
-                  </Text>
-                  <Heading size="md" className="text-foreground">
-                    You&apos;re up to date
-                  </Heading>
-                  <Text size="sm" className="text-center text-muted-foreground">
-                    Version {info?.currentVersion} is the latest.
-                  </Text>
+                <VStack space="md">
+                  <VStack space="sm" className="items-center py-4">
+                    <Text size="3xl" className="text-primary">
+                      ✓
+                    </Text>
+                    <Heading size="md" className="text-foreground">
+                      You&apos;re up to date
+                    </Heading>
+                    <Text
+                      size="sm"
+                      className="text-center text-muted-foreground"
+                    >
+                      Version {info?.currentVersion ?? info?.latestVersion} is
+                      the latest.
+                    </Text>
+                    {!!info?.releaseDate && (
+                      <Text size="xs" className="text-muted-foreground">
+                        Released: {updateService.formatDate(info.releaseDate)}
+                      </Text>
+                    )}
+                  </VStack>
+                  <ChangelogSection
+                    title="Changelog"
+                    notes={info?.releaseNotes || 'No release notes available.'}
+                  />
                 </VStack>
               )}
 
               {state === 'available' && info && <VersionSummary info={info} />}
 
-              {state === 'downloading' && info && (
-                <VStack space="md">
-                  <VersionSummary info={info} />
-                  <VStack space="sm" className="mt-2">
-                    <HStack className="items-center justify-between">
-                      <Text size="sm" className="text-foreground">
-                        Downloading…
-                      </Text>
-                      <Text size="sm" className="text-muted-foreground">
-                        {Math.round(downloadProgress)}%
-                      </Text>
-                    </HStack>
-                    <Box className="h-2 w-full overflow-hidden rounded-full bg-background/60">
-                      <Box
-                        className="h-2 rounded-full bg-primary"
-                        style={{ width: `${Math.min(100, Math.max(0, downloadProgress))}%` }}
-                      />
-                    </Box>
-                    <Text size="xs" className="text-muted-foreground">
-                      {updateService.formatFileSize(downloadedBytes)}
-                      {totalBytes > 0
-                        ? ` / ${updateService.formatFileSize(totalBytes)}`
-                        : ''}
-                    </Text>
-                  </VStack>
-                </VStack>
-              )}
+              {state === 'downloading' && info && <VersionSummary info={info} />}
 
               {state === 'installing' && (
                 <VStack space="md" className="items-center py-8">
@@ -320,13 +310,39 @@ export const UpdateModal = ({
             )}
 
             {state === 'downloading' && (
-              <Focusable
-                onPress={cancelDownloadFlow}
-                className="mt-4 items-center rounded-md border border-border px-4 py-3"
-                focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
-              >
-                <Text className="text-foreground">Cancel</Text>
-              </Focusable>
+              <VStack space="sm" className="mt-4">
+                <VStack space="sm">
+                  <HStack className="items-center justify-between">
+                    <Text size="sm" className="text-foreground">
+                      Downloading…
+                    </Text>
+                    <Text size="sm" className="text-muted-foreground">
+                      {Math.round(downloadProgress)}%
+                    </Text>
+                  </HStack>
+                  <Box className="h-2 w-full overflow-hidden rounded-full bg-background/60">
+                    <Box
+                      className="h-2 rounded-full bg-primary"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, downloadProgress))}%`,
+                      }}
+                    />
+                  </Box>
+                  <Text size="xs" className="text-muted-foreground">
+                    {updateService.formatFileSize(downloadedBytes)}
+                    {totalBytes > 0
+                      ? ` / ${updateService.formatFileSize(totalBytes)}`
+                      : ''}
+                  </Text>
+                </VStack>
+                <Focusable
+                  onPress={cancelDownloadFlow}
+                  className="items-center rounded-md border border-border px-4 py-3"
+                  focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                >
+                  <Text className="text-foreground">Cancel</Text>
+                </Focusable>
+              </VStack>
             )}
 
             {state === 'downloaded' && (
@@ -406,11 +422,6 @@ const VersionSummary = ({ info }: { info: UpdateInfo }) => (
       </Text>
     )}
 
-    <VStack space="xs" className="rounded-lg bg-background/40 p-4">
-      <Text className="font-semibold text-foreground">What&apos;s new</Text>
-      <Text size="sm" className="text-muted-foreground">
-        {info.releaseNotes}
-      </Text>
-    </VStack>
+    <ChangelogSection notes={info.releaseNotes} />
   </>
 );
