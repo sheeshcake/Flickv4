@@ -23,6 +23,7 @@ export default defineConfig({
       '/extract': 'http://127.0.0.1:8787',
       '/play': 'http://127.0.0.1:8787',
       '/wyzie': 'http://127.0.0.1:8787',
+      '/vdrk': 'http://127.0.0.1:8787',
       '/streamflix': 'http://127.0.0.1:8787',
       '/tmdb': 'http://127.0.0.1:8787',
       '/app': 'http://127.0.0.1:8787',

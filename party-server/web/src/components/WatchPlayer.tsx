@@ -45,6 +45,7 @@ import {
 } from '@/lib/streamflix';
 import { languageFromLabel } from '@/lib/languages';
 import { useSubtitleSettings } from '@/lib/subtitleSettings';
+import { searchVdrkSubtitles } from '@/lib/vdrk';
 import { searchWyzieSubtitles, type WyzieSubtitle } from '@/lib/wyzie';
 import { cueAt, parseSubtitleText, type Cue } from '@/lib/subtitles';
 
@@ -104,7 +105,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
         content: soloContent,
         clock: {
           positionSeconds: 0,
-          paused: true,
+          paused: false,
           updatedAt: Date.now(),
         },
         members: [],
@@ -138,6 +139,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   const [localSubOptions, setLocalSubOptions] = useState<SubtitleOption[]>([]);
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
   const [wyzieTracks, setWyzieTracks] = useState<WyzieSubtitle[]>([]);
+  const [vdrkTracks, setVdrkTracks] = useState<WyzieSubtitle[]>([]);
   const [wyzieLoading, setWyzieLoading] = useState(false);
   const [wyzieError, setWyzieError] = useState<string | null>(null);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
@@ -167,11 +169,13 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   const seekingRef = useRef(false);
   const streamflixSourcesRef = useRef<StreamflixWebSource[]>([]);
   const wyzieTracksRef = useRef<WyzieSubtitle[]>([]);
+  const vdrkTracksRef = useRef<WyzieSubtitle[]>([]);
   const localSubOptionsRef = useRef<SubtitleOption[]>([]);
   const selectedSubIdRef = useRef<string | null>(null);
   const triedSourceIdsRef = useRef<Set<string>>(new Set());
   const guestPickedSourceRef = useRef(false);
   const guestPickedSubRef = useRef(false);
+  const soloAutoplayDoneRef = useRef(false);
   const activeSourceIdRef = useRef<string | null>(null);
   const bufferingRef = useRef(false);
   const seenMembersRef = useRef<Set<string> | null>(null);
@@ -301,6 +305,36 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     }
   }, []);
 
+  const tryPlayWhenReady = useCallback(async () => {
+    if (modeRef.current !== 'video' || bufferingRef.current) return;
+    if (solo) {
+      if (soloAutoplayDoneRef.current) return;
+      const video = videoRef.current;
+      if (!video) return;
+      if (!video.paused) {
+        soloAutoplayDoneRef.current = true;
+        return;
+      }
+      try {
+        video.muted = true;
+        await video.play();
+        video.muted = false;
+        if (video.muted) setNeedsUnmute(true);
+      } catch {
+        try {
+          video.muted = true;
+          await video.play();
+          setNeedsUnmute(true);
+        } catch {
+          return;
+        }
+      }
+      soloAutoplayDoneRef.current = true;
+      return;
+    }
+    void playFollowingHost();
+  }, [playFollowingHost, solo]);
+
   const applyClock = useCallback(() => {
     if (isHostRef.current) return;
     const video = videoRef.current;
@@ -415,7 +449,10 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           setAudioTracks(tracks);
           setSelectedAudioId(hls.audioTrack);
         });
-        hls.on(Hls.Events.FRAG_BUFFERED, () => reportBuffering(false));
+        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+          reportBuffering(false);
+          void tryPlayWhenReady();
+        });
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (data?.details === 'bufferStalledError') reportBuffering(true);
           if (data?.fatal) onFail();
@@ -446,7 +483,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
         }
       };
     },
-    [applyClock, reportBuffering, showWaiting],
+    [applyClock, reportBuffering, showWaiting, tryPlayWhenReady],
   );
 
   const playIframe = (url: string) => {
@@ -467,6 +504,12 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
         url: t.file,
         language: languageFromLabel(t.label),
       }));
+      const vdrk: SubtitleOption[] = vdrkTracksRef.current.map((t) => ({
+        id: `vdrk:${t.id}`,
+        label: `${t.display}${t.isHearingImpaired ? ' (CC)' : ''}`,
+        url: t.url,
+        language: t.language,
+      }));
       const wyzie: SubtitleOption[] = wyzieTracksRef.current.map((t) => ({
         id: `wyzie:${t.id}`,
         label: `${t.display}${t.isHearingImpaired ? ' (CC)' : ''}`,
@@ -484,7 +527,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
               },
             ]
           : [];
-      const next = [...extractor, ...wyzie, ...host];
+      const next = [...extractor, ...vdrk, ...wyzie, ...host];
       localSubOptionsRef.current = next;
       setLocalSubOptions(next);
     },
@@ -941,10 +984,13 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     webResolvedRef.current = false;
     guestPickedSourceRef.current = false;
     guestPickedSubRef.current = false;
+    soloAutoplayDoneRef.current = false;
     triedSourceIdsRef.current = new Set();
     listedFullRef.current = [];
     wyzieTracksRef.current = [];
+    vdrkTracksRef.current = [];
     setWyzieTracks([]);
+    setVdrkTracks([]);
     setWyzieError(null);
     setStreamflixSources([]);
     streamflixSourcesRef.current = [];
@@ -1143,33 +1189,41 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     if (!content?.tmdbId) return;
     let cancelled = false;
     wyzieTracksRef.current = [];
+    vdrkTracksRef.current = [];
     setWyzieTracks([]);
+    setVdrkTracks([]);
     setWyzieError(null);
     setWyzieLoading(true);
-    searchWyzieSubtitles({
+    const req = {
       tmdbId: content.tmdbId,
       season: content.season,
       episode: content.episode,
-    })
-      .then((tracks) => {
+    };
+    const sortTracks = (tracks: WyzieSubtitle[]) => {
+      const lang = subtitleSettings.defaultLanguage;
+      return [...tracks].sort((a, b) => {
+        if (lang) {
+          const aDefault = a.language === lang ? 0 : 1;
+          const bDefault = b.language === lang ? 0 : 1;
+          if (aDefault !== bDefault) return aDefault - bDefault;
+        }
+        return a.display.localeCompare(b.display);
+      });
+    };
+    Promise.allSettled([searchWyzieSubtitles(req), searchVdrkSubtitles(req)])
+      .then(([wyzie, vdrk]) => {
         if (cancelled) return;
-        const lang = subtitleSettings.defaultLanguage;
-        const sorted = [...tracks].sort((a, b) => {
-          if (lang) {
-            const aDefault = a.language === lang ? 0 : 1;
-            const bDefault = b.language === lang ? 0 : 1;
-            if (aDefault !== bDefault) return aDefault - bDefault;
-          }
-          return a.display.localeCompare(b.display);
-        });
-        wyzieTracksRef.current = sorted;
-        setWyzieTracks(sorted);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        wyzieTracksRef.current = [];
-        setWyzieTracks([]);
-        setWyzieError('Wyzie unavailable');
+        const wyzieList = wyzie.status === 'fulfilled' ? wyzie.value : [];
+        const vdrkList = vdrk.status === 'fulfilled' ? vdrk.value : [];
+        const wyzieSorted = sortTracks(wyzieList);
+        const vdrkSorted = sortTracks(vdrkList);
+        wyzieTracksRef.current = wyzieSorted;
+        vdrkTracksRef.current = vdrkSorted;
+        setWyzieTracks(wyzieSorted);
+        setVdrkTracks(vdrkSorted);
+        if (wyzie.status === 'rejected' && vdrkList.length === 0) {
+          setWyzieError('Wyzie unavailable');
+        }
       })
       .finally(() => {
         if (!cancelled) setWyzieLoading(false);
@@ -1192,7 +1246,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
       streamflixSourcesRef.current.find((s) => s.id === activeSourceIdRef.current) ??
       null;
     applySubtitleOptions(source, current);
-  }, [applySubtitleOptions, wyzieTracks, activeSourceId]);
+  }, [applySubtitleOptions, wyzieTracks, vdrkTracks, activeSourceId]);
 
   useEffect(() => {
     if (guestPickedSubRef.current) return;
@@ -1532,7 +1586,10 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           }}
           onWaiting={() => reportBuffering(true)}
           onStalled={() => reportBuffering(true)}
-          onCanPlay={() => reportBuffering(false)}
+          onCanPlay={() => {
+            reportBuffering(false);
+            void tryPlayWhenReady();
+          }}
           onPlaying={() => {
             reportBuffering(false);
             const video = videoRef.current;

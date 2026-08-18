@@ -46,6 +46,8 @@ const WYZIE_BASE = (
 const WYZIE_KEY =
   process.env.WYZIE_API_KEY || process.env.EXPO_PUBLIC_WYZIE_API_KEY || '';
 const WYZIE_MAX_TRACKS = 20;
+const VDRK_SUB_BASE = 'https://sub.vdrk.site/v1';
+const VDRK_MAX_TRACKS = 80;
 const TMDB_TIMEOUT_MS = 15000;
 const GITHUB_OWNER =
   process.env.GITHUB_REPO_OWNER ||
@@ -319,6 +321,11 @@ const allowStreamflixHost = (room, hostname) => {
 
 const isStreamflixMediaHost = (room, hostname) =>
   Boolean(hostname && room?.streamflixHosts?.has(hostname.toLowerCase()));
+
+const isVdrkSubtitleHost = (hostname) => {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'cache.vdrk.site' || host === 'sub.vdrk.site' || host.endsWith('.vdrk.site');
+};
 
 const resolveAgainst = (base, maybeRelative) => {
   try {
@@ -973,6 +980,98 @@ const serveWyzieSearch = async (req, res) => {
   }
 };
 
+const languageFromLabel = (label) => {
+  const lower = String(label || '').toLowerCase();
+  const known = [
+    ['english', 'en'],
+    ['spanish', 'es'],
+    ['french', 'fr'],
+    ['german', 'de'],
+    ['portuguese', 'pt'],
+    ['italian', 'it'],
+    ['japanese', 'ja'],
+    ['korean', 'ko'],
+    ['chinese', 'zh'],
+    ['arabic', 'ar'],
+    ['hindi', 'hi'],
+  ];
+  const match = known.find(([name]) => lower.includes(name));
+  return match ? match[1] : lower.slice(0, 2);
+};
+
+const isHearingImpairedLabel = (label) =>
+  /(?:^|[\s(])hi(?:\d+)?(?:\s|$)/i.test(label) && !/hindi/i.test(label);
+
+const serveVdrkSearch = async (req, res) => {
+  if (req.method !== 'GET') {
+    res.writeHead(405, { allow: 'GET' });
+    res.end();
+    return;
+  }
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`);
+  const tmdbId = Number(reqUrl.searchParams.get('tmdbId'));
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
+    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, tracks: [] }));
+    return;
+  }
+  const season = Number(reqUrl.searchParams.get('season'));
+  const episode = Number(reqUrl.searchParams.get('episode'));
+  const isTv =
+    Number.isFinite(season) &&
+    Number.isFinite(episode) &&
+    season > 0 &&
+    episode > 0;
+  const path = isTv
+    ? `${VDRK_SUB_BASE}/tv/${tmdbId}/${season}/${episode}`
+    : `${VDRK_SUB_BASE}/movie/${tmdbId}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const upstream = await fetch(path, {
+      headers: { Accept: 'application/json', 'User-Agent': MEDIA_UA },
+      signal: controller.signal,
+    });
+    if (!upstream.ok) {
+      res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, tracks: [] }));
+      return;
+    }
+    const data = await upstream.json();
+    const list = Array.isArray(data) ? data : data && data.file ? [data] : [];
+    const tracks = [];
+    const seen = new Set();
+    for (const raw of list) {
+      const file = typeof raw?.file === 'string' ? raw.file : '';
+      if (!/^https?:\/\//i.test(file)) continue;
+      const display = String(raw.label || 'Unknown').slice(0, 80);
+      const language = languageFromLabel(display);
+      const cc = isHearingImpairedLabel(display);
+      const key = `${language}-${display}-${cc ? 'cc' : 'n'}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tracks.push({
+        id: `vdrk:${language}:${display}:${tracks.length}`.slice(0, 80),
+        url: file.slice(0, URI_MAX),
+        display,
+        language,
+        isHearingImpaired: cc,
+      });
+      if (tracks.length >= VDRK_MAX_TRACKS) break;
+    }
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    res.end(JSON.stringify({ ok: true, tracks }));
+  } catch {
+    res.writeHead(502, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, tracks: [] }));
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const listVidrock = async (content) => {
   const tmdbId = Number(content.tmdbId);
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
@@ -1407,6 +1506,7 @@ const serveSubtitle = async (code, req, res) => {
     const allowed =
       published ||
       isStreamflixMediaHost(room, host) ||
+      isVdrkSubtitleHost(host) ||
       Boolean(host && room?.mediaAllowedHosts?.has(host.toLowerCase()));
     if (!allowed) {
       res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
@@ -1692,6 +1792,11 @@ const serveStatic = (req, res) => {
 
   if ((url.pathname === '/wyzie' || url.pathname === '/wyzie/') && req.method === 'GET') {
     void serveWyzieSearch(req, res);
+    return;
+  }
+
+  if ((url.pathname === '/vdrk' || url.pathname === '/vdrk/') && req.method === 'GET') {
+    void serveVdrkSearch(req, res);
     return;
   }
 
