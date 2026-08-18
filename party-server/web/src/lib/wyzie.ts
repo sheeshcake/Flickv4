@@ -20,7 +20,8 @@ export const searchWyzieSubtitles = async (req: {
     params.set('episode', String(req.episode));
   }
   const res = await fetch(`/wyzie?${params}`);
-  if (!res.ok) return [];
-  const data = (await res.json()) as { tracks?: WyzieSubtitle[] };
+  if (!res.ok) throw new Error('Wyzie unavailable');
+  const data = (await res.json()) as { ok?: boolean; tracks?: WyzieSubtitle[] };
+  if (data.ok === false) throw new Error('Wyzie unavailable');
   return Array.isArray(data.tracks) ? data.tracks : [];
 };

@@ -84,7 +84,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     chat,
     displayName,
   } = useParty();
-  const solo = Boolean(soloContent) && !partyRoom;
+  const solo = Boolean(soloContent);
   const send = useCallback(
     (msg: Parameters<typeof sendParty>[0]) => {
       if (solo) return;
@@ -97,19 +97,20 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   const listedFullRef = useRef<StreamflixSource[]>([]);
   const [lobbyOpen, setLobbyOpen] = useState(false);
   const room = useMemo((): PartyRoom | null => {
-    if (partyRoom) return partyRoom;
-    if (!soloContent) return null;
-    return {
-      code: playbackSessionRef.current || playbackSession || 'solo',
-      hostId: 'solo',
-      content: soloContent,
-      clock: {
-        positionSeconds: 0,
-        paused: true,
-        updatedAt: Date.now(),
-      },
-      members: [],
-    };
+    if (soloContent) {
+      return {
+        code: playbackSessionRef.current || playbackSession || 'solo',
+        hostId: 'solo',
+        content: soloContent,
+        clock: {
+          positionSeconds: 0,
+          paused: true,
+          updatedAt: Date.now(),
+        },
+        members: [],
+      };
+    }
+    return partyRoom;
   }, [partyRoom, playbackSession, soloContent]);
   const isHost = solo || role === 'host';
   const [roomError, setRoomError] = useState('');
@@ -138,6 +139,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   const [selectedSubId, setSelectedSubId] = useState<string | null>(null);
   const [wyzieTracks, setWyzieTracks] = useState<WyzieSubtitle[]>([]);
   const [wyzieLoading, setWyzieLoading] = useState(false);
+  const [wyzieError, setWyzieError] = useState<string | null>(null);
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
   const [toast, setToast] = useState<ChatLine | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -793,7 +795,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
         showWaiting('Host is picking something else…');
         return;
       }
-      const vkey = `${current.content.tmdbId}|${current.content.imdbId ?? ''}|${current.content.season ?? ''}|${current.content.episode ?? ''}`;
+      const vkey = `${current.content.mediaType}|${current.content.tmdbId}|${current.content.imdbId ?? ''}|${current.content.season ?? ''}|${current.content.episode ?? ''}`;
 
       const tryStreamflixThenProxy = async () => {
         if (isWebViewHostSource(current) && !isHostRef.current) {
@@ -943,6 +945,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     listedFullRef.current = [];
     wyzieTracksRef.current = [];
     setWyzieTracks([]);
+    setWyzieError(null);
     setStreamflixSources([]);
     streamflixSourcesRef.current = [];
     setActiveSourceId(null);
@@ -1126,7 +1129,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
 
   // Resolve once per title/episode. Do not retrigger on clock/state ticks.
   const contentKey = room
-    ? `${room.content.tmdbId}|${room.content.imdbId ?? ''}|${room.content.season ?? ''}|${room.content.episode ?? ''}|${room.browsing ? 1 : 0}|${isHost ? 'h' : 'g'}`
+    ? `${room.content.mediaType}|${room.content.tmdbId}|${room.content.imdbId ?? ''}|${room.content.season ?? ''}|${room.content.episode ?? ''}|${room.browsing ? 1 : 0}|${isHost ? 'h' : 'g'}`
     : '';
   useEffect(() => {
     if (!room) return;
@@ -1139,6 +1142,9 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     const content = room?.content;
     if (!content?.tmdbId) return;
     let cancelled = false;
+    wyzieTracksRef.current = [];
+    setWyzieTracks([]);
+    setWyzieError(null);
     setWyzieLoading(true);
     searchWyzieSubtitles({
       tmdbId: content.tmdbId,
@@ -1163,6 +1169,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
         if (cancelled) return;
         wyzieTracksRef.current = [];
         setWyzieTracks([]);
+        setWyzieError('Wyzie unavailable');
       })
       .finally(() => {
         if (!cancelled) setWyzieLoading(false);
@@ -1171,6 +1178,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
       cancelled = true;
     };
   }, [
+    room?.content.mediaType,
     room?.content.tmdbId,
     room?.content.season,
     room?.content.episode,
@@ -1184,7 +1192,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
       streamflixSourcesRef.current.find((s) => s.id === activeSourceIdRef.current) ??
       null;
     applySubtitleOptions(source, current);
-  }, [applySubtitleOptions, wyzieTracks]);
+  }, [applySubtitleOptions, wyzieTracks, activeSourceId]);
 
   useEffect(() => {
     if (guestPickedSubRef.current) return;
@@ -1425,8 +1433,11 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     rtc.leaveCall();
     if (soloContent) {
       if (partyRoom) leaveRoom();
+      const fromTvWatch =
+        window.location.pathname.startsWith('/watch/tv/') ||
+        soloContent.mediaType === 'tv';
       navigate(
-        soloContent.mediaType === 'tv'
+        fromTvWatch
           ? `/title/tv/${soloContent.tmdbId}`
           : `/title/movie/${soloContent.tmdbId}`,
       );
@@ -1660,6 +1671,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           selectedSubtitleId={selectedSubId}
           onSelectSubtitle={handleSelectSubtitle}
           subtitlesLoading={wyzieLoading}
+          subtitlesError={wyzieError}
           subtitleOffset={subOffset}
           onChangeOffset={handleChangeOffset}
         />

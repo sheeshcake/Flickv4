@@ -1623,8 +1623,22 @@ const serveApp = async (_req, res) => {
 const serveStatic = (req, res) => {
   const pathOnly = String(req.url || '/').split('?')[0];
   if (pathOnly === '/health') {
+    let parties = 0;
+    let playbackSessions = 0;
+    for (const room of rooms.values()) {
+      if (room.playbackOnly) playbackSessions += 1;
+      else parties += 1;
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, rooms: rooms.size, version: APP_VERSION }));
+    res.end(
+      JSON.stringify({
+        ok: true,
+        rooms: rooms.size,
+        parties,
+        playbackSessions,
+        version: APP_VERSION,
+      }),
+    );
     return;
   }
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);

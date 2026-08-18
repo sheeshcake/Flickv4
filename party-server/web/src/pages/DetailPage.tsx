@@ -42,6 +42,9 @@ export const DetailPage = () => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setEpisodes([]);
+    setSeasons([]);
+    setSelectedSeason(null);
     const run = async () => {
       try {
         if (mediaType === 'movie') {
@@ -94,6 +97,7 @@ export const DetailPage = () => {
       return;
     }
     let cancelled = false;
+    setEpisodes([]);
     tmdb
       .seasonDetails(tmdbId, selectedSeason)
       .then((data) => {
@@ -259,7 +263,7 @@ export const DetailPage = () => {
                   <button
                     type="button"
                     className="flex w-full items-start gap-3 rounded-lg border border-border bg-card p-3 text-left hover:bg-primary/10"
-                    onClick={() => void playTitle(selectedSeason ?? ep.season_number, ep.episode_number)}
+                    onClick={() => void playTitle(ep.season_number, ep.episode_number)}
                     disabled={busy || Boolean(coming)}
                   >
                     <span className="w-8 shrink-0 text-sm font-bold text-muted-foreground">

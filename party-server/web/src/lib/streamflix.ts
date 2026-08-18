@@ -161,15 +161,23 @@ const slugId = (name: string): string =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
+const tvEpisodePath = (
+  req: StreamflixResolveRequest,
+): { season: number; episode: number } | null => {
+  if (req.mediaType !== 'tv') return null;
+  if (req.season == null || req.episode == null) return null;
+  return { season: req.season, episode: req.episode };
+};
+
 const listVidrock = async (
   req: StreamflixResolveRequest,
 ): Promise<StreamflixSource[]> => {
   const tmdbId = Number(req.tmdbId);
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
-  const isTv =
-    req.mediaType === 'tv' && req.season != null && req.episode != null;
-  const apiUrl = isTv
-    ? `${MAIN_URL}/api/tv/${tmdbId}/${req.season}/${req.episode}`
+  if (req.mediaType === 'tv' && !tvEpisodePath(req)) return [];
+  const tv = tvEpisodePath(req);
+  const apiUrl = tv
+    ? `${MAIN_URL}/api/tv/${tmdbId}/${tv.season}/${tv.episode}`
     : `${MAIN_URL}/api/movie/${tmdbId}`;
   log('vidrock: GET', apiUrl);
   const res = await extractFetch(apiUrl);
@@ -232,16 +240,17 @@ const VIDEASY_SERVERS = [
 const listVideasy = (req: StreamflixResolveRequest): StreamflixSource[] => {
   const tmdbId = Number(req.tmdbId);
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
+  if (req.mediaType === 'tv' && !tvEpisodePath(req)) return [];
+  const tv = tvEpisodePath(req);
   const title = encodeURIComponent(req.title || '');
   const year = req.year || '';
   const imdb = req.imdbId || '';
   return VIDEASY_SERVERS.filter(
     (s) => !('movieOnly' in s && s.movieOnly && req.mediaType !== 'movie'),
   ).map((s) => {
-    const url =
-      req.mediaType === 'tv' && req.season != null && req.episode != null
-        ? `${VIDEASY_API}/${s.endpoint}/sources-with-title?title=${title}&mediaType=tv&year=${year}&tmdbId=${tmdbId}&imdbId=${imdb}&episodeId=${req.episode}&seasonId=${req.season}`
-        : `${VIDEASY_API}/${s.endpoint}/sources-with-title?title=${title}&mediaType=movie&year=${year}&tmdbId=${tmdbId}&imdbId=${imdb}`;
+    const url = tv
+      ? `${VIDEASY_API}/${s.endpoint}/sources-with-title?title=${title}&mediaType=tv&year=${year}&tmdbId=${tmdbId}&imdbId=${imdb}&episodeId=${tv.episode}&seasonId=${tv.season}`
+      : `${VIDEASY_API}/${s.endpoint}/sources-with-title?title=${title}&mediaType=movie&year=${year}&tmdbId=${tmdbId}&imdbId=${imdb}`;
     return {
       id: `videasy-${slugId(s.name)}`,
       name: `${s.name} (Videasy)`,
@@ -323,10 +332,11 @@ const VIDZEE_SERVERS = [
 const listVidzee = (req: StreamflixResolveRequest): StreamflixSource[] => {
   const tmdbId = Number(req.tmdbId);
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
-  const base =
-    req.mediaType === 'tv' && req.season != null && req.episode != null
-      ? `${VIDZEE_PLAYER}/api/server?id=${tmdbId}&ss=${req.season}&ep=${req.episode}`
-      : `${VIDZEE_PLAYER}/api/server?id=${tmdbId}`;
+  if (req.mediaType === 'tv' && !tvEpisodePath(req)) return [];
+  const tv = tvEpisodePath(req);
+  const base = tv
+    ? `${VIDZEE_PLAYER}/api/server?id=${tmdbId}&ss=${tv.season}&ep=${tv.episode}`
+    : `${VIDZEE_PLAYER}/api/server?id=${tmdbId}`;
   return VIDZEE_SERVERS.map((s) => ({
     id: `vidzee-${slugId(s.name)}`,
     name: `${s.name} (Vidzee)`,
@@ -425,6 +435,10 @@ export const toWebSource = (source: StreamflixSource) => ({
 export const listSources = async (
   req: StreamflixResolveRequest,
 ): Promise<StreamflixSource[]> => {
+  if (req.mediaType === 'tv' && !tvEpisodePath(req)) {
+    log('list: skip tv without season/episode', req.tmdbId);
+    return [];
+  }
   log(
     'list:',
     req.mediaType,
