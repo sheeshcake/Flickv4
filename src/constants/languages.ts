@@ -25,3 +25,13 @@ export const SUBTITLE_LANGUAGES: SubLanguage[] = [
 
 export const getLanguageLabel = (code: string): string =>
   SUBTITLE_LANGUAGES.find((l) => l.code === code)?.label ?? 'None';
+
+/** Best-effort ISO 639-1 from a human subtitle label (e.g. "English Hi"). */
+export const languageFromLabel = (label: string): string => {
+  const lower = String(label || '').toLowerCase();
+  const known = SUBTITLE_LANGUAGES.find(
+    (l) => l.code && lower.includes(l.label.toLowerCase()),
+  );
+  if (known) return known.code;
+  return lower.slice(0, 2);
+};

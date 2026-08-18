@@ -1042,8 +1042,18 @@ const serveVdrkSearch = async (req, res) => {
     const tracks = [];
     const seen = new Set();
     for (const raw of list) {
-      const file = typeof raw?.file === 'string' ? raw.file : '';
+      let file = typeof raw?.file === 'string' ? raw.file : '';
       if (!/^https?:\/\//i.test(file)) continue;
+      try {
+        const parsed = new URL(file);
+        parsed.pathname = parsed.pathname
+          .split('/')
+          .map((seg) => encodeURIComponent(decodeURIComponent(seg)))
+          .join('/');
+        file = parsed.toString();
+      } catch {
+        // keep original
+      }
       const display = String(raw.label || 'Unknown').slice(0, 80);
       const language = languageFromLabel(display);
       const cc = isHearingImpairedLabel(display);

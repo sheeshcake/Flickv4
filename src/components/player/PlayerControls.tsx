@@ -25,7 +25,7 @@ import { Focusable } from '@/src/components/Focusable';
 import { PlayerReactionPicker } from '@/src/components/party/PlayerReactionPicker';
 import { ProgressBar } from '@/src/components/player/ProgressBar';
 import { VerticalSlider } from '@/src/components/player/VerticalSlider';
-import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
+import { isTV, TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import { formatTime } from '@/src/components/player/useTVRemote';
 
 interface PlayerControlsProps {
@@ -215,7 +215,11 @@ export const PlayerControls = ({
         )}
       </HStack>
 
-      <Center className="flex-1">
+      {isTV ? null : <Box className="flex-1" pointerEvents="none" />}
+      <Center
+        className={isTV ? 'flex-1' : 'absolute inset-0'}
+        pointerEvents="box-none"
+      >
         <HStack space="4xl" className="items-center">
           <ControlButton icon={RotateCcw} onPress={() => onSeekBy(-10)} />
           <ControlButton

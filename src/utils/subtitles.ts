@@ -23,7 +23,10 @@ const stripTags = (text: string): string =>
 
 /** Parse SRT or basic WebVTT into cue objects (times in seconds). */
 export const parseSubtitleText = (raw: string): SubtitleCue[] => {
-  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const normalized = raw
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
   const blocks = normalized.split(/\n\n+/);
   const cues: SubtitleCue[] = [];
 
@@ -60,7 +63,11 @@ export const parseSubtitleText = (raw: string): SubtitleCue[] => {
 
 /** Convert SRT (or already-VTT) text into a WebVTT document for native sidecars. */
 export const toWebVtt = (raw: string): string => {
-  const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  const normalized = raw
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim();
   if (normalized.toUpperCase().startsWith('WEBVTT')) return normalized;
   // SRT uses comma decimals; WebVTT uses dots.
   const body = normalized.replace(

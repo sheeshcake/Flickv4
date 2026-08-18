@@ -122,6 +122,7 @@ interface PlayerSettingsDrawerProps {
   subtitleTracks: SubtitleTrackOption[];
   selectedSubtitleId: string | null;
   subtitlesLoading?: boolean;
+  subtitlesError?: string | null;
   onSelectSubtitle: (id: string | null) => void;
   /** Current subtitle sync offset in seconds. Only meaningful (and shown)
    * once a track is selected. */
@@ -170,6 +171,7 @@ export const PlayerSettingsDrawer = ({
   subtitleTracks,
   selectedSubtitleId,
   subtitlesLoading,
+  subtitlesError,
   onSelectSubtitle,
   subtitleOffsetSeconds,
   onChangeSubtitleOffset,
@@ -488,37 +490,39 @@ export const PlayerSettingsDrawer = ({
 
               {subtitlesLoading ? (
                 <Text className="py-2 text-muted-foreground">
-                  Loading tracks…
+                  Loading more tracks…
                 </Text>
-              ) : (
-                <>
-                  <OptionRow
-                    label="Off"
-                    active={selectedSubtitleId == null}
-                    hasTVPreferredFocus
-                    onPress={() => {
-                      onSelectSubtitle(null);
-                      setActiveCategory(null);
-                    }}
-                  />
-                  {subtitleTracks.map((track) => (
-                    <OptionRow
-                      key={track.id}
-                      label={track.label}
-                      active={selectedSubtitleId === track.id}
-                      onPress={() => {
-                        onSelectSubtitle(track.id);
-                        setActiveCategory(null);
-                      }}
-                    />
-                  ))}
-                  {!subtitleTracks.length && (
-                    <Text size="sm" className="py-2 text-muted-foreground">
-                      No subtitles found for this title.
-                    </Text>
-                  )}
-                </>
-              )}
+              ) : null}
+              {subtitlesError ? (
+                <Text size="sm" className="py-2 text-muted-foreground">
+                  {subtitlesError}
+                </Text>
+              ) : null}
+              <OptionRow
+                label="Off"
+                active={selectedSubtitleId == null}
+                hasTVPreferredFocus
+                onPress={() => {
+                  onSelectSubtitle(null);
+                  setActiveCategory(null);
+                }}
+              />
+              {subtitleTracks.map((track) => (
+                <OptionRow
+                  key={track.id}
+                  label={track.label}
+                  active={selectedSubtitleId === track.id}
+                  onPress={() => {
+                    onSelectSubtitle(track.id);
+                    setActiveCategory(null);
+                  }}
+                />
+              ))}
+              {!subtitlesLoading && !subtitlesError && !subtitleTracks.length ? (
+                <Text size="sm" className="py-2 text-muted-foreground">
+                  No subtitles found for this title.
+                </Text>
+              ) : null}
             </VStack>
           )}
         </ScrollView>

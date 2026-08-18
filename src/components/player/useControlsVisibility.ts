@@ -5,8 +5,11 @@ const HIDE_DELAY = 5000;
 /**
  * Auto-hiding control visibility. Controls reveal on interaction and hide
  * again after `HIDE_DELAY` ms of inactivity while the video is playing.
+ * Pass `hold` while a drawer/sheet (chat, settings, episodes, party) is
+ * open so the overlay stays up and a hidden-state Pressable cannot steal
+ * TextInput focus.
  */
-export const useControlsVisibility = (playing: boolean) => {
+export const useControlsVisibility = (playing: boolean, hold: boolean) => {
   const [visible, setVisible] = useState(true);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -17,10 +20,10 @@ export const useControlsVisibility = (playing: boolean) => {
 
   const scheduleHide = useCallback(() => {
     clear();
-    if (playing) {
+    if (playing && !hold) {
       timer.current = setTimeout(() => setVisible(false), HIDE_DELAY);
     }
-  }, [clear, playing]);
+  }, [clear, playing, hold]);
 
   const show = useCallback(() => {
     setVisible(true);
@@ -28,18 +31,27 @@ export const useControlsVisibility = (playing: boolean) => {
   }, [scheduleHide]);
 
   const toggle = useCallback(() => {
+    if (!playing || hold) {
+      setVisible(true);
+      return;
+    }
     setVisible((v) => {
       const next = !v;
       if (next) scheduleHide();
       else clear();
       return next;
     });
-  }, [scheduleHide, clear]);
+  }, [playing, hold, scheduleHide, clear]);
 
   useEffect(() => {
+    if (hold || !playing) {
+      setVisible(true);
+      clear();
+      return;
+    }
     scheduleHide();
     return clear;
-  }, [scheduleHide, clear]);
+  }, [hold, playing, scheduleHide, clear]);
 
   return { visible, show, toggle };
 };

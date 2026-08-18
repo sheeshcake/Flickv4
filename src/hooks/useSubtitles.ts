@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { File } from 'expo-file-system';
+import { VdrkSubtitleService } from '@/src/services/VdrkSubtitleService';
 import { WyzieService, type WyzieSubtitle } from '@/src/services/WyzieService';
 import type { LocalDownloadedSubtitle } from '@/src/services/DownloadService';
 import {
@@ -41,7 +42,7 @@ interface UseSubtitlesArgs {
   extraTracks?: WyzieSubtitle[];
 }
 
-const MAX_TRACKS = 20;
+const MAX_TRACKS = 80;
 
 const isLocalTrack = (
   track: SubtitleTrack,
@@ -82,25 +83,37 @@ export const useSubtitles = ({
       return;
     }
     let cancelled = false;
+    setRemoteTracks([]);
     setLoading(true);
     setError(null);
     // Fetch across ALL languages (no `language` filter). Dedup and sort so the
     // default language sits at the top of the picker.
-    WyzieService.searchSubtitles({ tmdbId, season, episode, format })
-      .then((results) => {
+    Promise.allSettled([
+      WyzieService.searchSubtitles({ tmdbId, season, episode, format }),
+      VdrkSubtitleService.searchSubtitles({ tmdbId, season, episode }),
+    ])
+      .then(([wyzie, vdrk]) => {
         if (cancelled) return;
+        const wyzieTracks = wyzie.status === 'fulfilled' ? wyzie.value : [];
+        const vdrkTracks = vdrk.status === 'fulfilled' ? vdrk.value : [];
+        if (wyzie.status === 'rejected' && vdrkTracks.length === 0) {
+          setError(
+            wyzie.reason instanceof Error
+              ? wyzie.reason.message
+              : 'Subtitle search failed',
+          );
+          setRemoteTracks([]);
+          return;
+        }
         const seen = new Set<string>();
         const unique: WyzieSubtitle[] = [];
-        for (const r of results) {
-          // Key by language + display so different regional/CC variants of the
-          // same language still appear (e.g. English vs. English (CC)).
+        for (const r of [...vdrkTracks, ...wyzieTracks]) {
           const key = `${r.language}-${r.display}-${r.isHearingImpaired ? 'cc' : 'n'}`;
           if (seen.has(key)) continue;
           seen.add(key);
           unique.push(r);
           if (unique.length >= MAX_TRACKS) break;
         }
-        // Sort: default language first, then alphabetical by display label.
         const sorted = unique.sort((a, b) => {
           if (defaultLanguage) {
             const aDefault = a.language === defaultLanguage ? 0 : 1;
@@ -110,10 +123,6 @@ export const useSubtitles = ({
           return a.display.localeCompare(b.display);
         });
         setRemoteTracks(sorted);
-      })
-      .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : 'Subtitle search failed');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

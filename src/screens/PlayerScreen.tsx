@@ -34,7 +34,14 @@ import {
   type StreamflixSource,
   type StreamflixSubtitle,
 } from '@/src/services/StreamflixService';
-import { getReleaseDate, getTitle, type Episode, type MediaItem } from '@/src/types';
+import {
+  getReleaseDate,
+  getTitle,
+  isMovie,
+  type Episode,
+  type MediaItem,
+} from '@/src/types';
+import { resolveFirstAiredEpisode } from '@/src/hooks/useWatchNextRecommendation';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 import { useWatchParty } from '@/src/hooks/useWatchParty';
 import {
@@ -688,6 +695,32 @@ export const PlayerScreen = ({
     navigation.goBack();
   }, [navigation]);
 
+  const handlePlayRecommendation = useCallback(
+    async (next: MediaItem) => {
+      if (isMovie(next)) {
+        navigation.replace('Player', {
+          item: next,
+          title: getTitle(next),
+        });
+        return;
+      }
+      try {
+        const first = await resolveFirstAiredEpisode(next);
+        if (!first) return;
+        navigation.replace('Player', {
+          item: next,
+          title: `${getTitle(next)} — ${first.episode.name}`,
+          season: first.season,
+          episode: first.episode.episode_number,
+          subtitle: `S${first.season} E${first.episode.episode_number}`,
+        });
+      } catch {
+        // Leave the current player if we can't resolve an aired episode.
+      }
+    },
+    [navigation],
+  );
+
   if (source) {
     return (
       <PlayerCore
@@ -720,6 +753,7 @@ export const PlayerScreen = ({
         extractorSubtitles={extractorSubtitles}
         onPlaybackFailed={localForCurrent ? undefined : handlePlaybackFailed}
         localSubtitles={localSubtitles}
+        onPlayRecommendation={handlePlayRecommendation}
       />
     );
   }

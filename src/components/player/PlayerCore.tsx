@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StatusBar, StyleSheet } from 'react-native';
+import { Platform, Pressable, StatusBar, StyleSheet, useWindowDimensions } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import Video, {
   SelectedTrackType,
@@ -47,6 +47,7 @@ import {
 import {
   SeriesEndOverlay,
   UpNextOverlay,
+  WatchNextOverlay,
 } from '@/src/components/player/UpNextOverlay';
 import { useControlsVisibility } from '@/src/components/player/useControlsVisibility';
 import { useTVRemote } from '@/src/components/player/useTVRemote';
@@ -64,6 +65,7 @@ import {
   UP_NEXT_LEAD_SECONDS,
   useNextEpisode,
 } from '@/src/hooks/useNextEpisode';
+import { useWatchNextRecommendation } from '@/src/hooks/useWatchNextRecommendation';
 import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
 import { useServers } from '@/src/hooks/useServers';
 import { useSubtitles } from '@/src/hooks/useSubtitles';
@@ -82,6 +84,7 @@ import { writeNativeVttCache } from '@/src/utils/nativeSubtitleCache';
 import { WyzieService } from '@/src/services/WyzieService';
 import type { LocalDownloadedSubtitle } from '@/src/services/DownloadService';
 import type { Episode, MediaItem } from '@/src/types';
+import { isTV } from '@/src/utils/tv';
 
 interface PlayerCoreProps {
   source: ReactVideoSource;
@@ -119,6 +122,8 @@ interface PlayerCoreProps {
    * `useSubtitles` skips the Wyzie network search and loads these files.
    */
   localSubtitles?: LocalDownloadedSubtitle[];
+  /** Mobile: play a recommended title after the current video ends. */
+  onPlayRecommendation?: (item: MediaItem) => void;
 }
 
 /** Android has no PiP concept below API 26; iOS/tvOS support it wherever the
@@ -175,7 +180,9 @@ export const PlayerCore = ({
   extractorSubtitles = [],
   onPlaybackFailed,
   localSubtitles,
+  onPlayRecommendation,
 }: PlayerCoreProps) => {
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const isFocused = useIsFocused();
   const { servers, activeServer } = useServers();
   const { upsert, advanceEpisode } = useContinueWatching();
@@ -289,6 +296,12 @@ export const PlayerCore = ({
   // definitively resolved things (not just "hasn't found one yet") —
   // otherwise a still-loading result gets misread as a confirmed finale.
   const [pendingAdvance, setPendingAdvance] = useState(false);
+  const watchNextEnabled =
+    !isTV && !partyRoom && !!onPlayRecommendation;
+  const { recommendation, loading: recommendationLoading } =
+    useWatchNextRecommendation(item, watchNextEnabled);
+  const [showWatchNext, setShowWatchNext] = useState(false);
+  const [pendingWatchNext, setPendingWatchNext] = useState(false);
 
   // HLS-variant state. The master URI is captured once from the initial
   // `source` prop so quality swaps can always jump back to Auto.
@@ -343,6 +356,7 @@ export const PlayerCore = ({
     selectTrack: selectWyzieTrack,
     cueAt,
     loading: loadingWyzieTracks,
+    error: wyzieError,
   } = useSubtitles({
     tmdbId: item.id,
     season,
@@ -534,10 +548,13 @@ export const PlayerCore = ({
     }
     // Only apply once the cache matches the currently selected track.
     if (nativeVttTrackId !== selectedWyzieTrack.id) return undefined;
+    const language = /^[a-z]{2}$/i.test(selectedWyzieTrack.language)
+      ? selectedWyzieTrack.language.toLowerCase()
+      : 'en';
     return [
       {
         title: selectedWyzieTrack.display,
-        language: selectedWyzieTrack.language as ISO639_1,
+        language: language as ISO639_1,
         type: TextTrackType.VTT,
         uri: nativeVttUri,
       },
@@ -577,7 +594,14 @@ export const PlayerCore = ({
     ? null
     : cueAt(currentTime - subtitleOffsetSeconds);
 
-  const { visible, show, toggle } = useControlsVisibility(isPlaying);
+  const controlsHold =
+    settingsOpen ||
+    episodesOpen ||
+    partyOpen ||
+    chatOpen ||
+    partyIntroOpen ||
+    partyLobbyOpen;
+  const { visible, show, toggle } = useControlsVisibility(isPlaying, controlsHold);
 
   // Seconds left in the episode; `Infinity` until the player reports a real
   // duration so the Up Next card never flashes on load.
@@ -611,9 +635,21 @@ export const PlayerCore = ({
   // effect below, once `nextEpisodeLoading` confirms we actually know
   // whether there's a next episode (see comment on `pendingAdvance` above).
   const onEnd = useCallback(() => {
-    if (!autoplayNextEnabled) return;
-    setPendingAdvance(true);
-  }, [autoplayNextEnabled]);
+    if (autoplayNextEnabled) {
+      setPendingAdvance(true);
+      return;
+    }
+    if (watchNextEnabled) setPendingWatchNext(true);
+  }, [autoplayNextEnabled, watchNextEnabled]);
+
+  const offerWatchNext = useCallback(() => {
+    if (recommendation) {
+      setPaused(true);
+      setShowWatchNext(true);
+      return true;
+    }
+    return false;
+  }, [recommendation]);
 
   // Resolve the pending advance: autoplay straight into the next episode
   // (unless the user already cancelled the Up Next card), or — only once
@@ -623,10 +659,11 @@ export const PlayerCore = ({
   // for the next run once loading settles.
   useEffect(() => {
     if (!pendingAdvance || nextEpisodeLoading) return;
+    if (!nextEpisodeInfo && watchNextEnabled && recommendationLoading) return;
     setPendingAdvance(false);
     if (nextEpisodeInfo) {
       if (!upNextDismissed) playNextEpisode();
-    } else {
+    } else if (!watchNextEnabled || !offerWatchNext()) {
       setSeriesEnded(true);
     }
   }, [
@@ -635,7 +672,18 @@ export const PlayerCore = ({
     nextEpisodeInfo,
     upNextDismissed,
     playNextEpisode,
+    watchNextEnabled,
+    recommendationLoading,
+    offerWatchNext,
   ]);
+
+  useEffect(() => {
+    if (!pendingWatchNext || recommendationLoading) return;
+    setPendingWatchNext(false);
+    if (!offerWatchNext()) {
+      // No similar title — leave the last frame; controls can come back.
+    }
+  }, [pendingWatchNext, recommendationLoading, offerWatchNext]);
 
   // Series finale: hold the "caught up" card briefly, then return to Detail.
   useEffect(() => {
@@ -1061,7 +1109,8 @@ export const PlayerCore = ({
     partyIntroOpen ||
     partyLobbyOpen ||
     showUpNext ||
-    seriesEnded;
+    seriesEnded ||
+    showWatchNext;
 
   useTVRemote({
     // The hidden-state fallback `Pressable` (focusable, hasTVPreferredFocus,
@@ -1088,13 +1137,17 @@ export const PlayerCore = ({
     scrubPreview != null ? scrubPreview * duration : currentTime;
 
   return (
-    <Box className="flex-1 bg-black">
+    <Box className={`flex-1 bg-black ${isTV ? '' : 'overflow-hidden'}`}>
       <StatusBar hidden />
       {isFocused && (
         <Video
           ref={videoRef}
           source={initialSource}
-          style={StyleSheet.absoluteFill}
+          style={
+            isTV
+              ? StyleSheet.absoluteFill
+              : { width: windowWidth, height: windowHeight }
+          }
           controls={false}
           resizeMode={toResizeMode(aspect)}
           pointerEvents="none"
@@ -1192,6 +1245,14 @@ export const PlayerCore = ({
 
       {!pipActive && seriesEnded && <SeriesEndOverlay />}
 
+      {!pipActive && !seriesEnded && showWatchNext && recommendation && (
+        <WatchNextOverlay
+          item={recommendation}
+          onPlay={() => onPlayRecommendation?.(recommendation)}
+          onClose={() => setShowWatchNext(false)}
+        />
+      )}
+
       {!pipActive && !seriesEnded && showUpNext && nextEpisodeInfo && (
         <UpNextOverlay
           season={nextEpisodeInfo.season}
@@ -1204,6 +1265,7 @@ export const PlayerCore = ({
 
       {!pipActive &&
         !seriesEnded &&
+        !showWatchNext &&
         !showUpNext &&
         (visible ? (
           <PlayerControls
@@ -1266,14 +1328,7 @@ export const PlayerCore = ({
             }
             onSelectReaction={partyRoom ? sendReaction : undefined}
           />
-        ) : (
-          // TV: keep a focusable owner mounted while controls are hidden.
-          // Without one, some Android TV/tvOS builds swallow D-pad presses
-          // before they reach useTVRemote's global TVEventHandler listener,
-          // so nothing brings the controls back. `focusable` +
-          // `hasTVPreferredFocus` guarantee Select reliably fires `show`
-          // natively, and give the platform an active focus context for the
-          // other directions.
+        ) : overlayOpen ? null : (
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={show}
@@ -1312,6 +1367,7 @@ export const PlayerCore = ({
         subtitleTracks={subtitleTrackOptions}
         selectedSubtitleId={wyzieSelectedId}
         subtitlesLoading={loadingWyzieTracks}
+        subtitlesError={wyzieError}
         onSelectSubtitle={selectWyzieTrack}
         subtitleOffsetSeconds={subtitleOffsetSeconds}
         onChangeSubtitleOffset={setSubtitleOffsetSeconds}
