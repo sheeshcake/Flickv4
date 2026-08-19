@@ -14,6 +14,14 @@ jobs:
           node-version: 22
           cache: 'npm'
 
+      - name: Setup Environment File (.env)
+        run: |
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          else
+            echo "EXPO_PUBLIC_TMDB_API_URL=https://api.themoviedb.org/3" >> .env
+          fi
+
       - name: Install Dependencies
         run: npm install
 
@@ -23,7 +31,6 @@ jobs:
       - name: Fix MMKV CocoaPods Dependency
         run: |
           cd ios
-          # Pin MMKV and MMKVCore to 2.3.0 to bypass the AESCrypt.cpp compile bug
           sed -i '' '/target '\''Flick'\'' do/a\
             pod '\''MMKV'\'', '\''2.3.0'\''\
             pod '\''MMKVCore'\'', '\''2.3.0'\''
