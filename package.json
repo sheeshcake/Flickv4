@@ -63,6 +63,7 @@
     "start": "expo start",
     "android": "expo run:android",
     "android:apk": "expo run:android --variant release",
+    "ios:ipa": "bash scripts/build-ios-ipa.sh",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "postinstall": "patch-package"

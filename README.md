@@ -61,6 +61,58 @@ No ads. No subscriptions. Movies and TV via TMDB metadata, offline watching when
 
 ---
 
+## Installation
+
+Grab the latest **APK** (Android) or **IPA** (iOS) from [GitHub Releases](https://github.com/sheeshcake/Flickv4/releases). Files are named `Flick-<version>.apk` and `Flick-<version>.ipa`.
+
+### Android
+
+1. Download `Flick-<version>.apk` from the latest release.
+2. Open the file on your device and allow installs from that source if Android asks.
+3. Open Flick and grant storage / notification permissions when prompted.
+
+Android TV: sideload the same APK (USB, network, or a file manager), then launch Flick from the apps row.
+
+### iOS (SideStore)
+
+Flick is **not on the App Store**. The IPA on GitHub is unsigned, so you install it with [SideStore](https://sidestore.io), which signs it with **your** Apple ID. A computer is only needed once, to install SideStore itself.
+
+You need:
+
+- iPhone or iPad on **iOS / iPadOS 15 or later**, with a passcode
+- A free Apple Account (Apple ID)
+- Wi-Fi (not cellular) when installing or refreshing apps
+- [LocalDevVPN](https://apps.apple.com/app/localdevvpn/id6755608044) from the App Store
+- A Mac, Windows, Linux, or Chromebook computer for the first SideStore install
+
+Follow SideStore’s official guides for the computer step — they change more often than Flick does:
+
+1. [Prerequisites](https://docs.sidestore.io/docs/installation/prerequisites) — install **iloader** and **LocalDevVPN**, then connect the VPN.
+2. [Install SideStore](https://docs.sidestore.io/docs/installation/install) — USB-connect the device, install SideStore (Stable) with iloader, trust the developer app, turn on **Developer Mode**, sign in with the same Apple Account, then tap the **7 DAYS** counter next to SideStore under **My Apps** to finish setup.
+
+Then install Flick:
+
+1. On the iPhone or iPad, download `Flick-<version>.ipa` from [GitHub Releases](https://github.com/sheeshcake/Flickv4/releases) (Safari or Files). AirDrop from a Mac works too.
+2. Open **LocalDevVPN** and tap **Connect**. Leave it on for the rest of these steps.
+3. Open **SideStore** → **My Apps** → **+** (top of the screen).
+4. Choose the Flick IPA from Files.
+5. Wait until SideStore finishes signing and installing. Flick appears on the Home Screen.
+6. If iOS blocks the first launch: **Settings → General → VPN & Device Management** → your Apple Account → **Trust**.
+
+To update later, download the newer IPA and install it the same way (over the existing app). Your data stays on the device.
+
+#### Refresh every 7 days
+
+Apple’s free developer signing expires after **7 days**. Before Flick (or SideStore) expires:
+
+1. Connect to Wi-Fi.
+2. Open **LocalDevVPN** and connect.
+3. In SideStore → **My Apps**, tap the day counter next to **Flick** (and SideStore if it is low).
+
+A free Apple Account can keep **3 apps** installed at once, including SideStore, and can register at most **10 App IDs per week**. If install fails, SideStore’s [common issues](https://docs.sidestore.io/docs/troubleshooting/common-issues) and [error codes](https://docs.sidestore.io/docs/troubleshooting/error-codes) are the first place to look.
+
+---
+
 ## Important Notice: Web Scraper
 
 > **The web scraping engine lives in a private repository.**
