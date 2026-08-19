@@ -198,6 +198,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   const bufferingRef = useRef(false);
   const seenMembersRef = useRef<Set<string> | null>(null);
 
+  const rtc = usePartyRtc(solo ? null : memberId, solo ? null : partyRoom, (obj) => send(obj));
   const overlay = useOverlayVisibility(
     !clock.paused,
     membersOpen || chatOpen || settingsOpen || lobbyOpen || Boolean(rtc.error),
@@ -244,7 +245,6 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     [send],
   );
 
-  const rtc = usePartyRtc(solo ? null : memberId, solo ? null : partyRoom, (obj) => send(obj));
   const rtcOnMessageRef = useRef(rtc.onMessage);
   rtcOnMessageRef.current = rtc.onMessage;
 
