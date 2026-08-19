@@ -25,8 +25,14 @@ const Tile = ({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.srcObject = stream && !placeholder ? stream : null;
-  }, [stream, placeholder]);
+    if (stream && !placeholder) {
+      el.srcObject = stream;
+      el.muted = Boolean(muted);
+      void el.play().catch(() => {});
+      return;
+    }
+    el.srcObject = null;
+  }, [muted, placeholder, stream]);
 
   return (
     <div
@@ -36,7 +42,15 @@ const Tile = ({
     >
       {stream && !placeholder ? (
         <video
-          ref={ref}
+          ref={(el) => {
+            ref.current = el;
+            if (!el) return;
+            el.setAttribute('playsinline', '');
+            el.setAttribute('webkit-playsinline', '');
+            el.muted = Boolean(muted);
+            el.srcObject = stream;
+            void el.play().catch(() => {});
+          }}
           autoPlay
           playsInline
           muted={muted}

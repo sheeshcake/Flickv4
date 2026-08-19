@@ -200,7 +200,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
 
   const overlay = useOverlayVisibility(
     !clock.paused,
-    membersOpen || chatOpen || settingsOpen || lobbyOpen,
+    membersOpen || chatOpen || settingsOpen || lobbyOpen || Boolean(rtc.error),
   );
   const { settings: subtitleSettings } = useSubtitleSettings();
   const isHostRef = useRef(isHost);
@@ -1808,6 +1808,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           onToggleCam={rtc.toggleCam}
           tilesHidden={callTilesHidden}
           onToggleTilesHidden={() => setCallTilesHidden((prev) => !prev)}
+          callError={rtc.error}
         />
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />
         <MembersSheet

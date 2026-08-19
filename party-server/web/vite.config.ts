@@ -16,6 +16,9 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    headers: {
+      'Permissions-Policy': 'camera=(self), microphone=(self)',
+    },
     proxy: {
       '/media': 'http://127.0.0.1:8787',
       '/subtitle': 'http://127.0.0.1:8787',

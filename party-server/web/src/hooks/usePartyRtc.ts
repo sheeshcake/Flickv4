@@ -21,12 +21,100 @@ export interface PartyRtcApi {
   camOff: boolean;
   localStream: MediaStream | null;
   remotes: PartyRtcRemote[];
+  error: string | null;
   joinCall: () => Promise<void>;
   leaveCall: () => void;
   toggleMute: () => void;
   toggleCam: () => void;
   onMessage: (msg: ServerMessage) => void;
 }
+
+const CALL_VIDEO: MediaTrackConstraints = {
+  facingMode: { ideal: 'user' },
+};
+
+const gumErrorMessage = (err: unknown): string => {
+  const name =
+    err && typeof err === 'object' && 'name' in err
+      ? String((err as { name: unknown }).name)
+      : '';
+  if (!navigator.mediaDevices?.getUserMedia || name === 'NotSupportedError') {
+    return 'This browser cannot access the camera. Open this page in Safari.';
+  }
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return 'Allow camera and microphone for this site in Safari Settings, then try again.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'No camera or microphone found.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Camera is in use. Close other apps and try again.';
+  }
+  if (name === 'SecurityError') {
+    return 'Camera requires a secure (HTTPS) connection.';
+  }
+  return 'Could not open the camera.';
+};
+
+const applyPreferredVideo = async (stream: MediaStream) => {
+  const track = stream.getVideoTracks()[0];
+  if (!track) return;
+  try {
+    await track.applyConstraints({
+      width: { ideal: 640 },
+      height: { ideal: 360 },
+      frameRate: { ideal: 24 },
+    });
+  } catch {
+    // iOS Safari often rejects size/fps; the native camera size still works.
+  }
+};
+
+const openCallStream = async (): Promise<MediaStream> => {
+  const devices = navigator.mediaDevices;
+  if (!devices?.getUserMedia) {
+    throw Object.assign(new Error('unsupported'), { name: 'NotSupportedError' });
+  }
+
+  const attempts: MediaStreamConstraints[] = [
+    { audio: true, video: CALL_VIDEO },
+    { audio: true, video: true },
+  ];
+
+  let lastErr: unknown;
+  for (const constraints of attempts) {
+    try {
+      const stream = await devices.getUserMedia(constraints);
+      await applyPreferredVideo(stream);
+      return stream;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  // Combined A/V can fail on iOS while another <video> is playing.
+  try {
+    const videoStream = await devices.getUserMedia({
+      audio: false,
+      video: CALL_VIDEO,
+    });
+    try {
+      const audioStream = await devices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+      audioStream.getAudioTracks().forEach((track) => {
+        videoStream.addTrack(track);
+      });
+    } catch {
+      // Video-only still lets them appear in the grid.
+    }
+    await applyPreferredVideo(videoStream);
+    return videoStream;
+  } catch (err) {
+    throw lastErr ?? err;
+  }
+};
 
 const shouldOffer = (selfId: string, peerId: string) => selfId > peerId;
 
@@ -40,6 +128,7 @@ export const usePartyRtc = (
   const [camOff, setCamOff] = useState(false);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remotes, setRemotes] = useState<PartyRtcRemote[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const joinedRef = useRef(false);
   const memberIdRef = useRef(memberId);
@@ -326,25 +415,25 @@ export const usePartyRtc = (
     setJoined(false);
     setMuted(false);
     setCamOff(false);
+    setError(null);
     closeAllPeers();
     stopLocal();
   }, [closeAllPeers, send, stopLocal]);
 
   const joinCall = useCallback(async () => {
     if (!memberIdRef.current || joinedRef.current) return;
+    setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: { facingMode: 'user', width: 480, height: 360, frameRate: 24 },
-      });
+      const stream = await openCallStream();
       localRef.current = stream;
       applyLocalFlags(stream);
       setLocalStream(stream);
       joinedRef.current = true;
       setJoined(true);
       send({ type: 'rtc-join' });
-    } catch {
+    } catch (err) {
       stopLocal();
+      setError(gumErrorMessage(err));
     }
   }, [applyLocalFlags, send, stopLocal]);
 
@@ -390,6 +479,7 @@ export const usePartyRtc = (
       setJoined(false);
       setMuted(false);
       setCamOff(false);
+      setError(null);
       closeAllPeers();
       stopLocal();
     }
@@ -401,6 +491,7 @@ export const usePartyRtc = (
     camOff,
     localStream,
     remotes,
+    error,
     joinCall,
     leaveCall,
     toggleMute,

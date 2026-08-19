@@ -1870,7 +1870,13 @@ const serveStatic = (req, res) => {
       '.png': 'image/png',
       '.ico': 'image/x-icon',
     };
-    res.writeHead(200, { 'content-type': types[ext] || 'application/octet-stream' });
+    const headers = {
+      'content-type': types[ext] || 'application/octet-stream',
+    };
+    if (ext === '.html') {
+      headers['permissions-policy'] = 'camera=(self), microphone=(self)';
+    }
+    res.writeHead(200, headers);
     res.end(data);
   });
 };
