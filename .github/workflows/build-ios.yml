@@ -17,8 +17,18 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Expo Prebuild
-        run: npx expo prebuild --platform ios
+      - name: Expo Prebuild (No Pods)
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Fix MMKV CocoaPods Dependency
+        run: |
+          cd ios
+          # Pin MMKV and MMKVCore to 2.3.0 to bypass the AESCrypt.cpp compile bug
+          sed -i '' '/target '\''Flick'\'' do/a\
+            pod '\''MMKV'\'', '\''2.3.0'\''\
+            pod '\''MMKVCore'\'', '\''2.3.0'\''
+          ' Podfile
+          pod install
 
       - name: Build Xcode Archive
         run: |
