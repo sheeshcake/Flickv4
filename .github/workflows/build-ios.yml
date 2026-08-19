@@ -15,12 +15,18 @@ jobs:
           cache: 'npm'
 
       - name: Setup Environment File (.env)
+        env:
+          TMDB_TOKEN: ${{ secrets.TMDB_READ_TOKEN }}
         run: |
           if [ -f .env.example ]; then
             cp .env.example .env
-          else
-            echo "EXPO_PUBLIC_TMDB_API_URL=https://api.themoviedb.org/3" >> .env
           fi
+          # Write the TMDB base URL, API key, and v4 Bearer access token
+          echo "EXPO_PUBLIC_TMDB_API_URL=https://api.themoviedb.org/3" >> .env
+          echo "EXPO_PUBLIC_TMDB_BASE_URL=https://api.themoviedb.org/3" >> .env
+          echo "EXPO_PUBLIC_TMDB_API_KEY=$TMDB_TOKEN" >> .env
+          echo "EXPO_PUBLIC_TMDB_ACCESS_TOKEN=$TMDB_TOKEN" >> .env
+          echo "EXPO_PUBLIC_TMDB_READ_ACCESS_TOKEN=$TMDB_TOKEN" >> .env
 
       - name: Install Dependencies
         run: npm install
