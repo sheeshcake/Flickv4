@@ -147,7 +147,12 @@ export const usePartyRtc = (
         });
       };
       pc.ontrack = (ev) => {
-        const stream = ev.streams[0];
+        let stream = ev.streams[0];
+        if (!stream && ev.track) {
+          stream = new MediaStream([ev.track]);
+        } else if (stream && ev.track && !stream.getTracks().some((t) => t.id === ev.track.id)) {
+          stream.addTrack(ev.track);
+        }
         if (!stream) return;
         const name =
           roomRef.current?.members.find((m) => m.id === peerId)?.displayName ??
@@ -159,19 +164,23 @@ export const usePartyRtc = (
         });
       };
       pc.onconnectionstatechange = () => {
-        if (peersRef.current.get(peerId) !== pc) return;
-        const state = pc.connectionState;
-        if (state === 'connected') {
-          iceRestartedRef.current.delete(peerId);
-          recoveringRef.current.delete(peerId);
-          return;
-        }
-        if (state === 'closed') {
-          closePeer(peerId);
-          return;
-        }
-        if (state === 'failed') {
-          recoverPeerRef.current(peerId);
+        try {
+          if (peersRef.current.get(peerId) !== pc) return;
+          const state = pc.connectionState;
+          if (state === 'connected') {
+            iceRestartedRef.current.delete(peerId);
+            recoveringRef.current.delete(peerId);
+            return;
+          }
+          if (state === 'closed') {
+            closePeer(peerId);
+            return;
+          }
+          if (state === 'failed') {
+            recoverPeerRef.current(peerId);
+          }
+        } catch {
+          // Native WebRTC callbacks must not throw into the page.
         }
       };
       return pc;

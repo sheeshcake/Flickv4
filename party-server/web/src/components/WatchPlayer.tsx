@@ -64,7 +64,7 @@ const isAppleVideoPlayer = (): boolean => {
 };
 
 const hostIsPresent = (room: PartyRoom) =>
-  room.members.some((m) => m.id === room.hostId || m.role === 'host');
+  (room.members ?? []).some((m) => m.id === room.hostId || m.role === 'host');
 
 const shortUrl = (url: string) => {
   try {
@@ -1098,7 +1098,11 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
 
   useEffect(() => {
     return subscribe((msg: ServerMessage) => {
-      rtcOnMessageRef.current(msg);
+      try {
+        rtcOnMessageRef.current(msg);
+      } catch {
+        // Camera signaling must not tear down playback.
+      }
       if (msg.type === 'error' && roomRef.current) setRoomError(msg.message);
       if (msg.type === 'state' && hostIsPresent(msg.room)) {
         setRoomError((prev) => (prev === 'Host is away' ? '' : prev));
@@ -1191,8 +1195,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
       }
       if (msg.type === 'ended') {
         setRoomError(msg.reason || 'Room ended');
-        showWaiting(msg.reason || 'Room ended');
-        navigate('/');
+        if (!soloContent) showWaiting(msg.reason || 'Room ended');
       }
     });
   }, [
@@ -1200,13 +1203,13 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     applySubtitleOptions,
     enqueueReaction,
     loadSubtitles,
-    navigate,
     playRoom,
     playStreamflixSource,
     playViaProxy,
     resetPlaybackKeys,
     send,
     showWaiting,
+    soloContent,
     subscribe,
   ]);
 

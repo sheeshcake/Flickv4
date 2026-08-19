@@ -2259,7 +2259,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         throw new Error('Bad rtc signal');
       }
       const next = { type: kind };
-      if (typeof payload.sdp === 'string') next.sdp = payload.sdp.slice(0, 16384);
+      if (typeof payload.sdp === 'string') next.sdp = payload.sdp.slice(0, 65536);
       if (payload.candidate != null) next.candidate = String(payload.candidate).slice(0, 1024);
       if (payload.sdpMid != null) next.sdpMid = String(payload.sdpMid).slice(0, 32);
       if (payload.sdpMLineIndex != null) {
