@@ -1,0 +1,64 @@
+name: Setup Flick
+description: Install Node, dependencies, and write the build-time .env
+inputs:
+  app_version:
+    description: APP_VERSION written into .env
+    required: true
+  android_version_code:
+    description: ANDROID_VERSION_CODE written into .env
+    required: true
+  tmdb_api_key:
+    required: true
+  wyzie_api_key:
+    required: true
+  watch_party_url:
+    required: false
+    default: ''
+  tmdb_base_url:
+    required: false
+    default: https://api.themoviedb.org/3
+  tmdb_image_base_url:
+    required: false
+    default: https://image.tmdb.org/t/p/w500
+  wyzie_base_url:
+    required: false
+    default: https://sub.wyzie.io
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: npm
+
+    - name: Install JS dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Write .env
+      shell: bash
+      env:
+        APP_VERSION: ${{ inputs.app_version }}
+        ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
+        EXPO_PUBLIC_TMDB_API_KEY: ${{ inputs.tmdb_api_key }}
+        EXPO_PUBLIC_WYZIE_API_KEY: ${{ inputs.wyzie_api_key }}
+        EXPO_PUBLIC_WATCH_PARTY_URL: ${{ inputs.watch_party_url }}
+        EXPO_PUBLIC_TMDB_BASE_URL: ${{ inputs.tmdb_base_url }}
+        EXPO_PUBLIC_TMDB_IMAGE_BASE_URL: ${{ inputs.tmdb_image_base_url }}
+        EXPO_PUBLIC_WYZIE_BASE_URL: ${{ inputs.wyzie_base_url }}
+      run: |
+        umask 077
+        cat > .env <<EOF
+        EXPO_PUBLIC_TMDB_API_KEY=${EXPO_PUBLIC_TMDB_API_KEY}
+        EXPO_PUBLIC_TMDB_BASE_URL=${EXPO_PUBLIC_TMDB_BASE_URL}
+        EXPO_PUBLIC_TMDB_IMAGE_BASE_URL=${EXPO_PUBLIC_TMDB_IMAGE_BASE_URL}
+        EXPO_PUBLIC_WYZIE_BASE_URL=${EXPO_PUBLIC_WYZIE_BASE_URL}
+        EXPO_PUBLIC_WYZIE_API_KEY=${EXPO_PUBLIC_WYZIE_API_KEY}
+        EXPO_PUBLIC_SAMPLE_VIDEO_URL=https://media.w3.org/2010/05/sintel/trailer.mp4
+        EXPO_PUBLIC_WATCH_PARTY_URL=${EXPO_PUBLIC_WATCH_PARTY_URL}
+        APP_VERSION=${APP_VERSION}
+        ANDROID_VERSION_CODE=${ANDROID_VERSION_CODE}
+        TMDB_API_KEY=${EXPO_PUBLIC_TMDB_API_KEY}
+        EOF

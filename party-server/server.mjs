@@ -1870,7 +1870,13 @@ const serveStatic = (req, res) => {
       '.png': 'image/png',
       '.ico': 'image/x-icon',
     };
-    res.writeHead(200, { 'content-type': types[ext] || 'application/octet-stream' });
+    const headers = {
+      'content-type': types[ext] || 'application/octet-stream',
+    };
+    if (ext === '.html') {
+      headers['permissions-policy'] = 'camera=(self), microphone=(self)';
+    }
+    res.writeHead(200, headers);
     res.end(data);
   });
 };
@@ -2259,7 +2265,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         throw new Error('Bad rtc signal');
       }
       const next = { type: kind };
-      if (typeof payload.sdp === 'string') next.sdp = payload.sdp.slice(0, 16384);
+      if (typeof payload.sdp === 'string') next.sdp = payload.sdp.slice(0, 65536);
       if (payload.candidate != null) next.candidate = String(payload.candidate).slice(0, 1024);
       if (payload.sdpMid != null) next.sdpMid = String(payload.sdpMid).slice(0, 32);
       if (payload.sdpMLineIndex != null) {

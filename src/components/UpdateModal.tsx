@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, ScrollView } from 'react-native';
+import { Modal, Platform, ScrollView } from 'react-native';
 import { X } from 'lucide-react-native';
 import type { File } from 'expo-file-system';
 import { Box } from '@/components/ui/box';
@@ -10,6 +10,7 @@ import { Text } from '@/components/ui/text';
 import { Icon } from '@/components/ui/icon';
 import { Spinner } from '@/components/ui/spinner';
 import { Pressable } from '@/components/ui/pressable';
+import { ChangelogSection } from '@/src/components/ChangelogMarkdown';
 import { Focusable } from '@/src/components/Focusable';
 import {
   updateService,
@@ -124,8 +125,7 @@ export const UpdateModal = ({
   // automatically launches the installer — no extra manual step beyond the
   // OS's own install confirmation dialog.
   const startUpdate = useCallback(async () => {
-    if (!info?.downloadUrl) {
-      // No direct APK asset for this platform — fall back to the release page.
+    if (Platform.OS !== 'android' || !info?.downloadUrl) {
       await openReleasePage();
       return;
     }
@@ -162,6 +162,9 @@ export const UpdateModal = ({
   const retryInstall = useCallback(() => {
     if (downloadedFile) void runInstall(downloadedFile);
   }, [downloadedFile, runInstall]);
+
+  const canDownload =
+    Platform.OS === 'android' && Boolean(info?.downloadUrl);
 
   return (
     <Modal
@@ -200,47 +203,40 @@ export const UpdateModal = ({
               )}
 
               {state === 'up-to-date' && (
-                <VStack space="md" className="items-center py-8">
-                  <Text size="3xl" className="text-primary">
-                    ✓
-                  </Text>
-                  <Heading size="md" className="text-foreground">
-                    You&apos;re up to date
-                  </Heading>
-                  <Text size="sm" className="text-center text-muted-foreground">
-                    Version {info?.currentVersion} is the latest.
-                  </Text>
+                <VStack space="md">
+                  <VStack space="sm" className="items-center py-4">
+                    <Text size="3xl" className="text-primary">
+                      ✓
+                    </Text>
+                    <Heading size="md" className="text-foreground">
+                      You&apos;re up to date
+                    </Heading>
+                    <Text
+                      size="sm"
+                      className="text-center text-muted-foreground"
+                    >
+                      Version {info?.currentVersion ?? info?.latestVersion} is
+                      the latest.
+                    </Text>
+                    {!!info?.releaseDate && (
+                      <Text size="xs" className="text-muted-foreground">
+                        Released: {updateService.formatDate(info.releaseDate)}
+                      </Text>
+                    )}
+                  </VStack>
+                  <ChangelogSection
+                    title="Changelog"
+                    notes={info?.releaseNotes || 'No release notes available.'}
+                  />
                 </VStack>
               )}
 
-              {state === 'available' && info && <VersionSummary info={info} />}
+              {state === 'available' && info && (
+                <VersionSummary info={info} showDownloadSize={canDownload} />
+              )}
 
               {state === 'downloading' && info && (
-                <VStack space="md">
-                  <VersionSummary info={info} />
-                  <VStack space="sm" className="mt-2">
-                    <HStack className="items-center justify-between">
-                      <Text size="sm" className="text-foreground">
-                        Downloading…
-                      </Text>
-                      <Text size="sm" className="text-muted-foreground">
-                        {Math.round(downloadProgress)}%
-                      </Text>
-                    </HStack>
-                    <Box className="h-2 w-full overflow-hidden rounded-full bg-background/60">
-                      <Box
-                        className="h-2 rounded-full bg-primary"
-                        style={{ width: `${Math.min(100, Math.max(0, downloadProgress))}%` }}
-                      />
-                    </Box>
-                    <Text size="xs" className="text-muted-foreground">
-                      {updateService.formatFileSize(downloadedBytes)}
-                      {totalBytes > 0
-                        ? ` / ${updateService.formatFileSize(totalBytes)}`
-                        : ''}
-                    </Text>
-                  </VStack>
-                </VStack>
+                <VersionSummary info={info} showDownloadSize />
               )}
 
               {state === 'installing' && (
@@ -290,23 +286,38 @@ export const UpdateModal = ({
 
             {state === 'available' && info && (
               <VStack space="sm" className="mt-4">
-                <Focusable
-                  onPress={startUpdate}
-                  hasTVPreferredFocus
-                  className="items-center rounded-md bg-primary px-4 py-3"
-                  focusedClassName="border-2 border-foreground"
-                >
-                  <Text className="font-semibold text-primary-foreground">
-                    {info.downloadUrl ? 'Download & install' : 'View on GitHub'}
-                  </Text>
-                </Focusable>
-                <Focusable
-                  onPress={openReleasePage}
-                  className="items-center rounded-md border border-border px-4 py-3"
-                  focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
-                >
-                  <Text className="text-foreground">Release page</Text>
-                </Focusable>
+                {canDownload ? (
+                  <>
+                    <Focusable
+                      onPress={startUpdate}
+                      hasTVPreferredFocus
+                      className="items-center rounded-md bg-primary px-4 py-3"
+                      focusedClassName="border-2 border-foreground"
+                    >
+                      <Text className="font-semibold text-primary-foreground">
+                        Download & install
+                      </Text>
+                    </Focusable>
+                    <Focusable
+                      onPress={openReleasePage}
+                      className="items-center rounded-md border border-border px-4 py-3"
+                      focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                    >
+                      <Text className="text-foreground">Release page</Text>
+                    </Focusable>
+                  </>
+                ) : (
+                  <Focusable
+                    onPress={openReleasePage}
+                    hasTVPreferredFocus
+                    className="items-center rounded-md bg-primary px-4 py-3"
+                    focusedClassName="border-2 border-foreground"
+                  >
+                    <Text className="font-semibold text-primary-foreground">
+                      View on GitHub
+                    </Text>
+                  </Focusable>
+                )}
                 {onSkipVersion && (
                   <Pressable onPress={onSkipVersion}>
                     <Box className="items-center py-2">
@@ -320,13 +331,39 @@ export const UpdateModal = ({
             )}
 
             {state === 'downloading' && (
-              <Focusable
-                onPress={cancelDownloadFlow}
-                className="mt-4 items-center rounded-md border border-border px-4 py-3"
-                focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
-              >
-                <Text className="text-foreground">Cancel</Text>
-              </Focusable>
+              <VStack space="sm" className="mt-4">
+                <VStack space="sm">
+                  <HStack className="items-center justify-between">
+                    <Text size="sm" className="text-foreground">
+                      Downloading…
+                    </Text>
+                    <Text size="sm" className="text-muted-foreground">
+                      {Math.round(downloadProgress)}%
+                    </Text>
+                  </HStack>
+                  <Box className="h-2 w-full overflow-hidden rounded-full bg-background/60">
+                    <Box
+                      className="h-2 rounded-full bg-primary"
+                      style={{
+                        width: `${Math.min(100, Math.max(0, downloadProgress))}%`,
+                      }}
+                    />
+                  </Box>
+                  <Text size="xs" className="text-muted-foreground">
+                    {updateService.formatFileSize(downloadedBytes)}
+                    {totalBytes > 0
+                      ? ` / ${updateService.formatFileSize(totalBytes)}`
+                      : ''}
+                  </Text>
+                </VStack>
+                <Focusable
+                  onPress={cancelDownloadFlow}
+                  className="items-center rounded-md border border-border px-4 py-3"
+                  focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                >
+                  <Text className="text-foreground">Cancel</Text>
+                </Focusable>
+              </VStack>
             )}
 
             {state === 'downloaded' && (
@@ -345,15 +382,21 @@ export const UpdateModal = ({
             {state === 'error' && (
               <VStack space="sm" className="mt-4">
                 <Focusable
-                  onPress={info ? startUpdate : runCheck}
+                  onPress={
+                    info
+                      ? canDownload
+                        ? startUpdate
+                        : openReleasePage
+                      : runCheck
+                  }
                   className="items-center rounded-md bg-primary px-4 py-3"
                   focusedClassName="border-2 border-foreground"
                 >
                   <Text className="font-semibold text-primary-foreground">
-                    Try again
+                    {info && !canDownload ? 'View on GitHub' : 'Try again'}
                   </Text>
                 </Focusable>
-                {info?.releaseUrl && (
+                {info?.releaseUrl && canDownload && (
                   <Focusable
                     onPress={openReleasePage}
                     className="items-center rounded-md border border-border px-4 py-3"
@@ -374,7 +417,13 @@ export const UpdateModal = ({
 };
 
 /** Current → new version comparison + release notes, shared across states. */
-const VersionSummary = ({ info }: { info: UpdateInfo }) => (
+const VersionSummary = ({
+  info,
+  showDownloadSize = false,
+}: {
+  info: UpdateInfo;
+  showDownloadSize?: boolean;
+}) => (
   <>
     <VStack className="rounded-lg bg-background/40 p-4">
       <HStack className="items-center justify-between">
@@ -400,17 +449,12 @@ const VersionSummary = ({ info }: { info: UpdateInfo }) => (
         Released: {updateService.formatDate(info.releaseDate)}
       </Text>
     )}
-    {!!info.assetSize && (
+    {showDownloadSize && !!info.assetSize && (
       <Text size="xs" className="text-muted-foreground">
         Download size: {updateService.formatFileSize(info.assetSize)}
       </Text>
     )}
 
-    <VStack space="xs" className="rounded-lg bg-background/40 p-4">
-      <Text className="font-semibold text-foreground">What&apos;s new</Text>
-      <Text size="sm" className="text-muted-foreground">
-        {info.releaseNotes}
-      </Text>
-    </VStack>
+    <ChangelogSection notes={info.releaseNotes} />
   </>
 );

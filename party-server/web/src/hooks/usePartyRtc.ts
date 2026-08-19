@@ -21,12 +21,100 @@ export interface PartyRtcApi {
   camOff: boolean;
   localStream: MediaStream | null;
   remotes: PartyRtcRemote[];
+  error: string | null;
   joinCall: () => Promise<void>;
   leaveCall: () => void;
   toggleMute: () => void;
   toggleCam: () => void;
   onMessage: (msg: ServerMessage) => void;
 }
+
+const CALL_VIDEO: MediaTrackConstraints = {
+  facingMode: { ideal: 'user' },
+};
+
+const gumErrorMessage = (err: unknown): string => {
+  const name =
+    err && typeof err === 'object' && 'name' in err
+      ? String((err as { name: unknown }).name)
+      : '';
+  if (!navigator.mediaDevices?.getUserMedia || name === 'NotSupportedError') {
+    return 'This browser cannot access the camera. Open this page in Safari.';
+  }
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return 'Allow camera and microphone for this site in Safari Settings, then try again.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'No camera or microphone found.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Camera is in use. Close other apps and try again.';
+  }
+  if (name === 'SecurityError') {
+    return 'Camera requires a secure (HTTPS) connection.';
+  }
+  return 'Could not open the camera.';
+};
+
+const applyPreferredVideo = async (stream: MediaStream) => {
+  const track = stream.getVideoTracks()[0];
+  if (!track) return;
+  try {
+    await track.applyConstraints({
+      width: { ideal: 640 },
+      height: { ideal: 360 },
+      frameRate: { ideal: 24 },
+    });
+  } catch {
+    // iOS Safari often rejects size/fps; the native camera size still works.
+  }
+};
+
+const openCallStream = async (): Promise<MediaStream> => {
+  const devices = navigator.mediaDevices;
+  if (!devices?.getUserMedia) {
+    throw Object.assign(new Error('unsupported'), { name: 'NotSupportedError' });
+  }
+
+  const attempts: MediaStreamConstraints[] = [
+    { audio: true, video: CALL_VIDEO },
+    { audio: true, video: true },
+  ];
+
+  let lastErr: unknown;
+  for (const constraints of attempts) {
+    try {
+      const stream = await devices.getUserMedia(constraints);
+      await applyPreferredVideo(stream);
+      return stream;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  // Combined A/V can fail on iOS while another <video> is playing.
+  try {
+    const videoStream = await devices.getUserMedia({
+      audio: false,
+      video: CALL_VIDEO,
+    });
+    try {
+      const audioStream = await devices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+      audioStream.getAudioTracks().forEach((track) => {
+        videoStream.addTrack(track);
+      });
+    } catch {
+      // Video-only still lets them appear in the grid.
+    }
+    await applyPreferredVideo(videoStream);
+    return videoStream;
+  } catch (err) {
+    throw lastErr ?? err;
+  }
+};
 
 const shouldOffer = (selfId: string, peerId: string) => selfId > peerId;
 
@@ -40,6 +128,7 @@ export const usePartyRtc = (
   const [camOff, setCamOff] = useState(false);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remotes, setRemotes] = useState<PartyRtcRemote[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const joinedRef = useRef(false);
   const memberIdRef = useRef(memberId);
@@ -47,6 +136,10 @@ export const usePartyRtc = (
   const localRef = useRef<MediaStream | null>(null);
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
   const pendingIceRef = useRef(new Map<string, PartyRtcSignalPayload[]>());
+  const livePeerIdsRef = useRef(new Set<string>());
+  const iceRestartedRef = useRef(new Set<string>());
+  const recoveringRef = useRef(new Set<string>());
+  const recoverPeerRef = useRef<(peerId: string) => void>(() => {});
   const mutedRef = useRef(false);
   const camOffRef = useRef(false);
 
@@ -59,21 +152,30 @@ export const usePartyRtc = (
     setRemotes((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
+  const teardownPc = useCallback((id: string) => {
+    const pc = peersRef.current.get(id);
+    if (pc) {
+      peersRef.current.delete(id);
+      pc.close();
+    }
+    pendingIceRef.current.delete(id);
+  }, []);
+
   const closePeer = useCallback(
     (id: string) => {
-      const pc = peersRef.current.get(id);
-      if (pc) {
-        pc.close();
-        peersRef.current.delete(id);
-      }
-      pendingIceRef.current.delete(id);
+      teardownPc(id);
+      iceRestartedRef.current.delete(id);
+      recoveringRef.current.delete(id);
       dropRemote(id);
     },
-    [dropRemote],
+    [dropRemote, teardownPc],
   );
 
   const closeAllPeers = useCallback(() => {
     for (const id of [...peersRef.current.keys()]) closePeer(id);
+    livePeerIdsRef.current = new Set();
+    iceRestartedRef.current.clear();
+    recoveringRef.current.clear();
   }, [closePeer]);
 
   const stopLocal = useCallback(() => {
@@ -134,7 +236,12 @@ export const usePartyRtc = (
         });
       };
       pc.ontrack = (ev) => {
-        const stream = ev.streams[0];
+        let stream = ev.streams[0];
+        if (!stream && ev.track) {
+          stream = new MediaStream([ev.track]);
+        } else if (stream && ev.track && !stream.getTracks().some((t) => t.id === ev.track.id)) {
+          stream.addTrack(ev.track);
+        }
         if (!stream) return;
         const name =
           roomRef.current?.members.find((m) => m.id === peerId)?.displayName ??
@@ -146,12 +253,23 @@ export const usePartyRtc = (
         });
       };
       pc.onconnectionstatechange = () => {
-        if (
-          pc.connectionState === 'failed' ||
-          pc.connectionState === 'closed' ||
-          pc.connectionState === 'disconnected'
-        ) {
-          closePeer(peerId);
+        try {
+          if (peersRef.current.get(peerId) !== pc) return;
+          const state = pc.connectionState;
+          if (state === 'connected') {
+            iceRestartedRef.current.delete(peerId);
+            recoveringRef.current.delete(peerId);
+            return;
+          }
+          if (state === 'closed') {
+            closePeer(peerId);
+            return;
+          }
+          if (state === 'failed') {
+            recoverPeerRef.current(peerId);
+          }
+        } catch {
+          // Native WebRTC callbacks must not throw into the page.
         }
       };
       return pc;
@@ -160,31 +278,77 @@ export const usePartyRtc = (
   );
 
   const offerTo = useCallback(
-    async (peerId: string) => {
+    async (peerId: string, iceRestart = false) => {
       const pc = attachPeer(peerId);
-      const offer = await pc.createOffer();
+      const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
       await pc.setLocalDescription(offer);
-      if (!pc.localDescription?.sdp) return;
+      if (!pc.localDescription?.sdp) return false;
       send({
         type: 'rtc-signal',
         to: peerId,
         payload: { type: 'offer', sdp: pc.localDescription.sdp },
       });
+      return true;
     },
     [attachPeer, send],
   );
+
+  const recoverPeer = useCallback(
+    (peerId: string) => {
+      if (!joinedRef.current || !livePeerIdsRef.current.has(peerId)) {
+        closePeer(peerId);
+        return;
+      }
+      if (recoveringRef.current.has(peerId)) return;
+      if (iceRestartedRef.current.has(peerId)) {
+        closePeer(peerId);
+        return;
+      }
+      iceRestartedRef.current.add(peerId);
+      recoveringRef.current.add(peerId);
+      const self = memberIdRef.current;
+      if (!self) {
+        recoveringRef.current.delete(peerId);
+        closePeer(peerId);
+        return;
+      }
+
+      const restart = async () => {
+        try {
+          const existing = peersRef.current.get(peerId);
+          if (existing && shouldOffer(self, peerId)) {
+            try {
+              if (await offerTo(peerId, true)) return;
+            } catch {
+              // Recreate below.
+            }
+          }
+          teardownPc(peerId);
+          if (shouldOffer(self, peerId)) await offerTo(peerId);
+        } catch {
+          closePeer(peerId);
+        } finally {
+          recoveringRef.current.delete(peerId);
+        }
+      };
+      void restart();
+    },
+    [closePeer, offerTo, teardownPc],
+  );
+  recoverPeerRef.current = recoverPeer;
 
   const syncPeers = useCallback(
     (ids: string[]) => {
       const self = memberIdRef.current;
       if (!self || !joinedRef.current) return;
       const live = new Set(ids.filter((id) => id !== self));
+      livePeerIdsRef.current = live;
       for (const id of [...peersRef.current.keys()]) {
         if (!live.has(id)) closePeer(id);
       }
       for (const id of live) {
         if (peersRef.current.has(id)) continue;
-        if (shouldOffer(self, id)) void offerTo(id);
+        if (shouldOffer(self, id)) void offerTo(id).catch(() => {});
       }
     },
     [closePeer, offerTo],
@@ -214,24 +378,32 @@ export const usePartyRtc = (
         return;
       }
       if (payload.type === 'offer' && payload.sdp) {
-        const pc = attachPeer(from);
-        await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
-        await flushIce(from, pc);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        if (!pc.localDescription?.sdp) return;
-        send({
-          type: 'rtc-signal',
-          to: from,
-          payload: { type: 'answer', sdp: pc.localDescription.sdp },
-        });
+        try {
+          const pc = attachPeer(from);
+          await pc.setRemoteDescription({ type: 'offer', sdp: payload.sdp });
+          await flushIce(from, pc);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (!pc.localDescription?.sdp) return;
+          send({
+            type: 'rtc-signal',
+            to: from,
+            payload: { type: 'answer', sdp: pc.localDescription.sdp },
+          });
+        } catch {
+          recoverPeerRef.current(from);
+        }
         return;
       }
       if (payload.type === 'answer' && payload.sdp) {
         const pc = peersRef.current.get(from);
         if (!pc) return;
-        await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
-        await flushIce(from, pc);
+        try {
+          await pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
+          await flushIce(from, pc);
+        } catch {
+          recoverPeerRef.current(from);
+        }
       }
     },
     [attachPeer, flushIce, send],
@@ -243,25 +415,25 @@ export const usePartyRtc = (
     setJoined(false);
     setMuted(false);
     setCamOff(false);
+    setError(null);
     closeAllPeers();
     stopLocal();
   }, [closeAllPeers, send, stopLocal]);
 
   const joinCall = useCallback(async () => {
     if (!memberIdRef.current || joinedRef.current) return;
+    setError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: { facingMode: 'user', width: 480, height: 360, frameRate: 24 },
-      });
+      const stream = await openCallStream();
       localRef.current = stream;
       applyLocalFlags(stream);
       setLocalStream(stream);
       joinedRef.current = true;
       setJoined(true);
       send({ type: 'rtc-join' });
-    } catch {
+    } catch (err) {
       stopLocal();
+      setError(gumErrorMessage(err));
     }
   }, [applyLocalFlags, send, stopLocal]);
 
@@ -307,6 +479,7 @@ export const usePartyRtc = (
       setJoined(false);
       setMuted(false);
       setCamOff(false);
+      setError(null);
       closeAllPeers();
       stopLocal();
     }
@@ -318,6 +491,7 @@ export const usePartyRtc = (
     camOff,
     localStream,
     remotes,
+    error,
     joinCall,
     leaveCall,
     toggleMute,

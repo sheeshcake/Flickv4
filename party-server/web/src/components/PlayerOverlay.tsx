@@ -33,6 +33,7 @@ interface PlayerOverlayProps {
   onToggleCam: () => void;
   tilesHidden: boolean;
   onToggleTilesHidden: () => void;
+  callError?: string | null;
 }
 
 const seekFraction = (el: HTMLElement, clientX: number) => {
@@ -69,6 +70,7 @@ export const PlayerOverlay = ({
   onToggleCam,
   tilesHidden,
   onToggleTilesHidden,
+  callError,
 }: PlayerOverlayProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
 
@@ -222,6 +224,9 @@ export const PlayerOverlay = ({
             <Settings className="size-5" />
           </Button>
         </div>
+        {callError ? (
+          <p className="basis-full pt-1 text-xs text-destructive">{callError}</p>
+        ) : null}
       </div>
 
       <div className="relative z-10 flex flex-1 items-center justify-center gap-8 sm:gap-10">

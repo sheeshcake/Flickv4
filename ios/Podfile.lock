@@ -1,7 +1,7 @@
 PODS:
   - EXApplication (57.0.2):
     - ExpoModulesCore
-  - EXConstants (57.0.6):
+  - EXConstants (57.0.7):
     - ExpoModulesCore
   - Expo (57.0.7):
     - ExpoModulesCore
@@ -30,6 +30,8 @@ PODS:
     - ReactNativeDependencies
     - Yoga
   - ExpoAsset (57.0.6):
+    - ExpoModulesCore
+  - ExpoBrightness (57.0.1):
     - ExpoModulesCore
   - ExpoDevice (57.0.1):
     - ExpoModulesCore
@@ -109,9 +111,11 @@ PODS:
   - hermes-engine (250829098.0.14):
     - hermes-engine/Pre-built (= 250829098.0.14)
   - hermes-engine/Pre-built (250829098.0.14)
-  - MMKV (2.4.0):
-    - MMKVCore (~> 2.4.0)
-  - MMKVCore (2.4.0)
+  - JitsiWebRTC (124.0.2)
+  - MMKV (2.4.1):
+    - MMKVCore (~> 2.4.1)
+  - MMKVCore (2.4.1)
+  - Mute (0.6.1)
   - RCTDeprecation (0.86.0)
   - RCTRequired (0.86.0)
   - RCTSwiftUI (0.86.0)
@@ -1695,6 +1699,12 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - react-native-volume-manager (2.0.8):
+    - Mute
+    - React-Core
+  - react-native-webrtc (124.0.8):
+    - JitsiWebRTC (~> 124.0.0)
+    - React-Core
   - react-native-webview (13.16.1):
     - hermes-engine
     - RCTRequired
@@ -2432,6 +2442,7 @@ DEPENDENCIES:
   - EXConstants (from `../node_modules/expo-constants/ios`)
   - Expo (from `../node_modules/expo`)
   - ExpoAsset (from `../node_modules/expo/node_modules/expo-asset/ios`)
+  - ExpoBrightness (from `../node_modules/expo-brightness/ios`)
   - ExpoDevice (from `../node_modules/expo-device/ios`)
   - "ExpoDomWebView (from `../node_modules/expo/node_modules/@expo/dom-webview/ios`)"
   - ExpoFileSystem (from `../node_modules/expo-file-system/ios/ExpoFileSystem.podspec`)
@@ -2488,6 +2499,8 @@ DEPENDENCIES:
   - "react-native-background-downloader (from `../node_modules/@kesha-antonov/react-native-background-downloader`)"
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
   - react-native-video (from `../node_modules/react-native-video`)
+  - react-native-volume-manager (from `../node_modules/react-native-volume-manager`)
+  - react-native-webrtc (from `../node_modules/react-native-webrtc`)
   - react-native-webview (from `../node_modules/react-native-webview`)
   - React-NativeModulesApple (from `../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
   - React-networking (from `../node_modules/react-native/ReactCommon/react/networking`)
@@ -2535,8 +2548,10 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
+    - JitsiWebRTC
     - MMKV
     - MMKVCore
+    - Mute
 
 EXTERNAL SOURCES:
   EXApplication:
@@ -2547,6 +2562,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo"
   ExpoAsset:
     :path: "../node_modules/expo/node_modules/expo-asset/ios"
+  ExpoBrightness:
+    :path: "../node_modules/expo-brightness/ios"
   ExpoDevice:
     :path: "../node_modules/expo-device/ios"
   ExpoDomWebView:
@@ -2658,6 +2675,10 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-safe-area-context"
   react-native-video:
     :path: "../node_modules/react-native-video"
+  react-native-volume-manager:
+    :path: "../node_modules/react-native-volume-manager"
+  react-native-webrtc:
+    :path: "../node_modules/react-native-webrtc"
   react-native-webview:
     :path: "../node_modules/react-native-webview"
   React-NativeModulesApple:
@@ -2749,9 +2770,10 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   EXApplication: bbd517d50878ca1d121fb3843392beb210181e28
-  EXConstants: 8641fb5fcb789b2bfc9d01c9206a6826ca9d49e6
+  EXConstants: fa5647482320b7bde855057f8b86580456d4b9f0
   Expo: af971fa66971775479d4d1c20b394b2ba5f94095
   ExpoAsset: c270900c121a250ceabbf692dfecc2f1564ec82f
+  ExpoBrightness: bd5b283f0ccd168d6c5b7ff1e95bc3999972a54a
   ExpoDevice: 93a72d7c2bd656a4f0c0d580523e390e9ee7fba5
   ExpoDomWebView: beaec034e51bd028428b98bb1f2633ab79c6d095
   ExpoFileSystem: e441dae0ae671fc451640517550973d9e024fdf0
@@ -2767,8 +2789,10 @@ SPEC CHECKSUMS:
   ExpoScreenOrientation: 17fd81b2bdb7615b4b540335673aaf98a358281f
   FBLazyVector: b3e7ad108f0d882e30445c5527d774e3fd432f3d
   hermes-engine: 503dbd38a0fb8c4a12c820a945e43a37995b4fc8
-  MMKV: 86859fdfa2b0b21db1fd6e48788474a6416a2c77
-  MMKVCore: 3d16ce9f7d411e135020915fde98a056859a1efa
+  JitsiWebRTC: b47805ab5668be38e7ee60e2258f49badfe8e1d0
+  MMKV: 63014ed88c63a43bbe2a1c9cf3a58f3654a5f4eb
+  MMKVCore: b29cd04b69f5794074e22183ba42ffee52445279
+  Mute: 20135a96076f140cc82bfc8b810e2d6150d8ec7e
   RCTDeprecation: 2a74a2c57675e64419bd89078efde81f7c1de90b
   RCTRequired: 30451112e6fef4e6f31b4e7eee0845156e35e4b0
   RCTSwiftUI: 5aaf0b07e747ba749dc6acc94d8bd41eea4b570f
@@ -2809,6 +2833,8 @@ SPEC CHECKSUMS:
   react-native-background-downloader: 39926c41851c62318aaf415e940c438f0c97f0ee
   react-native-safe-area-context: 6b4966397ada0f7dd481e4486a2ef936834861a1
   react-native-video: db3a70efc9fa0c00f5499d7798283bf0585cbd37
+  react-native-volume-manager: cdd3c3857158c1df7b9fbea071a9946395cee06c
+  react-native-webrtc: da75ba1f85a36981cbcb3fdae7dfbab7ad63c040
   react-native-webview: 2da09bdea1aeb6c46e27dd94632e21059cade6c1
   React-NativeModulesApple: a092d89b58f635ebfab88048b0eda9fb516819fd
   React-networking: 968bbbe73590149feb1e72b2af4f6a68e4796ece

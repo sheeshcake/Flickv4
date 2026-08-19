@@ -47,12 +47,24 @@ import { languageFromLabel } from '@/lib/languages';
 import { useSubtitleSettings } from '@/lib/subtitleSettings';
 import { searchVdrkSubtitles } from '@/lib/vdrk';
 import { searchWyzieSubtitles, type WyzieSubtitle } from '@/lib/wyzie';
-import { cueAt, parseSubtitleText, type Cue } from '@/lib/subtitles';
+import { cueAt, parseSubtitleText, shiftCues, type Cue } from '@/lib/subtitles';
 
 type Mode = 'none' | 'video' | 'iframe';
 
+/** Safari and iOS use the system video player (fullscreen / AirPlay / PiP). */
+const isAppleVideoPlayer = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  const iOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const safari =
+    /Safari/.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+  return iOS || safari;
+};
+
 const hostIsPresent = (room: PartyRoom) =>
-  room.members.some((m) => m.id === room.hostId || m.role === 'host');
+  (room.members ?? []).some((m) => m.id === room.hostId || m.role === 'host');
 
 const shortUrl = (url: string) => {
   try {
@@ -149,6 +161,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   const [duration, setDuration] = useState(0);
   const [videoTime, setVideoTime] = useState(0);
   const [cues, setCues] = useState<Cue[]>([]);
+  const [nativeCaptionsActive, setNativeCaptionsActive] = useState(false);
   const [subOffset, setSubOffset] = useState(0);
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
   const [needsUnmute, setNeedsUnmute] = useState(false);
@@ -162,6 +175,11 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   const lastSourceKey = useRef('');
   const failedSourceKey = useRef('');
   const lastSubUrl = useRef('');
+  const nativeTrackRef = useRef<TextTrack | null>(null);
+  const cuesRef = useRef<Cue[]>([]);
+  const subOffsetRef = useRef(0);
+  const appleVideoPlayer = useMemo(() => isAppleVideoPlayer(), []);
+  const applyNativeAppleTrackRef = useRef<() => void>(() => {});
   const lastWebKey = useRef('');
   const webResolvedRef = useRef(false);
   const roomRef = useRef<PartyRoom | null>(null);
@@ -180,9 +198,10 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   const bufferingRef = useRef(false);
   const seenMembersRef = useRef<Set<string> | null>(null);
 
+  const rtc = usePartyRtc(solo ? null : memberId, solo ? null : partyRoom, (obj) => send(obj));
   const overlay = useOverlayVisibility(
     !clock.paused,
-    membersOpen || chatOpen || settingsOpen || lobbyOpen,
+    membersOpen || chatOpen || settingsOpen || lobbyOpen || Boolean(rtc.error),
   );
   const { settings: subtitleSettings } = useSubtitleSettings();
   const isHostRef = useRef(isHost);
@@ -197,6 +216,8 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
   isHostRef.current = isHost;
   displayNameRef.current = displayName;
   partyRoomRef.current = partyRoom;
+  cuesRef.current = cues;
+  subOffsetRef.current = subOffset;
 
   useEffect(() => {
     playbackSessionRef.current = null;
@@ -224,7 +245,6 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     [send],
   );
 
-  const rtc = usePartyRtc(solo ? null : memberId, solo ? null : partyRoom, (obj) => send(obj));
   const rtcOnMessageRef = useRef(rtc.onMessage);
   rtcOnMessageRef.current = rtc.onMessage;
 
@@ -262,9 +282,79 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     [],
   );
 
+  const applyNativeAppleTrack = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || !appleVideoPlayer) {
+      setNativeCaptionsActive(false);
+      return;
+    }
+
+    const hostOffset = Number(roomRef.current?.subtitles?.offsetSeconds);
+    const offsetSeconds =
+      guestPickedSubRef.current || isHostRef.current
+        ? subOffsetRef.current
+        : Number.isFinite(hostOffset)
+          ? hostOffset
+          : subOffsetRef.current;
+    const cuesNow = cuesRef.current;
+    const selected = selectedSubIdRef.current;
+    const option = localSubOptionsRef.current.find((t) => t.id === selected);
+    const canShow =
+      cuesNow.length > 0 && selected != null && modeRef.current === 'video';
+
+    const tracks = video.textTracks;
+    let track = nativeTrackRef.current;
+    let attached = false;
+    if (track) {
+      for (let i = 0; i < tracks.length; i += 1) {
+        if (tracks[i] === track) {
+          attached = true;
+          break;
+        }
+      }
+    }
+    if (!track || !attached) {
+      track = video.addTextTrack(
+        'subtitles',
+        option?.label || 'Subtitles',
+        option?.language || 'en',
+      );
+      nativeTrackRef.current = track;
+    }
+
+    const existing = track.cues;
+    if (existing) {
+      while (existing.length > 0) track.removeCue(existing[0]);
+    }
+
+    if (!canShow) {
+      track.mode = 'disabled';
+      setNativeCaptionsActive(false);
+      return;
+    }
+
+    for (const cue of shiftCues(cuesNow, offsetSeconds)) {
+      try {
+        track.addCue(new VTTCue(cue.start, cue.end, cue.text));
+      } catch {
+        /* Safari rejects overlapping or inverted cues */
+      }
+    }
+    for (let i = 0; i < tracks.length; i += 1) {
+      const other = tracks[i];
+      if (other !== track && (other.kind === 'subtitles' || other.kind === 'captions')) {
+        other.mode = 'disabled';
+      }
+    }
+    track.mode = 'showing';
+    setNativeCaptionsActive(true);
+  }, [appleVideoPlayer]);
+  applyNativeAppleTrackRef.current = applyNativeAppleTrack;
+
   const destroyHls = () => {
     hlsRef.current?.destroy();
     hlsRef.current = null;
+    nativeTrackRef.current = null;
   };
 
   const showWaiting = useCallback(
@@ -481,6 +571,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           }
           setAudioTracks(tracks);
         }
+        applyNativeAppleTrackRef.current();
       };
     },
     [applyClock, reportBuffering, showWaiting, tryPlayWhenReady],
@@ -1007,7 +1098,11 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
 
   useEffect(() => {
     return subscribe((msg: ServerMessage) => {
-      rtcOnMessageRef.current(msg);
+      try {
+        rtcOnMessageRef.current(msg);
+      } catch {
+        // Camera signaling must not tear down playback.
+      }
       if (msg.type === 'error' && roomRef.current) setRoomError(msg.message);
       if (msg.type === 'state' && hostIsPresent(msg.room)) {
         setRoomError((prev) => (prev === 'Host is away' ? '' : prev));
@@ -1100,8 +1195,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
       }
       if (msg.type === 'ended') {
         setRoomError(msg.reason || 'Room ended');
-        showWaiting(msg.reason || 'Room ended');
-        navigate('/');
+        if (!soloContent) showWaiting(msg.reason || 'Room ended');
       }
     });
   }, [
@@ -1109,13 +1203,13 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     applySubtitleOptions,
     enqueueReaction,
     loadSubtitles,
-    navigate,
     playRoom,
     playStreamflixSource,
     playViaProxy,
     resetPlaybackKeys,
     send,
     showWaiting,
+    soloContent,
     subscribe,
   ]);
 
@@ -1274,6 +1368,32 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
       void loadSubtitleFile(option.url);
     }
   }, [loadSubtitleFile, playbackSession]);
+
+  useEffect(() => {
+    applyNativeAppleTrack();
+  }, [
+    applyNativeAppleTrack,
+    cues,
+    selectedSubId,
+    subOffset,
+    mode,
+    isHost,
+    room?.subtitles?.offsetSeconds,
+  ]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !appleVideoPlayer) return;
+    const apply = () => applyNativeAppleTrackRef.current();
+    video.addEventListener('loadeddata', apply);
+    video.addEventListener('webkitbeginfullscreen', apply);
+    video.addEventListener('enterpictureinpicture', apply);
+    return () => {
+      video.removeEventListener('loadeddata', apply);
+      video.removeEventListener('webkitbeginfullscreen', apply);
+      video.removeEventListener('enterpictureinpicture', apply);
+    };
+  }, [appleVideoPlayer, mode]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -1612,7 +1732,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           />
         ) : null}
         <SubtitleOverlay
-          text={cue?.text ?? null}
+          text={nativeCaptionsActive ? null : (cue?.text ?? null)}
           controlsVisible={overlay.visible}
         />
         {needsUnmute && mode === 'video' ? (
@@ -1688,6 +1808,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           onToggleCam={rtc.toggleCam}
           tilesHidden={callTilesHidden}
           onToggleTilesHidden={() => setCallTilesHidden((prev) => !prev)}
+          callError={rtc.error}
         />
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />
         <MembersSheet

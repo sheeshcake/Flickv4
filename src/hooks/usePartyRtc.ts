@@ -24,6 +24,7 @@ export interface PartyRtcRemote {
   id: string;
   name: string;
   streamURL: string;
+  renderKey: string;
   audioLevel?: number;
 }
 
@@ -65,6 +66,11 @@ interface UsePartyRtcArgs {
   subscribe: (listener: Listener) => () => void;
 }
 
+type RtcTrackEvent = {
+  track?: { id: string; kind: string };
+  streams?: MediaStream[];
+};
+
 const streamUrl = (stream: MediaStream | null): string | null => {
   if (!stream) return null;
   const withUrl = stream as MediaStream & { toURL?: () => string };
@@ -94,6 +100,11 @@ export const usePartyRtc = ({
   const localRef = useRef<MediaStream | null>(null);
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
   const pendingIceRef = useRef(new Map<string, PartyRtcSignalPayload[]>());
+  const remoteStreamsRef = useRef(new Map<string, MediaStream>());
+  const livePeerIdsRef = useRef(new Set<string>());
+  const iceRestartedRef = useRef(new Set<string>());
+  const recoveringRef = useRef(new Set<string>());
+  const recoverPeerRef = useRef<(peerId: string) => void>(() => {});
   const mutedRef = useRef(false);
   const camOffRef = useRef(false);
 
@@ -106,21 +117,32 @@ export const usePartyRtc = ({
     setRemotes((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
+  const teardownPc = useCallback((id: string) => {
+    const pc = peersRef.current.get(id);
+    if (pc) {
+      peersRef.current.delete(id);
+      pc.close();
+    }
+    pendingIceRef.current.delete(id);
+    remoteStreamsRef.current.delete(id);
+  }, []);
+
   const closePeer = useCallback(
     (id: string) => {
-      const pc = peersRef.current.get(id);
-      if (pc) {
-        pc.close();
-        peersRef.current.delete(id);
-      }
-      pendingIceRef.current.delete(id);
+      teardownPc(id);
+      iceRestartedRef.current.delete(id);
+      recoveringRef.current.delete(id);
       dropRemote(id);
     },
-    [dropRemote],
+    [dropRemote, teardownPc],
   );
 
   const closeAllPeers = useCallback(() => {
     for (const id of [...peersRef.current.keys()]) closePeer(id);
+    livePeerIdsRef.current = new Set();
+    iceRestartedRef.current.clear();
+    recoveringRef.current.clear();
+    remoteStreamsRef.current.clear();
   }, [closePeer]);
 
   const stopLocal = useCallback(() => {
@@ -169,9 +191,9 @@ export const usePartyRtc = ({
           pc.addTrack(track, local);
         });
       }
-      pc.onicecandidate = (ev) => {
+      pc.onicecandidate = (ev: unknown) => {
         const candidate = (
-          ev as unknown as {
+          ev as {
             candidate?: {
               candidate?: string;
               sdpMid?: string | null;
@@ -191,24 +213,48 @@ export const usePartyRtc = ({
           },
         });
       };
-      pc.ontrack = (ev) => {
-        const streams = (ev as unknown as { streams?: MediaStream[] }).streams;
-        const stream = streams?.[0];
-        const url = streamUrl(stream ?? null);
+      pc.ontrack = (ev: unknown) => {
+        const event = ev as RtcTrackEvent;
+        const track = event.track;
+        let stream = event.streams?.[0] ?? remoteStreamsRef.current.get(peerId);
+        if (!stream) {
+          stream = new MediaStream();
+        }
+        if (track && !stream.getTracks().some((existing) => existing.id === track.id)) {
+          stream.addTrack(track as Parameters<MediaStream['addTrack']>[0]);
+        }
+        remoteStreamsRef.current.set(peerId, stream);
+        const url = streamUrl(stream);
         if (!url) return;
+        const videoId = stream.getVideoTracks()[0]?.id;
+        const renderKey = videoId ? `${url}:${videoId}` : url;
         const name =
           roomRef.current?.members.find((m) => m.id === peerId)?.displayName ??
           'Guest';
         setRemotes((prev) => {
           const next = prev.filter((r) => r.id !== peerId);
-          next.push({ id: peerId, name, streamURL: url });
+          next.push({ id: peerId, name, streamURL: url, renderKey });
           return next;
         });
       };
       pc.onconnectionstatechange = () => {
-        const state = pc.connectionState;
-        if (state === 'failed' || state === 'closed' || state === 'disconnected') {
-          closePeer(peerId);
+        try {
+          if (peersRef.current.get(peerId) !== pc) return;
+          const state = pc.connectionState;
+          if (state === 'connected') {
+            iceRestartedRef.current.delete(peerId);
+            recoveringRef.current.delete(peerId);
+            return;
+          }
+          if (state === 'closed') {
+            closePeer(peerId);
+            return;
+          }
+          if (state === 'failed') {
+            recoverPeerRef.current(peerId);
+          }
+        } catch {
+          // Native WebRTC callbacks must not throw into the app.
         }
       };
       return pc;
@@ -217,36 +263,80 @@ export const usePartyRtc = ({
   );
 
   const offerTo = useCallback(
-    async (peerId: string) => {
-      try {
-        const pc = attachPeer(peerId);
-        const offer = await pc.createOffer({});
-        await pc.setLocalDescription(offer);
-        const sdp = pc.localDescription?.sdp;
-        if (!sdp) return;
-        send({
-          type: 'rtc-signal',
-          to: peerId,
-          payload: { type: 'offer', sdp },
-        });
-      } catch {
-        closePeer(peerId);
-      }
+    async (peerId: string, iceRestart = false) => {
+      const pc = attachPeer(peerId);
+      const offer = await pc.createOffer(
+        iceRestart ? { iceRestart: true } : {},
+      );
+      await pc.setLocalDescription(offer);
+      const sdp = pc.localDescription?.sdp;
+      if (!sdp) return false;
+      send({
+        type: 'rtc-signal',
+        to: peerId,
+        payload: { type: 'offer', sdp },
+      });
+      return true;
     },
-    [attachPeer, closePeer, send],
+    [attachPeer, send],
   );
+
+  const recoverPeer = useCallback(
+    (peerId: string) => {
+      if (!joinedRef.current || !livePeerIdsRef.current.has(peerId)) {
+        closePeer(peerId);
+        return;
+      }
+      if (recoveringRef.current.has(peerId)) return;
+      if (iceRestartedRef.current.has(peerId)) {
+        closePeer(peerId);
+        return;
+      }
+      iceRestartedRef.current.add(peerId);
+      recoveringRef.current.add(peerId);
+      const self = memberIdRef.current;
+      if (!self) {
+        recoveringRef.current.delete(peerId);
+        closePeer(peerId);
+        return;
+      }
+
+      const restart = async () => {
+        try {
+          const existing = peersRef.current.get(peerId);
+          if (existing && shouldOffer(self, peerId)) {
+            try {
+              if (await offerTo(peerId, true)) return;
+            } catch {
+              // Recreate below.
+            }
+          }
+          teardownPc(peerId);
+          if (shouldOffer(self, peerId)) await offerTo(peerId);
+        } catch {
+          closePeer(peerId);
+        } finally {
+          recoveringRef.current.delete(peerId);
+        }
+      };
+      void restart();
+    },
+    [closePeer, offerTo, teardownPc],
+  );
+  recoverPeerRef.current = recoverPeer;
 
   const syncPeers = useCallback(
     (ids: string[]) => {
       const self = memberIdRef.current;
       if (!self || !joinedRef.current) return;
       const live = new Set(ids.filter((id) => id !== self));
+      livePeerIdsRef.current = live;
       for (const id of [...peersRef.current.keys()]) {
         if (!live.has(id)) closePeer(id);
       }
       for (const id of live) {
         if (peersRef.current.has(id)) continue;
-        if (shouldOffer(self, id)) void offerTo(id);
+        if (shouldOffer(self, id)) void offerTo(id).catch(() => {});
       }
     },
     [closePeer, offerTo],
@@ -256,58 +346,58 @@ export const usePartyRtc = ({
     async (from: string, payload: PartyRtcSignalPayload) => {
       if (!joinedRef.current) return;
       try {
-      if (payload.type === 'ice') {
-        const pc = peersRef.current.get(from);
-        if (!pc || !pc.remoteDescription) {
-          const queued = pendingIceRef.current.get(from) ?? [];
-          queued.push(payload);
-          pendingIceRef.current.set(from, queued);
+        if (payload.type === 'ice') {
+          const pc = peersRef.current.get(from);
+          if (!pc || !pc.remoteDescription) {
+            const queued = pendingIceRef.current.get(from) ?? [];
+            queued.push(payload);
+            pendingIceRef.current.set(from, queued);
+            return;
+          }
+          if (!payload.candidate) return;
+          try {
+            await pc.addIceCandidate(
+              new RTCIceCandidate({
+                candidate: payload.candidate,
+                sdpMid: payload.sdpMid ?? undefined,
+                sdpMLineIndex: payload.sdpMLineIndex ?? undefined,
+              }),
+            );
+          } catch {
+            // ignore stale ICE
+          }
           return;
         }
-        if (!payload.candidate) return;
-        try {
-          await pc.addIceCandidate(
-            new RTCIceCandidate({
-              candidate: payload.candidate,
-              sdpMid: payload.sdpMid ?? undefined,
-              sdpMLineIndex: payload.sdpMLineIndex ?? undefined,
-            }),
+        if (payload.type === 'offer' && payload.sdp) {
+          const pc = attachPeer(from);
+          await pc.setRemoteDescription(
+            new RTCSessionDescription({ type: 'offer', sdp: payload.sdp }),
           );
-        } catch {
-          // ignore
+          await flushIce(from, pc);
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          const sdp = pc.localDescription?.sdp;
+          if (!sdp) return;
+          send({
+            type: 'rtc-signal',
+            to: from,
+            payload: { type: 'answer', sdp },
+          });
+          return;
         }
-        return;
-      }
-      if (payload.type === 'offer' && payload.sdp) {
-        const pc = attachPeer(from);
-        await pc.setRemoteDescription(
-          new RTCSessionDescription({ type: 'offer', sdp: payload.sdp }),
-        );
-        await flushIce(from, pc);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        const sdp = pc.localDescription?.sdp;
-        if (!sdp) return;
-        send({
-          type: 'rtc-signal',
-          to: from,
-          payload: { type: 'answer', sdp },
-        });
-        return;
-      }
-      if (payload.type === 'answer' && payload.sdp) {
-        const pc = peersRef.current.get(from);
-        if (!pc) return;
-        await pc.setRemoteDescription(
-          new RTCSessionDescription({ type: 'answer', sdp: payload.sdp }),
-        );
-        await flushIce(from, pc);
-      }
+        if (payload.type === 'answer' && payload.sdp) {
+          const pc = peersRef.current.get(from);
+          if (!pc) return;
+          await pc.setRemoteDescription(
+            new RTCSessionDescription({ type: 'answer', sdp: payload.sdp }),
+          );
+          await flushIce(from, pc);
+        }
       } catch {
-        closePeer(from);
+        recoverPeerRef.current(from);
       }
     },
-    [attachPeer, closePeer, flushIce, send],
+    [attachPeer, flushIce, send],
   );
 
   const leaveCall = useCallback(() => {
@@ -398,7 +488,7 @@ export const usePartyRtc = ({
         for (const [id, pc] of peersRef.current) {
           try {
             const stats = await pc.getStats();
-            stats.forEach((report) => {
+            stats.forEach((report: unknown) => {
               const row = report as {
                 type?: string;
                 kind?: string;

@@ -22,12 +22,14 @@ interface PartyCallOverlayProps {
 
 const Tile = ({
   streamURL,
+  renderKey,
   label,
   mirror,
   placeholder,
   speaking,
 }: {
   streamURL: string | null;
+  renderKey?: string;
   label: string;
   mirror?: boolean;
   placeholder?: boolean;
@@ -40,10 +42,12 @@ const Tile = ({
   >
     {streamURL && !placeholder ? (
       <RTCView
+        key={renderKey ?? streamURL}
         streamURL={streamURL}
         style={StyleSheet.absoluteFill}
         objectFit="cover"
         mirror={mirror}
+        zOrder={10}
       />
     ) : (
       <Box className="h-full w-full items-center justify-center bg-muted">
@@ -131,6 +135,7 @@ export const PartyCallOverlay = ({
             <Tile
               key={remote.id}
               streamURL={remote.streamURL}
+              renderKey={remote.renderKey}
               label={remote.name}
               speaking={remote.id === speakerId}
             />

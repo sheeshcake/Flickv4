@@ -1,0 +1,254 @@
+# Native release builds. Required repository secrets:
+#   EXPO_PUBLIC_TMDB_API_KEY
+#   EXPO_PUBLIC_WYZIE_API_KEY
+# Optional:
+#   EXPO_PUBLIC_WATCH_PARTY_URL
+#
+# Merging a PR to main bumps the patch version, builds APK + IPA, and
+# publishes a GitHub Release. Manual runs (workflow_dispatch) only upload
+# artifacts unless you enable create_release.
+
+name: Build Android & iOS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: APP_VERSION (e.g. 2.3.3). Empty uses the next patch from the latest tag.
+        required: false
+        type: string
+      android_version_code:
+        description: ANDROID_VERSION_CODE (must increase each APK). Empty is derived from APP_VERSION.
+        required: false
+        type: string
+      create_release:
+        description: Create a GitHub Release (always true on merge to main).
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: write
+
+env:
+  APP_VERSION_INPUT: ${{ github.event.inputs.app_version || '' }}
+  ANDROID_VERSION_CODE_INPUT: ${{ github.event.inputs.android_version_code || '' }}
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.resolve.outputs.app_version }}
+      android_version_code: ${{ steps.resolve.outputs.android_version_code }}
+      create_release: ${{ steps.resolve.outputs.create_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin || true
+
+          bump_patch() {
+            local raw="${1#v}"
+            local major=0 minor=0 patch=0
+            IFS='.' read -r major minor patch _ <<< "${raw}.0.0"
+            echo "${major}.${minor}.$((patch + 1))"
+          }
+
+          version_code() {
+            local raw="${1#v}"
+            local major=0 minor=0 patch=0
+            IFS='.' read -r major minor patch _ <<< "${raw}.0.0"
+            echo $((major * 10000 + minor * 100 + patch))
+          }
+
+          VERSION="${APP_VERSION_INPUT}"
+          CODE="${ANDROID_VERSION_CODE_INPUT}"
+          EXAMPLE_VERSION=$(grep -E '^APP_VERSION=' .env.example | cut -d= -f2- | tr -d '[:space:]')
+          LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n 1 || true)
+
+          if [ -z "$VERSION" ]; then
+            if [ -n "$LATEST_TAG" ]; then
+              VERSION="$(bump_patch "$LATEST_TAG")"
+            elif [ -n "$EXAMPLE_VERSION" ]; then
+              VERSION="$(bump_patch "$EXAMPLE_VERSION")"
+            else
+              VERSION="0.0.1"
+            fi
+          fi
+
+          if [ -z "$CODE" ]; then
+            CODE="$(version_code "$VERSION")"
+          fi
+
+          CREATE_RELEASE=false
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            CREATE_RELEASE=true
+          elif [ "${{ github.event.inputs.create_release || 'false' }}" = "true" ]; then
+            CREATE_RELEASE=true
+          fi
+
+          echo "app_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "android_version_code=${CODE}" >> "$GITHUB_OUTPUT"
+          echo "create_release=${CREATE_RELEASE}" >> "$GITHUB_OUTPUT"
+          echo "Building Flick ${VERSION} (${CODE}), release=${CREATE_RELEASE}, previous_tag=${LATEST_TAG:-none}"
+
+  android:
+    name: Android APK
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flick
+        uses: ./.github/actions/setup-flick
+        with:
+          app_version: ${{ needs.version.outputs.app_version }}
+          android_version_code: ${{ needs.version.outputs.android_version_code }}
+          tmdb_api_key: ${{ secrets.EXPO_PUBLIC_TMDB_API_KEY }}
+          wyzie_api_key: ${{ secrets.EXPO_PUBLIC_WYZIE_API_KEY }}
+          watch_party_url: ${{ secrets.EXPO_PUBLIC_WATCH_PARTY_URL }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Assemble release APK
+        working-directory: android
+        env:
+          ORG_GRADLE_PROJECT_reactNativeArchitectures: armeabi-v7a,arm64-v8a
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk \
+            "Flick-${{ needs.version.outputs.app_version }}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flick-${{ needs.version.outputs.app_version }}-android
+          path: Flick-${{ needs.version.outputs.app_version }}.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS IPA
+    needs: version
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Setup Flick
+        uses: ./.github/actions/setup-flick
+        with:
+          app_version: ${{ needs.version.outputs.app_version }}
+          android_version_code: ${{ needs.version.outputs.android_version_code }}
+          tmdb_api_key: ${{ secrets.EXPO_PUBLIC_TMDB_API_KEY }}
+          wyzie_api_key: ${{ secrets.EXPO_PUBLIC_WYZIE_API_KEY }}
+          watch_party_url: ${{ secrets.EXPO_PUBLIC_WATCH_PARTY_URL }}
+
+      - name: Install CocoaPods
+        run: |
+          gem install cocoapods
+          pod install --project-directory=ios
+
+      - name: Set iOS version
+        env:
+          APP_VERSION: ${{ needs.version.outputs.app_version }}
+          ANDROID_VERSION_CODE: ${{ needs.version.outputs.android_version_code }}
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" ios/Flick/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${ANDROID_VERSION_CODE}" ios/Flick/Info.plist
+
+      - name: Build unsigned Release app
+        env:
+          APP_VERSION: ${{ needs.version.outputs.app_version }}
+          ANDROID_VERSION_CODE: ${{ needs.version.outputs.android_version_code }}
+        run: |
+          xcodebuild \
+            -workspace ios/Flick.xcworkspace \
+            -scheme Flick \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ios/build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="${APP_VERSION}" \
+            CURRENT_PROJECT_VERSION="${ANDROID_VERSION_CODE}" \
+            build
+
+      - name: Package IPA
+        env:
+          APP_VERSION: ${{ needs.version.outputs.app_version }}
+        run: |
+          APP="ios/build/DerivedData/Build/Products/Release-iphoneos/Flick.app"
+          test -d "$APP"
+          mkdir -p ios/build/Payload
+          cp -R "$APP" ios/build/Payload/
+          (cd ios/build && zip -qry "Flick-${APP_VERSION}.ipa" Payload)
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flick-${{ needs.version.outputs.app_version }}-ios
+          path: ios/build/Flick-${{ needs.version.outputs.app_version }}.ipa
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [version, android, ios]
+    if: needs.version.outputs.create_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Flick-${{ needs.version.outputs.app_version }}-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          ls -la dist
+          gh release create "v${VERSION}" \
+            dist/Flick-"${VERSION}".apk \
+            dist/Flick-"${VERSION}".ipa \
+            --title "Flick ${VERSION}" \
+            --generate-notes \
+            --target "${{ github.sha }}"

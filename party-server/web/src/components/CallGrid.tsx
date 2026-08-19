@@ -25,8 +25,14 @@ const Tile = ({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.srcObject = stream && !placeholder ? stream : null;
-  }, [stream, placeholder]);
+    if (stream && !placeholder) {
+      el.srcObject = stream;
+      el.muted = Boolean(muted);
+      void el.play().catch(() => {});
+      return;
+    }
+    el.srcObject = null;
+  }, [muted, placeholder, stream]);
 
   return (
     <div
@@ -36,7 +42,15 @@ const Tile = ({
     >
       {stream && !placeholder ? (
         <video
-          ref={ref}
+          ref={(el) => {
+            ref.current = el;
+            if (!el) return;
+            el.setAttribute('playsinline', '');
+            el.setAttribute('webkit-playsinline', '');
+            el.muted = Boolean(muted);
+            el.srcObject = stream;
+            void el.play().catch(() => {});
+          }}
           autoPlay
           playsInline
           muted={muted}
@@ -91,18 +105,33 @@ export const CallGrid = ({
       speakerUntilRef.current = 0;
       return;
     }
-    const ctx = new AudioContext();
-    const nodes = remotes.map((remote) => {
-      const source = ctx.createMediaStreamSource(remote.stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      return {
-        id: remote.id,
-        analyser,
-        buffer: new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount)),
-      };
-    });
+    let ctx: AudioContext | null = null;
+    try {
+      ctx = new AudioContext();
+    } catch {
+      return;
+    }
+    const nodes: {
+      id: string;
+      analyser: AnalyserNode;
+      buffer: Uint8Array<ArrayBuffer>;
+    }[] = [];
+    for (const remote of remotes) {
+      if (remote.stream.getAudioTracks().length === 0) continue;
+      try {
+        const source = ctx.createMediaStreamSource(remote.stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        nodes.push({
+          id: remote.id,
+          analyser,
+          buffer: new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount)),
+        });
+      } catch {
+        // Video-only or muted streams cannot feed an AnalyserNode.
+      }
+    }
     void ctx.resume();
     const timer = window.setInterval(() => {
       const next: Record<string, number> = {};
@@ -127,7 +156,7 @@ export const CallGrid = ({
     }, 250);
     return () => {
       window.clearInterval(timer);
-      void ctx.close();
+      void ctx?.close();
     };
   }, [hidden, remotes]);
 
