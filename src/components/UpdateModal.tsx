@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, ScrollView } from 'react-native';
+import { Modal, Platform, ScrollView } from 'react-native';
 import { X } from 'lucide-react-native';
 import type { File } from 'expo-file-system';
 import { Box } from '@/components/ui/box';
@@ -125,8 +125,7 @@ export const UpdateModal = ({
   // automatically launches the installer — no extra manual step beyond the
   // OS's own install confirmation dialog.
   const startUpdate = useCallback(async () => {
-    if (!info?.downloadUrl) {
-      // No direct APK asset for this platform — fall back to the release page.
+    if (Platform.OS !== 'android' || !info?.downloadUrl) {
       await openReleasePage();
       return;
     }
@@ -163,6 +162,9 @@ export const UpdateModal = ({
   const retryInstall = useCallback(() => {
     if (downloadedFile) void runInstall(downloadedFile);
   }, [downloadedFile, runInstall]);
+
+  const canDownload =
+    Platform.OS === 'android' && Boolean(info?.downloadUrl);
 
   return (
     <Modal
@@ -229,9 +231,13 @@ export const UpdateModal = ({
                 </VStack>
               )}
 
-              {state === 'available' && info && <VersionSummary info={info} />}
+              {state === 'available' && info && (
+                <VersionSummary info={info} showDownloadSize={canDownload} />
+              )}
 
-              {state === 'downloading' && info && <VersionSummary info={info} />}
+              {state === 'downloading' && info && (
+                <VersionSummary info={info} showDownloadSize />
+              )}
 
               {state === 'installing' && (
                 <VStack space="md" className="items-center py-8">
@@ -280,23 +286,38 @@ export const UpdateModal = ({
 
             {state === 'available' && info && (
               <VStack space="sm" className="mt-4">
-                <Focusable
-                  onPress={startUpdate}
-                  hasTVPreferredFocus
-                  className="items-center rounded-md bg-primary px-4 py-3"
-                  focusedClassName="border-2 border-foreground"
-                >
-                  <Text className="font-semibold text-primary-foreground">
-                    {info.downloadUrl ? 'Download & install' : 'View on GitHub'}
-                  </Text>
-                </Focusable>
-                <Focusable
-                  onPress={openReleasePage}
-                  className="items-center rounded-md border border-border px-4 py-3"
-                  focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
-                >
-                  <Text className="text-foreground">Release page</Text>
-                </Focusable>
+                {canDownload ? (
+                  <>
+                    <Focusable
+                      onPress={startUpdate}
+                      hasTVPreferredFocus
+                      className="items-center rounded-md bg-primary px-4 py-3"
+                      focusedClassName="border-2 border-foreground"
+                    >
+                      <Text className="font-semibold text-primary-foreground">
+                        Download & install
+                      </Text>
+                    </Focusable>
+                    <Focusable
+                      onPress={openReleasePage}
+                      className="items-center rounded-md border border-border px-4 py-3"
+                      focusedClassName={`bg-primary/10 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                    >
+                      <Text className="text-foreground">Release page</Text>
+                    </Focusable>
+                  </>
+                ) : (
+                  <Focusable
+                    onPress={openReleasePage}
+                    hasTVPreferredFocus
+                    className="items-center rounded-md bg-primary px-4 py-3"
+                    focusedClassName="border-2 border-foreground"
+                  >
+                    <Text className="font-semibold text-primary-foreground">
+                      View on GitHub
+                    </Text>
+                  </Focusable>
+                )}
                 {onSkipVersion && (
                   <Pressable onPress={onSkipVersion}>
                     <Box className="items-center py-2">
@@ -361,15 +382,21 @@ export const UpdateModal = ({
             {state === 'error' && (
               <VStack space="sm" className="mt-4">
                 <Focusable
-                  onPress={info ? startUpdate : runCheck}
+                  onPress={
+                    info
+                      ? canDownload
+                        ? startUpdate
+                        : openReleasePage
+                      : runCheck
+                  }
                   className="items-center rounded-md bg-primary px-4 py-3"
                   focusedClassName="border-2 border-foreground"
                 >
                   <Text className="font-semibold text-primary-foreground">
-                    Try again
+                    {info && !canDownload ? 'View on GitHub' : 'Try again'}
                   </Text>
                 </Focusable>
-                {info?.releaseUrl && (
+                {info?.releaseUrl && canDownload && (
                   <Focusable
                     onPress={openReleasePage}
                     className="items-center rounded-md border border-border px-4 py-3"
@@ -390,7 +417,13 @@ export const UpdateModal = ({
 };
 
 /** Current → new version comparison + release notes, shared across states. */
-const VersionSummary = ({ info }: { info: UpdateInfo }) => (
+const VersionSummary = ({
+  info,
+  showDownloadSize = false,
+}: {
+  info: UpdateInfo;
+  showDownloadSize?: boolean;
+}) => (
   <>
     <VStack className="rounded-lg bg-background/40 p-4">
       <HStack className="items-center justify-between">
@@ -416,7 +449,7 @@ const VersionSummary = ({ info }: { info: UpdateInfo }) => (
         Released: {updateService.formatDate(info.releaseDate)}
       </Text>
     )}
-    {!!info.assetSize && (
+    {showDownloadSize && !!info.assetSize && (
       <Text size="xs" className="text-muted-foreground">
         Download size: {updateService.formatFileSize(info.assetSize)}
       </Text>

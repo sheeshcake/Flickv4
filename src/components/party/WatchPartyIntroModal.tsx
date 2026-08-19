@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Modal, StyleSheet } from 'react-native';
 import { Users, X } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -14,19 +15,46 @@ interface WatchPartyIntroModalProps {
   visible: boolean;
   onContinue: () => void;
   onDismiss: () => void;
+  /** `overlay` draws in-place (player). `modal` is a native Modal (detail/join). */
+  presentation?: 'modal' | 'overlay';
 }
+
+const wrapPresentation = (
+  presentation: 'modal' | 'overlay',
+  visible: boolean,
+  onRequestClose: () => void,
+  children: ReactNode,
+) => {
+  if (presentation === 'overlay') {
+    if (!visible) return null;
+    return (
+      <Box style={StyleSheet.absoluteFill} className="z-50">
+        {children}
+      </Box>
+    );
+  }
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onRequestClose}
+    >
+      {children}
+    </Modal>
+  );
+};
 
 export const WatchPartyIntroModal = ({
   visible,
   onContinue,
   onDismiss,
-}: WatchPartyIntroModalProps) => (
-  <Modal
-    visible={visible}
-    transparent
-    animationType="fade"
-    onRequestClose={onDismiss}
-  >
+  presentation = 'modal',
+}: WatchPartyIntroModalProps) =>
+  wrapPresentation(
+    presentation,
+    visible,
+    onDismiss,
     <Box className="flex-1 bg-background/80" style={StyleSheet.absoluteFill}>
       <Box className="flex-1 items-center justify-center px-6">
         <Box className="w-full max-w-md rounded-2xl bg-card p-5">
@@ -69,6 +97,5 @@ export const WatchPartyIntroModal = ({
           </VStack>
         </Box>
       </Box>
-    </Box>
-  </Modal>
-);
+    </Box>,
+  );

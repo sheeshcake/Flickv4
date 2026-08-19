@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Modal, Share, StyleSheet, useWindowDimensions } from 'react-native';
 import { Users, X } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -25,7 +25,35 @@ interface PartyLobbyModalProps {
   playTogetherLabel?: string;
   onPlayTogether: () => void;
   onClose: () => void;
+  /** `overlay` draws in-place (player). `modal` is a native Modal (detail/join). */
+  presentation?: 'modal' | 'overlay';
 }
+
+const wrapPresentation = (
+  presentation: 'modal' | 'overlay',
+  visible: boolean,
+  onRequestClose: () => void,
+  children: ReactNode,
+) => {
+  if (presentation === 'overlay') {
+    if (!visible) return null;
+    return (
+      <Box style={StyleSheet.absoluteFill} className="z-50">
+        {children}
+      </Box>
+    );
+  }
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onRequestClose}
+    >
+      {children}
+    </Modal>
+  );
+};
 
 const qrUri = (url: string) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(url)}&bgcolor=ffffff&color=000000&margin=8`;
@@ -37,6 +65,7 @@ export const PartyLobbyModal = ({
   playTogetherLabel = 'Play together',
   onPlayTogether,
   onClose,
+  presentation = 'modal',
 }: PartyLobbyModalProps) => {
   const {
     createRoom,
@@ -107,14 +136,11 @@ export const PartyLobbyModal = ({
     onClose();
   };
 
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={handleClose}
-    >
-      <Box className="flex-1 bg-background/80" style={StyleSheet.absoluteFill}>
+  return wrapPresentation(
+    presentation,
+    visible,
+    handleClose,
+    <Box className="flex-1 bg-background/80" style={StyleSheet.absoluteFill}>
         <Box className="flex-1 items-center justify-center px-4 py-3">
           <Box
             className={`w-full rounded-2xl bg-card p-4 ${landscape ? 'max-w-2xl' : 'max-w-md'}`}
@@ -303,7 +329,6 @@ export const PartyLobbyModal = ({
             </ScrollView>
           </Box>
         </Box>
-      </Box>
-    </Modal>
+      </Box>,
   );
 };

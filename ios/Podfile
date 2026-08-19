@@ -63,5 +63,20 @@ target 'Flick' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+
+    # Xcode 26 / iOS 26 SDK: CocoaPods prefix headers include <string.h>
+    # before MMKVCore can set __STDC_WANT_LIB_EXT1__, so memset_s is undeclared.
+    installer.pods_project.targets.each do |target|
+      next unless target.name == 'MMKVCore'
+      target.build_configurations.each do |config|
+        defs = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
+        defs = ['$(inherited)'] if defs.nil?
+        defs = [defs] unless defs.is_a?(Array)
+        unless defs.any? { |d| d.to_s.include?('__STDC_WANT_LIB_EXT1__') }
+          defs << '__STDC_WANT_LIB_EXT1__=1'
+        end
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs
+      end
+    end
   end
 end

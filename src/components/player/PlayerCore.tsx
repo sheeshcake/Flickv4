@@ -1444,6 +1444,7 @@ export const PlayerCore = ({
       )}
       <WatchPartyIntroModal
         visible={partyIntroOpen}
+        presentation="overlay"
         onContinue={() => {
           setPartyIntroOpen(false);
           setPartyLobbyOpen(true);
@@ -1452,6 +1453,7 @@ export const PlayerCore = ({
       />
       <PartyLobbyModal
         visible={partyLobbyOpen}
+        presentation="overlay"
         content={
           partyLobbyOpen
             ? partyContentFromItem(item, season, episode, imdbId)
