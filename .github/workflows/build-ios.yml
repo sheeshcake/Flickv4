@@ -1,0 +1,33 @@
+name: Build iOS IPA
+on: workflow_dispatch
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Unsigned iOS Archive
+        run: |
+          npx expo prebuild --platform ios
+          cd ios
+          xcodebuild -workspace *.xcworkspace -scheme Flickv4 -configuration Release -destination 'generic/platform=iOS' -archivePath build/Flickv4.xcarchive archive CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          mkdir -p Payload
+          cp -r build/Flickv4.xcarchive/Products/Applications/*.app Payload/
+          zip -r Flickv4.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Flickv4-IPA
+          path: ios/Flickv4.ipa
