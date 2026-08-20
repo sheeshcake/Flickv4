@@ -19,6 +19,10 @@
  * Rate-limiting lives here rather than at every call site so that the four
  * parallel segment progress callbacks that hit `DownloadService.updateJob`
  * per tick can't overwhelm the notifee JSI bridge.
+ *
+ * iOS: skip queued / resolving / downloading / paused entirely. At most one
+ * completed or failed banner (Android replaces one shade entry; iOS banners
+ * a new alert on every `displayNotification`).
  */
 
 import notifee, {
@@ -42,6 +46,8 @@ const notifId = (jobId: string): string => `flick-download-${jobId}`;
 const MIN_PUBLISH_INTERVAL_MS = 500;
 
 const lastPublishAt = new Map<string, number>();
+/** iOS: avoid a second banner when a completed job later gets subtitles. */
+const lastIosTerminalStatus = new Map<string, DownloadJob['status']>();
 
 let channelReady: Promise<void> | null = null;
 
@@ -118,6 +124,16 @@ export const publishJobNotification = async (
   // invocations (memoized).
   await ensureChannel();
 
+  // iOS banners a new alert on every displayNotification. Android replaces
+  // one shade entry. Skip in-progress states on iOS, and at most one
+  // completed / failed banner (subtitle sidecar writes would otherwise
+  // re-fire `completed`).
+  if (Platform.OS === 'ios') {
+    if (!isTerminalStatus(job)) return;
+    if (lastIosTerminalStatus.get(job.id) === job.status) return;
+    lastIosTerminalStatus.set(job.id, job.status);
+  }
+
   const now = Date.now();
   const terminal = isTerminalStatus(job);
   if (!terminal) {
@@ -177,6 +193,7 @@ export const publishJobNotification = async (
  */
 export const dismissJobNotification = async (jobId: string): Promise<void> => {
   lastPublishAt.delete(jobId);
+  lastIosTerminalStatus.delete(jobId);
   try {
     await notifee.cancelNotification(notifId(jobId));
   } catch {

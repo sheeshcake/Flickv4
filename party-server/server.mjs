@@ -1,8 +1,7 @@
 /**
  * Flick watch-party room server.
  * Syncs TMDB identity + a host playback clock.
- * Web guest waterfall: Streamflix → `/media` proxy → host embed.
- * Web host/solo: browser lists/decrypts via `/extract`, plays through `/media`.
+ * Web waterfall: Streamflix (`/streamflix/:session`) → `/media` proxy → Videasy embed.
  *
  * Protocol: keep in sync with `src/party/protocol.ts`.
  */
@@ -74,8 +73,13 @@ const MEDIA_PLAYLIST_TIMEOUT_MS = 20_000;
 const MEDIA_SEGMENT_TIMEOUT_MS = 45_000;
 const MEDIA_UA =
   'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
+const STREAMFLIX_PLAYBACK_HEADERS = {
+  vidrock: { referer: 'https://vidrock.net/', origin: 'https://vidrock.net' },
+  videasy: { referer: 'https://player.videasy.net/', origin: 'https://player.videasy.net' },
+  vidzee: { referer: 'https://player.vidzee.wtf/', origin: 'https://player.vidzee.wtf' },
+};
 
-/** @typedef {{ tmdbId: number, mediaType: 'movie'|'tv', title: string, posterPath?: string|null, season?: number, episode?: number, imdbId?: string|null }} PartyContent */
+/** @typedef {{ tmdbId: number, mediaType: 'movie'|'tv', title: string, posterPath?: string|null, season?: number, episode?: number, imdbId?: string|null, year?: string }} PartyContent */
 /** @typedef {{ positionSeconds: number, paused: boolean, updatedAt: number }} PartyClock */
 /** @typedef {{ uri: string, kind: 'hls'|'file', referer?: string, origin?: string, sourceId?: string }} PartySource */
 /** @typedef {{ url: string, language: string, display: string, offsetSeconds: number }} PartySubtitles */
@@ -130,6 +134,7 @@ const createPlaybackSession = (content) => {
       season: content.season,
       episode: content.episode,
       imdbId: content.imdbId ? String(content.imdbId).slice(0, 16) : null,
+      ...(content.year ? { year: String(content.year).slice(0, 4) } : {}),
     },
     clock: { positionSeconds: 0, paused: true, updatedAt: Date.now() },
     source: null,
@@ -239,10 +244,16 @@ const memberRoom = (memberId) => {
 
 const isHost = (room, memberId) => room.hostId === memberId;
 
+const parseYear = (raw) => {
+  const year = String(raw || '').trim().slice(0, 4);
+  return /^\d{4}$/.test(year) ? year : undefined;
+};
+
 const parsePartyContent = (raw) => {
   if (!raw || typeof raw.tmdbId !== 'number' || !raw.mediaType) {
     throw new Error('Missing content');
   }
+  const year = parseYear(raw.year);
   return {
     tmdbId: raw.tmdbId,
     mediaType: raw.mediaType === 'tv' ? 'tv' : 'movie',
@@ -251,7 +262,33 @@ const parsePartyContent = (raw) => {
     season: raw.season,
     episode: raw.episode,
     imdbId: raw.imdbId ? String(raw.imdbId).slice(0, 16) : null,
+    ...(year ? { year } : {}),
   };
+};
+
+const streamflixHeadersFromSourceId = (sourceId) => {
+  const id = String(sourceId || '').toLowerCase();
+  if (id.startsWith('videasy-')) return STREAMFLIX_PLAYBACK_HEADERS.videasy;
+  if (id.startsWith('vidzee-')) return STREAMFLIX_PLAYBACK_HEADERS.vidzee;
+  return STREAMFLIX_PLAYBACK_HEADERS.vidrock;
+};
+
+const streamflixUpstreamHeaders = (room) => {
+  const source = room?.source;
+  if (source?.referer) {
+    return {
+      Referer: source.referer,
+      ...(source.origin ? { Origin: source.origin } : {}),
+    };
+  }
+  const inferred = streamflixHeadersFromSourceId(source?.sourceId);
+  return { Referer: inferred.referer, Origin: inferred.origin };
+};
+
+const kindFromResolvedUrl = (url, fallback) => {
+  if (/\.m3u8(\?|#|$)/i.test(url)) return 'hls';
+  if (/\.(mp4|webm|mkv)(\?|#|$)/i.test(url)) return 'file';
+  return fallback === 'file' ? 'file' : 'hls';
 };
 
 const clearRoomPlayback = (room) => {
@@ -365,6 +402,24 @@ const rewriteHlsPlaylist = (text, playlistUrl, code, room) => {
 
 const looksLikePlaylistUrl = (parsed) => /\.m3u8(\?|#|$)/i.test(parsed.pathname);
 
+const looksLikeHlsPlaylist = (buf) =>
+  Buffer.isBuffer(buf) && buf.toString('utf8').trimStart().startsWith('#EXTM3U');
+
+const concatWebBody = async (prefix, reader, maxBytes) => {
+  const parts = prefix?.length ? [prefix] : [];
+  let size = prefix?.length || 0;
+  if (reader) {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) return null;
+      parts.push(Buffer.from(value));
+    }
+  }
+  return Buffer.concat(parts);
+};
+
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /** 1shows wraps MPEG-TS in a 1×1 PNG. Mobile players resync; HLS.js cannot. */
@@ -435,13 +490,14 @@ const serveMedia = async (code, req, res) => {
   req.on('close', onClose);
 
   try {
+    const streamflixHeaders = streamflix ? streamflixUpstreamHeaders(room) : null;
     const upstreamHeaders = {
       Accept: '*/*',
       'User-Agent': MEDIA_UA,
-      Referer: streamflix ? 'https://vidrock.net/' : room.source.referer,
+      Referer: streamflixHeaders ? streamflixHeaders.Referer : room.source.referer,
     };
-    if (streamflix) upstreamHeaders.Origin = 'https://vidrock.net';
-    else if (room.source.origin) upstreamHeaders.Origin = room.source.origin;
+    if (streamflixHeaders?.Origin) upstreamHeaders.Origin = streamflixHeaders.Origin;
+    else if (!streamflix && room.source.origin) upstreamHeaders.Origin = room.source.origin;
     if (req.headers.range) upstreamHeaders.Range = req.headers.range;
 
     const upstream = await fetch(parsed.href, {
@@ -461,9 +517,31 @@ const serveMedia = async (code, req, res) => {
       playlistHint ||
       /mpegurl|x-mpegURL|vnd\.apple\.mpegurl/i.test(contentType);
 
-    if (treatAsPlaylist && req.method !== 'HEAD') {
-      const buf = Buffer.from(await upstream.arrayBuffer());
-      if (buf.length > PLAYLIST_MAX_BYTES) {
+    const outHeaders = {
+      'content-type': contentType || 'application/octet-stream',
+      'cache-control': 'no-store',
+    };
+    const len = upstream.headers.get('content-length');
+    if (len) outHeaders['content-length'] = len;
+    const range = upstream.headers.get('content-range');
+    if (range) outHeaders['content-range'] = range;
+    const acceptRanges = upstream.headers.get('accept-ranges');
+    if (acceptRanges) outHeaders['accept-ranges'] = acceptRanges;
+
+    if (req.method === 'HEAD' || !upstream.body) {
+      res.writeHead(upstream.status, outHeaders);
+      res.end();
+      return;
+    }
+
+    const { prefix, reader } = await readWebPrefix(upstream.body, 96);
+    const prefixIsPlaylist = looksLikeHlsPlaylist(prefix);
+    if (streamflix && prefixIsPlaylist && !playlistHint) {
+      streamflixLog('proxy sniff playlist', code, host, parsed.pathname);
+    }
+    if (treatAsPlaylist || prefixIsPlaylist) {
+      const buf = await concatWebBody(prefix, reader, PLAYLIST_MAX_BYTES);
+      if (!buf) {
         res.writeHead(413, { 'content-type': 'text/plain; charset=utf-8' });
         res.end('Playlist too large');
         return;
@@ -491,24 +569,6 @@ const serveMedia = async (code, req, res) => {
       return;
     }
 
-    const outHeaders = {
-      'content-type': contentType || 'application/octet-stream',
-      'cache-control': 'no-store',
-    };
-    const len = upstream.headers.get('content-length');
-    if (len) outHeaders['content-length'] = len;
-    const range = upstream.headers.get('content-range');
-    if (range) outHeaders['content-range'] = range;
-    const acceptRanges = upstream.headers.get('accept-ranges');
-    if (acceptRanges) outHeaders['accept-ranges'] = acceptRanges;
-
-    if (req.method === 'HEAD' || !upstream.body) {
-      res.writeHead(upstream.status, outHeaders);
-      res.end();
-      return;
-    }
-
-    const { prefix, reader } = await readWebPrefix(upstream.body, 96);
     const skip = tsAfterPngPrefix(prefix);
     const start = skip ? prefix.subarray(skip) : prefix;
     if (skip) {
@@ -818,6 +878,7 @@ const servePlayCreate = async (req, res) => {
       season: raw.season != null ? Number(raw.season) : undefined,
       episode: raw.episode != null ? Number(raw.episode) : undefined,
       imdbId: raw.imdbId,
+      year: raw.year,
     });
   } catch {
     res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
@@ -856,6 +917,17 @@ const servePlaySource = async (code, req, res) => {
     res.end(JSON.stringify({ ok: false }));
     return;
   }
+  const sourceId = raw.sourceId != null ? String(raw.sourceId).slice(0, 80) : '';
+  const kind = kindFromResolvedUrl(uri, raw.kind === 'file' ? 'file' : 'hls');
+  const inferred = streamflixHeadersFromSourceId(sourceId);
+  const referer =
+    typeof raw.referer === 'string' && raw.referer
+      ? String(raw.referer).slice(0, URI_MAX)
+      : inferred.referer;
+  const origin =
+    typeof raw.origin === 'string' && raw.origin
+      ? String(raw.origin).slice(0, URI_MAX)
+      : inferred.origin;
   const subtitles = Array.isArray(raw.subtitles)
     ? raw.subtitles
         .filter((t) => t && typeof t.file === 'string' && /^https?:\/\//i.test(t.file))
@@ -865,6 +937,13 @@ const servePlaySource = async (code, req, res) => {
           file: String(t.file).slice(0, URI_MAX),
         }))
     : [];
+  room.source = {
+    uri,
+    kind,
+    referer,
+    origin,
+    ...(sourceId ? { sourceId } : {}),
+  };
   seedSourceHosts(room, { url: uri, subtitles });
   touch(room);
   res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -1115,6 +1194,7 @@ const listVidrock = async (content) => {
     let url = decryptVidrockUrl(packed);
     if (!url) continue;
     let kind = streamflixKind(data.type, url);
+    kind = kindFromResolvedUrl(url, kind);
     if (!isStreamUri(url) && !/\.m3u8(\?|#|$)/i.test(url)) {
       const mp4 = await pickAtlasMp4(url);
       if (mp4) {
@@ -1151,7 +1231,7 @@ const listVideasy = (content) => {
   const tmdbId = Number(content.tmdbId);
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) return [];
   const title = encodeURIComponent(content.title || '');
-  const year = '';
+  const year = content.year || '';
   const imdb = content.imdbId || '';
   return VIDEASY_SERVERS.filter(
     (s) => !(s.movieOnly && content.mediaType !== 'movie'),
@@ -1208,7 +1288,7 @@ const extractVideasy = async (source) => {
     .filter((t) => t.url)
     .map((t) => ({ label: t.lang || 'Unknown', file: t.url }));
   streamflixLog('videasy: ok', source.name, shortStreamflixUrl(url), 'subs', subtitles.length);
-  return { ...source, url, subtitles };
+  return { ...source, url, kind: kindFromResolvedUrl(url, source.kind), subtitles };
 };
 
 const VIDZEE_SERVERS = [
@@ -1318,7 +1398,7 @@ const extractVidzee = async (source) => {
     .filter((t) => t.url)
     .map((t) => ({ label: t.lang || 'Unknown', file: t.url }));
   streamflixLog('vidzee: ok', source.name, shortStreamflixUrl(url), 'subs', subtitles.length);
-  return { ...source, url, subtitles };
+  return { ...source, url, kind: kindFromResolvedUrl(url, source.kind), subtitles };
 };
 
 const listStreamflixSources = async (content) => {
@@ -1365,10 +1445,12 @@ const contentFromQuery = (reqUrl) => {
   const season = Number(reqUrl.searchParams.get('season'));
   const episode = Number(reqUrl.searchParams.get('episode'));
   const imdbId = String(reqUrl.searchParams.get('imdbId') || '').trim() || null;
+  const year = parseYear(reqUrl.searchParams.get('year'));
   return {
     tmdbId,
     mediaType,
     imdbId,
+    ...(year ? { year } : {}),
     ...(mediaType === 'tv' && Number.isFinite(season) && Number.isFinite(episode)
       ? { season, episode }
       : {}),
@@ -1393,7 +1475,17 @@ const serveStreamflixForContent = async (content, wantedId, res, room) => {
         res.end(JSON.stringify({ ok: false }));
         return;
       }
-      if (room) seedSourceHosts(room, resolved);
+      if (room) {
+        seedSourceHosts(room, resolved);
+        const inferred = streamflixHeadersFromSourceId(resolved.id);
+        room.source = {
+          uri: resolved.url,
+          kind: kindFromResolvedUrl(resolved.url, resolved.kind),
+          referer: inferred.referer,
+          origin: inferred.origin,
+          sourceId: resolved.id,
+        };
+      }
       streamflixLog(
         'http: source',
         room?.code || 'solo',
@@ -1552,8 +1644,9 @@ const serveSubtitle = async (code, req, res) => {
       'User-Agent': MEDIA_UA,
     };
     if (streamflix) {
-      upstreamHeaders.Referer = 'https://vidrock.net/';
-      upstreamHeaders.Origin = 'https://vidrock.net';
+      const headers = streamflixUpstreamHeaders(room);
+      upstreamHeaders.Referer = headers.Referer;
+      if (headers.Origin) upstreamHeaders.Origin = headers.Origin;
     } else if (room?.source?.referer) {
       upstreamHeaders.Referer = room.source.referer;
       if (room.source.origin) upstreamHeaders.Origin = room.source.origin;
@@ -1988,6 +2081,7 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
         season: content.season,
         episode: content.episode,
         imdbId: content.imdbId ? String(content.imdbId).slice(0, 16) : null,
+        ...(parseYear(content.year) ? { year: parseYear(content.year) } : {}),
       },
       clock,
       source: null,
@@ -2127,19 +2221,16 @@ const handleMessage = (ws, msg, getMemberId, setMemberId) => {
       if (!looksHttp || (!looksStream && !sourceId)) {
         throw new Error('Source must be a stream URL (m3u8/mp4), not an embed page');
       }
-      const kind = /\.m3u8(\?|#|$)/i.test(uri)
-        ? 'hls'
-        : msg.kind === 'file'
-          ? 'file'
-          : 'hls';
+      const kind = kindFromResolvedUrl(uri, msg.kind === 'file' ? 'file' : 'hls');
+      const inferred = sourceId ? streamflixHeadersFromSourceId(sourceId) : null;
       const referer =
         msg.referer != null
           ? String(msg.referer).slice(0, URI_MAX)
-          : room.source?.referer;
+          : inferred?.referer || room.source?.referer;
       const origin =
         msg.origin != null
           ? String(msg.origin).slice(0, URI_MAX)
-          : room.source?.origin;
+          : inferred?.origin || room.source?.origin;
       room.source = {
         uri,
         kind,

@@ -377,7 +377,8 @@ const EpisodeRow = ({
           {label}
         </Heading>
         <Text size="xs" className="text-muted-foreground" numberOfLines={1}>
-          {job.qualityLabel} · {sizeLabel(job)}
+          {job.qualityLabel}
+          {job.serverName ? ` · ${job.serverName}` : ''} · {sizeLabel(job)}
         </Text>
         <Text size="xs" className="mt-0.5 text-muted-foreground" numberOfLines={1}>
           {statusLabel(job)}
@@ -477,7 +478,8 @@ const DownloadRow = ({
             {job.title}
           </Heading>
           <Text size="xs" className="text-muted-foreground">
-            {job.qualityLabel} · {sizeLabel(job)}
+            {job.qualityLabel}
+          {job.serverName ? ` · ${job.serverName}` : ''} · {sizeLabel(job)}
           </Text>
           <Text size="xs" className="mt-0.5 text-muted-foreground">
             {statusLabel(job)}

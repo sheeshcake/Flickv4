@@ -28,7 +28,7 @@ Flickv4 2.0 is a ground-up revamp—not a polish pass. The app was rebuilt on **
 | **Downloads** | Background downloads (direct + HLS), pause/resume, progress notifications via Notifee, and a redesigned Downloads screen |
 | **TV & large screens** | Android TV / Leanback shell, side navigation, focusable UI, and Mac Catalyst layouts that share the TV grid |
 | **Architecture** | Cleaner `src/` layout—hooks, services, navigators, and providers instead of a monolithic App |
-| **Extras** | In-app update checks, Coming Soon handling, server settings, and smarter continue-watching |
+| **Extras** | In-app update checks, Coming Soon handling, server settings, smarter continue-watching, and **watch party** (synced playback, chat, optional camera) |
 
 ### Still the same idea
 
@@ -39,11 +39,49 @@ No ads. No subscriptions. Movies and TV via TMDB metadata, offline watching when
 ## Features
 
 - **Continue Watching** — Resume movies and episodes where you left off
+- **Watch party** — Watch the same title together; sync play/pause/seek, chat, reactions, and an optional in-room camera
 - **Offline downloads** — Queue, pause, resume; grouped TV episodes; live progress
 - **Subtitles** — Multi-language tracks with size, color, and position controls
 - **Search & browse** — TMDB-backed home rows, detail pages, cast, trailers, recommendations
 - **Adaptive layouts** — Phone, tablet, and TV shells from one codebase
 - **Picture-in-Picture** — Background-friendly playback where the platform supports it
+
+---
+
+## Watch party
+
+Watch party is **beta**. Rooms, sync, and the web companion can still be unreliable.
+
+Everyone plays the **same title on their own device**. The room only shares **play, pause, and seek** — the host’s controls lead, guests follow. Up to **8** people can be in a room. Friends can join from **Flick** or the **web companion** (QR code or link).
+
+### Host a room
+
+1. Open a movie or episode and tap **Watch party**.
+2. Pick the name others will see. Optionally set a password for a private room.
+3. Tap **Create room**, then share the **code**, the **Share** sheet, or the **Scan for web** QR.
+4. Tap **Play together** when you’re ready.
+
+### Join a room
+
+- **In Flick:** Settings → **Join watch party**. Pick a live public room or enter the host’s code (and password if they set one).
+- **Web:** Scan the host’s QR, or open the companion link they shared. The page can also hand you back into Flick via `flick://party/CODE`.
+- **Deep link:** Opening `flick://party/CODE` (or `com.wfrdee.flick://party/CODE`) jumps straight to join.
+
+Set **Watch party name** in Settings — that’s what shows in chat, reactions, and the member list.
+
+### In the player
+
+Once you’re in a room you can:
+
+- Follow the host’s playhead (guests can’t independently scrub the group)
+- Send **chat** and on-screen **reactions**
+- **Join camera** for an optional video-call grid (mute / cam off / hide tiles). Camera is not available on Android TV.
+
+Playback waits when someone is buffering. If the host leaves the player to pick another title, guests stay in the room until they leave or the host comes back.
+
+### From source
+
+Official GitHub builds already point at the public party server. If you compile Flick yourself, set `EXPO_PUBLIC_WATCH_PARTY_URL` (WebSocket, e.g. `wss://…`) in `.env` or the feature stays hidden. The Node server and web companion live in `party-server/`.
 
 ---
 
@@ -58,6 +96,7 @@ No ads. No subscriptions. Movies and TV via TMDB metadata, offline watching when
 | Downloads | `@kesha-antonov/react-native-background-downloader` · Notifee |
 | Navigation | React Navigation 7 |
 | Data | TMDB · Wyzie (subtitles) |
+| Watch party | WebSocket room server (`party-server/`) · WebRTC camera |
 
 ---
 

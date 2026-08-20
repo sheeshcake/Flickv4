@@ -31,10 +31,6 @@ import { Focusable } from '@/src/components/Focusable';
 import { ContentCard } from '@/src/components/ContentCard';
 import { SeasonEpisodePicker } from '@/src/components/SeasonEpisodePicker';
 import {
-  DownloadQualitySheet,
-  type DownloadQualityChoice,
-} from '@/src/components/DownloadQualitySheet';
-import {
   ActionIcon,
   MovieDownloadButton,
   TabButton,
@@ -43,7 +39,6 @@ import {
 import type { EpisodeDownloadState } from '@/src/components/SeasonEpisodePicker';
 import type { ComingSoonResult } from '@/src/utils/comingSoon';
 import type { DownloadJob } from '@/src/services/DownloadService';
-import type { Variant } from '@/src/utils/hlsVariants';
 import { getGridColumns } from '@/src/utils/responsive';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import {
@@ -96,11 +91,6 @@ interface DetailScreenTVProps {
   similarLoadingMore: boolean;
   onLoadMoreSimilar: () => void;
   onPressSimilar: (item: MediaItem) => void;
-  qualitySheet: {
-    variants: Variant[];
-    onSelect: (choice: DownloadQualityChoice) => void;
-  } | null;
-  onCloseQualitySheet: () => void;
 }
 
 /**
@@ -150,8 +140,6 @@ export const DetailScreenTV = ({
   similarLoadingMore,
   onLoadMoreSimilar,
   onPressSimilar,
-  qualitySheet,
-  onCloseQualitySheet,
 }: DetailScreenTVProps) => {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -410,13 +398,6 @@ export const DetailScreenTV = ({
           )}
         </Box>
       </ScrollView>
-
-      <DownloadQualitySheet
-        visible={qualitySheet != null}
-        variants={qualitySheet?.variants ?? []}
-        onSelect={(choice) => qualitySheet?.onSelect(choice)}
-        onClose={onCloseQualitySheet}
-      />
     </Box>
   );
 };

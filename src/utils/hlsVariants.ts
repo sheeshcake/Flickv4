@@ -1,18 +1,20 @@
 /**
  * HLS master-playlist parsing utilities.
  *
- * react-native-video exposes `selectedVideoTrack` for ABR-managed
- * resolution hints on Android only, so — for cross-platform parity — we
- * still drive the "select a resolution" feature ourselves by parsing the
- * master `.m3u8`, listing its variants, and swapping the source to a
- * variant's child playlist via `VideoRef.setSource(...)`.
+ * Quality selection stays on the master playlist. Android pins a rendition
+ * with `selectedVideoTrack` (RESOLUTION / AUTO); iOS uses `maxBitRate`.
+ * Swapping `source.uri` to a variant child playlist drops demuxed AUDIO
+ * groups (`#EXT-X-MEDIA:TYPE=AUDIO`) — Auto has sound, 1080p does not.
+ * Do not rewrite or locally host a filtered master (iOS cannot play
+ * `file://` HLS).
  *
  * A master playlist looks like:
  *
  *   #EXTM3U
- *   #EXT-X-STREAM-INF:BANDWIDTH=4200000,RESOLUTION=1920x1080,FRAME-RATE=24
+ *   #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac",URI="audio.m3u8"
+ *   #EXT-X-STREAM-INF:BANDWIDTH=4200000,RESOLUTION=1920x1080,AUDIO="aac"
  *   1080p/index.m3u8
- *   #EXT-X-STREAM-INF:BANDWIDTH=2100000,RESOLUTION=1280x720
+ *   #EXT-X-STREAM-INF:BANDWIDTH=2100000,RESOLUTION=1280x720,AUDIO="aac"
  *   720p/index.m3u8
  *   ...
  *
@@ -32,7 +34,32 @@ export interface Variant {
   bandwidth: number;
   /** Human-readable label, e.g. `"1080p"`, `"720p"`, `"480p"`. */
   label: string;
+  /** Raw `CODECS=` list from `#EXT-X-STREAM-INF`, if present. */
+  codecs?: string;
 }
+
+/**
+ * Lower is more likely to decode on Android MediaCodec without FFmpeg.
+ * AVC first, then HEVC, then Dolby Vision / unknown.
+ */
+export const codecRank = (codecs?: string): number => {
+  const c = (codecs ?? '').toLowerCase();
+  if (c.includes('avc1') || c.includes('avc3')) return 0;
+  if (c.includes('dvh1') || c.includes('dvhe') || c.includes('dvav')) return 2;
+  if (c.includes('hev1') || c.includes('hvc1')) return 1;
+  return 1;
+};
+
+/** Prefer AVC over HEVC/DV; same rank keeps the higher bandwidth. */
+export const isPreferredVariant = (
+  candidate: Variant,
+  existing: Variant,
+): boolean => {
+  const rankA = codecRank(candidate.codecs);
+  const rankB = codecRank(existing.codecs);
+  if (rankA !== rankB) return rankA < rankB;
+  return candidate.bandwidth > existing.bandwidth;
+};
 
 /** Extract a key/value from a `#EXT-X-STREAM-INF` attribute list. */
 const attr = (line: string, key: string): string | undefined => {
@@ -93,17 +120,25 @@ export const parseMasterPlaylist = (
       // If the master URI isn't parseable (rare), fall back to the raw string.
     }
 
+    const codecs = attr(line, 'CODECS');
     const label = height > 0 ? `${height}p` : `${Math.round(bandwidth / 1000)}kbps`;
 
-    variants.push({ uri: absoluteUri, width, height, bandwidth, label });
+    variants.push({
+      uri: absoluteUri,
+      width,
+      height,
+      bandwidth,
+      label,
+      codecs,
+    });
   }
 
-  // Dedupe by height (keep the highest bandwidth per resolution) and sort
-  // tallest -> shortest so the picker reads top-down like YouTube's menu.
+  // Dedupe by height: prefer AVC over HEVC/DV so Android offline playback
+  // does not pick a 10-bit HDR rendition the OEM decoder cannot handle.
   const byHeight = new Map<number, Variant>();
   for (const v of variants) {
     const existing = byHeight.get(v.height);
-    if (!existing || v.bandwidth > existing.bandwidth) {
+    if (!existing || isPreferredVariant(v, existing)) {
       byHeight.set(v.height, v);
     }
   }
@@ -176,9 +211,14 @@ export interface HlsKey {
 
 export interface MediaPlaylist {
   segments: HlsSegment[];
+  /** Last `#EXT-X-KEY` seen (compat). Prefer `keys` for downloads. */
   key?: HlsKey;
-  /** Absolute URI of a `#EXT-X-MAP:URI="…"` init segment, if present (fMP4). */
+  /** Last `#EXT-X-MAP` seen (compat). Prefer `mapInits` for downloads. */
   mapInit?: string;
+  /** Every encryption key in playlist order (key rotation). */
+  keys: HlsKey[];
+  /** Every fMP4 init URI in playlist order. */
+  mapInits: string[];
   targetDuration: number;
   totalDuration: number;
 }
@@ -212,13 +252,15 @@ export const parseMediaPlaylist = (
   playlistUri: string,
 ): MediaPlaylist => {
   const segments: HlsSegment[] = [];
+  const keys: HlsKey[] = [];
+  const mapInits: string[] = [];
   let key: HlsKey | undefined;
   let mapInit: string | undefined;
   let targetDuration = 0;
   let totalDuration = 0;
 
   if (!text.startsWith('#EXTM3U')) {
-    return { segments, key, mapInit, targetDuration, totalDuration };
+    return { segments, key, mapInit, keys, mapInits, targetDuration, totalDuration };
   }
 
   const lines = text.split(/\r?\n/);
@@ -250,6 +292,9 @@ export const parseMediaPlaylist = (
           uri: resolveUri(uriAttr, playlistUri),
           iv: attr(attrs, 'IV'),
         };
+        if (!keys.some((k) => k.uri === key!.uri && k.method === key!.method)) {
+          keys.push(key);
+        }
       } else {
         key = undefined;
       }
@@ -258,7 +303,10 @@ export const parseMediaPlaylist = (
 
     if (line.startsWith('#EXT-X-MAP:')) {
       const uriAttr = attr(line.slice(11), 'URI');
-      if (uriAttr) mapInit = resolveUri(uriAttr, playlistUri);
+      if (uriAttr) {
+        mapInit = resolveUri(uriAttr, playlistUri);
+        if (!mapInits.includes(mapInit)) mapInits.push(mapInit);
+      }
       continue;
     }
 
@@ -271,7 +319,7 @@ export const parseMediaPlaylist = (
     pendingDuration = 0;
   }
 
-  return { segments, key, mapInit, targetDuration, totalDuration };
+  return { segments, key, mapInit, keys, mapInits, targetDuration, totalDuration };
 };
 
 /**
@@ -288,6 +336,8 @@ export const fetchMediaPlaylist = async (
 ): Promise<FetchedMediaPlaylist> => {
   const empty: FetchedMediaPlaylist = {
     segments: [],
+    keys: [],
+    mapInits: [],
     targetDuration: 0,
     totalDuration: 0,
     rawText: '',
@@ -302,127 +352,63 @@ export const fetchMediaPlaylist = async (
   }
 };
 
+const isRemoteHttpUri = (uri: string): boolean =>
+  /^https?:\/\//i.test(uri.trim());
+
+export interface RewriteMediaPlaylistResult {
+  playlist: string;
+  leftoverRemoteUris: string[];
+}
+
 /**
- * HEAD-probe every URL in `uris` (in parallel, with a small concurrency cap)
- * and sum up the `Content-Length` headers. Returns `undefined` if we couldn't
- * derive a total (e.g. the server refuses HEAD, or omits `Content-Length` on
- * more than a couple of segments).
+ * Rewrite a media playlist's remote URIs to **relative** local paths
+ * (`segments/00000.ts`) so a loopback HTTP server (iOS) and file:// HLS
+ * (Android) can both resolve them next to `local.m3u8`.
  *
- * The caller is responsible for concatenating all segment / key / init URIs
- * into `uris` — this helper doesn't know anything about HLS.
- */
-export const probeTotalContentLength = async (
-  uris: string[],
-  headers?: Record<string, string>,
-  concurrency = 8,
-): Promise<number | undefined> => {
-  if (uris.length === 0) return 0;
-
-  let total = 0;
-  let unknown = 0;
-  let cursor = 0;
-
-  const runner = async () => {
-    while (cursor < uris.length) {
-      const my = cursor++;
-      const uri = uris[my];
-      try {
-        // `HEAD` is what we actually want, but some CDNs 405 it. Fall back
-        // to a byte-range GET (0-0) which reveals `Content-Range` and never
-        // downloads more than a byte.
-        let len = await tryHead(uri, headers);
-        if (len == null) len = await tryRangeProbe(uri, headers);
-        if (len == null || Number.isNaN(len)) {
-          unknown++;
-        } else {
-          total += len;
-        }
-      } catch {
-        unknown++;
-      }
-    }
-  };
-
-  const workers = Array.from(
-    { length: Math.min(concurrency, uris.length) },
-    () => runner(),
-  );
-  await Promise.all(workers);
-
-  // If more than a small fraction of probes fail, bail out — a partial total
-  // is worse than showing nothing.
-  if (unknown > Math.max(2, Math.floor(uris.length * 0.1))) {
-    return undefined;
-  }
-  return total;
-};
-
-const tryHead = async (
-  uri: string,
-  headers?: Record<string, string>,
-): Promise<number | null> => {
-  const res = await fetch(uri, { method: 'HEAD', headers });
-  if (!res.ok) return null;
-  const raw = res.headers.get('content-length');
-  if (!raw) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-};
-
-const tryRangeProbe = async (
-  uri: string,
-  headers?: Record<string, string>,
-): Promise<number | null> => {
-  const res = await fetch(uri, {
-    method: 'GET',
-    headers: { ...(headers ?? {}), Range: 'bytes=0-0' },
-  });
-  // 206 responses expose `Content-Range: bytes 0-0/12345`.
-  const cr = res.headers.get('content-range');
-  if (cr) {
-    const total = cr.split('/').pop();
-    if (total && total !== '*') {
-      const n = Number(total);
-      if (Number.isFinite(n) && n > 0) return n;
-    }
-  }
-  // 200 responses with the whole body — best-effort, most CDNs skip this.
-  const cl = res.headers.get('content-length');
-  if (cl && res.status === 200) {
-    const n = Number(cl);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return null;
-};
-
-/**
- * Rewrite a media playlist's remote URIs to local relative paths so the file
- * can be played from disk.
+ * Quoted and unquoted `URI=` attributes on `#EXT-X-KEY` / `#EXT-X-MAP`
+ * are rewritten. Any remote URL that is not in `uriMap` is recorded in
+ * `leftoverRemoteUris` so the downloader can fail the job instead of
+ * marking a still-online playlist as complete.
+ *
+ * Appends `#EXT-X-ENDLIST` when missing so AVPlayer treats the file as VOD
+ * rather than waiting on a live window.
  *
  * @param text        Original playlist text.
  * @param playlistUri Absolute URI the playlist was fetched from.
- * @param uriMap      Map from absolute remote URI -> local relative path
- *                    (e.g. `"segments/0000.ts"`).
+ * @param uriMap      Map from absolute remote URI -> relative local path
+ *                    (e.g. `"segments/00000.ts"`).
  */
 export const rewriteMediaPlaylist = (
   text: string,
   playlistUri: string,
   uriMap: Map<string, string>,
-): string => {
+): RewriteMediaPlaylistResult => {
   const lines = text.split(/\r?\n/);
   const out: string[] = [];
+  const leftoverRemoteUris: string[] = [];
+  let hasEndList = false;
+
+  const rememberLeftover = (uri: string) => {
+    if (isRemoteHttpUri(uri) && !leftoverRemoteUris.includes(uri)) {
+      leftoverRemoteUris.push(uri);
+    }
+  };
 
   for (const raw of lines) {
-    const line = raw;
-    const trimmed = line.trim();
+    const trimmed = raw.trim();
+    if (trimmed === '#EXT-X-ENDLIST') hasEndList = true;
 
     if (trimmed.startsWith('#EXT-X-KEY:') || trimmed.startsWith('#EXT-X-MAP:')) {
-      const rewritten = line.replace(
-        /URI="([^"]+)"/,
-        (_m, uri: string) => {
-          const abs = resolveUri(uri, playlistUri);
+      const rewritten = raw.replace(
+        /URI=("([^"]*)"|([^,"\s]+))/i,
+        (_m, _all: string, quoted?: string, unquoted?: string) => {
+          const original = quoted ?? unquoted ?? '';
+          const abs = resolveUri(original, playlistUri);
           const local = uriMap.get(abs);
-          return `URI="${local ?? uri}"`;
+          if (local) return `URI="${local}"`;
+          rememberLeftover(abs);
+          rememberLeftover(original);
+          return `URI="${original}"`;
         },
       );
       out.push(rewritten);
@@ -430,14 +416,60 @@ export const rewriteMediaPlaylist = (
     }
 
     if (!trimmed || trimmed.startsWith('#')) {
-      out.push(line);
+      out.push(raw);
       continue;
     }
 
     const abs = resolveUri(trimmed, playlistUri);
     const local = uriMap.get(abs);
-    out.push(local ?? line);
+    if (local) {
+      out.push(local);
+    } else {
+      rememberLeftover(abs);
+      rememberLeftover(trimmed);
+      out.push(raw);
+    }
   }
 
-  return out.join('\n');
+  if (!hasEndList) out.push('#EXT-X-ENDLIST');
+
+  return { playlist: out.join('\n'), leftoverRemoteUris };
 };
+
+/**
+ * Rewrite relative HLS paths (`segments/00000.ts`, `URI="segments/key-0.bin"`)
+ * to absolute `file://` URIs next to `playlistFileUri`. ExoPlayer's
+ * FileDataSource + AES-128 is unreliable with relative paths. Already-absolute
+ * `file:` / `http:` URIs are left alone.
+ */
+export const toAbsoluteFilePlaylist = (
+  text: string,
+  playlistFileUri: string,
+): string => {
+  const dir = playlistFileUri.replace(/\/[^/]*$/, '');
+  const abs = (rel: string): string => {
+    const trimmed = rel.trim();
+    if (/^(file|https?):/i.test(trimmed)) return trimmed;
+    const cleaned = trimmed.replace(/^\.\//, '');
+    return `${dir}/${cleaned}`;
+  };
+
+  return text
+    .split(/\r?\n/)
+    .map((raw) => {
+      const trimmed = raw.trim();
+      if (trimmed.startsWith('#EXT-X-KEY:') || trimmed.startsWith('#EXT-X-MAP:')) {
+        return raw.replace(
+          /URI=("([^"]*)"|([^,"\s]+))/i,
+          (_m, _all: string, quoted?: string, unquoted?: string) => {
+            const original = quoted ?? unquoted ?? '';
+            return `URI="${abs(original)}"`;
+          },
+        );
+      }
+      if (!trimmed || trimmed.startsWith('#')) return raw;
+      return abs(trimmed);
+    })
+    .join('\n');
+};
+

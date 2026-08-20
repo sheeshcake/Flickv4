@@ -78,7 +78,13 @@ export const PlayerScreen = ({
   useKeepAwake('flick-player');
 
   const { servers, activeServer, setActive } = useServers();
-  const { jobs, getLocalSource, getJob, getJobFor } = useDownloads();
+  const {
+    jobs,
+    getJob,
+    getJobFor,
+    prepareLocalPlayback,
+    stopLocalPlayback,
+  } = useDownloads();
   const { role, send, subscribe, leaveRoom, room } = useWatchParty();
   const roleRef = useRef(role);
   roleRef.current = role;
@@ -225,51 +231,78 @@ export const PlayerScreen = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- jobs triggers refresh
   }, [localSourceId, getJob, getJobFor, item, season, episode, jobs]);
 
-  const localForCurrent = useMemo<ReactVideoSource | null>(() => {
-    const id = localJob?.id;
-    if (!id) return null;
-    return getLocalSource(id) ?? null;
-  }, [localJob?.id, getLocalSource]);
+  const playingDownloaded = localJob?.status === 'completed';
 
-  const localSubtitles =
-    localForCurrent && localJob?.status === 'completed'
-      ? localJob.subtitles
-      : undefined;
+  const localSubtitles = playingDownloaded ? localJob.subtitles : undefined;
 
   // Track which episode key we've already toasted about, so switching
   // between episodes shows the "data saving" toast at most once each.
   const toastedKeyRef = useRef<string | null>(null);
 
   // Playing back a downloaded copy: short-circuit the scraper entirely and
-  // feed the local URI straight into react-native-video. We also surface a
-  // lightweight "playing offline copy" toast the first time this happens
-  // per episode so the user knows we're saving data.
+  // feed a local source into react-native-video. iOS HLS goes through a
+  // loopback HTTP server (AVPlayer will not play file:// playlists); Android
+  // uses the on-disk file:// URI. Depend on job id + completed status only
+  // — not the full `jobs` snapshot — so a late subtitle sidecar write does
+  // not tear down the loopback server.
   //
   // The `resolvedRef` guard matters: if the user was ALREADY streaming and a
   // background download for this same episode finished mid-playback, we
   // don't want to restart or spam a toast — we just leave the stream alone.
   useEffect(() => {
     if (waitingForHost) return;
-    if (!localForCurrent) return;
+    if (!playingDownloaded || !localJob?.id) {
+      void stopLocalPlayback();
+      return;
+    }
     if (resolvedRef.current) return;
-    finish(localForCurrent);
+    const jobId = localJob.id;
+    let cancelled = false;
+    void prepareLocalPlayback(jobId).then((src) => {
+      if (cancelled) return;
+      if (!src) {
+        setNoSource(true);
+        return;
+      }
+      finish(src);
 
-    const key = `${item.id}-${season ?? 'm'}-${episode ?? 'm'}`;
-    if (toastedKeyRef.current === key) return;
-    toastedKeyRef.current = key;
-    toast.show({
-      placement: 'top',
-      duration: 3500,
-      render: ({ id }) => (
-        <Toast nativeID={id} action="info" variant="solid">
-          <ToastTitle>Playing downloaded copy</ToastTitle>
-          <ToastDescription>
-            Using your offline download to save data.
-          </ToastDescription>
-        </Toast>
-      ),
+      const key = `${item.id}-${season ?? 'm'}-${episode ?? 'm'}`;
+      if (toastedKeyRef.current === key) return;
+      toastedKeyRef.current = key;
+      toast.show({
+        placement: 'top',
+        duration: 3500,
+        render: ({ id }) => (
+          <Toast nativeID={id} action="info" variant="solid">
+            <ToastTitle>Playing downloaded copy</ToastTitle>
+            <ToastDescription>
+              Using your offline download to save data.
+            </ToastDescription>
+          </Toast>
+        ),
+      });
     });
-  }, [waitingForHost, localForCurrent, finish, item.id, season, episode, toast]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    waitingForHost,
+    playingDownloaded,
+    localJob?.id,
+    prepareLocalPlayback,
+    stopLocalPlayback,
+    finish,
+    item.id,
+    season,
+    episode,
+    toast,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      void stopLocalPlayback();
+    };
+  }, [stopLocalPlayback]);
 
   const onExtracted = useCallback(
     ({ videoUrl: url }: ExtractedStream) => {
@@ -427,7 +460,7 @@ export const PlayerScreen = ({
   }, [source, publishHostSource, activeStreamflixSourceId]);
 
   useEffect(() => {
-    if (localForCurrent) return;
+    if (playingDownloaded) return;
     if (resolvedRef.current || source || noSource || waitingForHost) return;
     if (!usingStreamflix) return;
     let cancelled = false;
@@ -484,7 +517,7 @@ export const PlayerScreen = ({
       cancelled = true;
     };
   }, [
-    localForCurrent,
+    playingDownloaded,
     source,
     noSource,
     waitingForHost,
@@ -742,17 +775,18 @@ export const PlayerScreen = ({
         onSelectEpisode={
           type === 'tv' && role !== 'guest' ? handleSelectEpisode : undefined
         }
-        onSelectServer={localForCurrent ? undefined : handleSelectServer}
+        onSelectServer={playingDownloaded ? undefined : handleSelectServer}
         streamflixSources={usingStreamflix ? streamflixSources : []}
         activeStreamflixSourceId={activeStreamflixSourceId}
         onSelectStreamflixSource={
-          localForCurrent || !usingStreamflix
+          playingDownloaded || !usingStreamflix
             ? undefined
             : handleSelectStreamflixSource
         }
         extractorSubtitles={extractorSubtitles}
-        onPlaybackFailed={localForCurrent ? undefined : handlePlaybackFailed}
+        onPlaybackFailed={playingDownloaded ? undefined : handlePlaybackFailed}
         localSubtitles={localSubtitles}
+        isLocalDownload={playingDownloaded}
         onPlayRecommendation={handlePlayRecommendation}
       />
     );
@@ -818,7 +852,7 @@ export const PlayerScreen = ({
   return (
     <Box className="flex-1 bg-black">
       <StatusBar hidden />
-      {!localForCurrent && !usingRestResolver && !waitingForHost && (
+      {!playingDownloaded && !usingRestResolver && !waitingForHost && (
         <WebViewScraper
           server={activeServer}
           tmdbId={item.id}
@@ -868,7 +902,7 @@ export const PlayerScreen = ({
           </Text>
         </Center>
       )}
-      {!localForCurrent && (
+      {!playingDownloaded && (
         <ServerLoadingSideNav
           servers={servers}
           activeServerId={activeServer.id}
