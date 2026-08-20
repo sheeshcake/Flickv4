@@ -36,13 +36,15 @@ jobs:
       - name: Fix MMKV and Install CocoaPods
         run: |
           cd ios
+          # Remove stale lockfile to allow downgrading MMKV to 2.3.0
+          rm -f Podfile.lock
           if ! grep -q "pod 'MMKV', '2.3.0'" Podfile; then
             sed -i '' '/target '\''Flick'\'' do/a\
               pod '\''MMKV'\'', '\''2.3.0'\''\
               pod '\''MMKVCore'\'', '\''2.3.0'\''
             ' Podfile
           fi
-          pod install
+          pod install --repo-update
 
       - name: Build Xcode Archive
         run: |
