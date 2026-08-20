@@ -14,33 +14,34 @@ jobs:
           node-version: 22
           cache: 'npm'
 
-      - name: Setup Environment File (.env)
-        env:
-          TMDB_TOKEN: ${{ secrets.TMDB_READ_TOKEN }}
+      - name: Inject TMDB Keys into Environment
         run: |
-          if [ -f .env.example ]; then
-            cp .env.example .env
-          fi
-          # Write the TMDB base URL, API key, and v4 Bearer access token
-          echo "EXPO_PUBLIC_TMDB_API_URL=https://api.themoviedb.org/3" >> .env
-          echo "EXPO_PUBLIC_TMDB_BASE_URL=https://api.themoviedb.org/3" >> .env
-          echo "EXPO_PUBLIC_TMDB_API_KEY=$TMDB_TOKEN" >> .env
-          echo "EXPO_PUBLIC_TMDB_ACCESS_TOKEN=$TMDB_TOKEN" >> .env
-          echo "EXPO_PUBLIC_TMDB_READ_ACCESS_TOKEN=$TMDB_TOKEN" >> .env
+          cat << 'EOF' > .env
+          EXPO_PUBLIC_TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
+          EXPO_PUBLIC_TMDB_BASE_URL=https://api.themoviedb.org/3
+          EXPO_PUBLIC_TMDB_IMAGE_BASE_URL=https://image.tmdb.org/t/p/w500
+          EXPO_PUBLIC_TMDB_READ_ACCESS_TOKEN=eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIxMDExNmZhMzAyYzhmZTBjMmNiYzM4YmUxN2FhNjVhNSIsIm5iZiI6MTc4NzE0MjkzMy4wNiwic3ViamVjdCI6IjZkNWEzMTU0NmQzN2ZlMzYxNjc0NDEzIiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.nHY8A-KhX4-MefoFpq7Wy32K5EVdn9uTsYkCfkcCi_I
+          EXPO_PUBLIC_WYZIE_BASE_URL=https://sub.wyzie.io
+          EXPO_PUBLIC_WYZIE_API_KEY=
+          EXPO_PUBLIC_SAMPLE_VIDEO_URL=https://media.w3.org/2010/05/sintel/trailer.mp4
+          EXPO_PUBLIC_WATCH_PARTY_URL=
+          TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
+          APP_VERSION=2.1.5
+          ANDROID_VERSION_CODE=20105
+          EOF
 
-      - name: Install Dependencies
+      - name: Install Node Dependencies
         run: npm install
 
-      - name: Expo Prebuild (No Pods)
-        run: npx expo prebuild --platform ios --no-install
-
-      - name: Fix MMKV CocoaPods Dependency
+      - name: Fix MMKV and Install CocoaPods
         run: |
           cd ios
-          sed -i '' '/target '\''Flick'\'' do/a\
-            pod '\''MMKV'\'', '\''2.3.0'\''\
-            pod '\''MMKVCore'\'', '\''2.3.0'\''
-          ' Podfile
+          if ! grep -q "pod 'MMKV', '2.3.0'" Podfile; then
+            sed -i '' '/target '\''Flick'\'' do/a\
+              pod '\''MMKV'\'', '\''2.3.0'\''\
+              pod '\''MMKVCore'\'', '\''2.3.0'\''
+            ' Podfile
+          fi
           pod install
 
       - name: Build Xcode Archive
