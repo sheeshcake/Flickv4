@@ -33,7 +33,7 @@ export const DownloadResolverHost = () => {
 
   useEffect(() => {
     const resolver = (req: ResolveRequest) => {
-      if (req.resolver === 'streamflix') {
+      if (req.server.resolver === 'streamflix') {
         return StreamflixService.resolve({
           tmdbId: req.tmdbId,
           mediaType: req.type,
@@ -87,16 +87,14 @@ export const DownloadResolverHost = () => {
   return (
     <View style={styles.hidden} pointerEvents="none">
       <WebViewScraper
-        // Downloads always resolve against the default `{url}/{type}/{tmdbId}`
-        // pattern — `ResolveRequest` only carries a plain base URL, not a
-        // full server config, so a custom pattern/TV type label set on a
-        // server only applies to live playback (`PlayerScreen`), not queued
-        // downloads.
-        server={{ url: job.baseUrl }}
+        server={job.server}
         tmdbId={job.tmdbId}
+        imdbId={job.imdbId}
         type={job.type}
         season={job.season}
         episode={job.episode}
+        title={job.title}
+        timeoutSeconds={job.server.scraperTimeoutSeconds}
         onDataExtracted={handleExtracted}
         onError={handleError}
       />

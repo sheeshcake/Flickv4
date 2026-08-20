@@ -698,10 +698,16 @@ export const PlayerCore = ({
     durationRef.current = duration;
   }, [currentTime, duration]);
 
-  // Fetch HLS variants once per source. For non-HLS sources this stays empty
-  // and the quality button is hidden.
+  // Fetch HLS variants once per remote source. Offline playlists (file://
+  // on Android, loopback HTTP on iOS) are already a single downloaded media
+  // playlist — fetching them would try the CDN and break airplane mode.
+  const isOfflineSource =
+    !!masterUri &&
+    (masterUri.startsWith('file:') ||
+      /^https?:\/\/127\.0\.0\.1(?::\d+)?\//i.test(masterUri) ||
+      /^https?:\/\/localhost(?::\d+)?\//i.test(masterUri));
   useEffect(() => {
-    if (!isHls || !masterUri) {
+    if (!isHls || !masterUri || isOfflineSource) {
       setVariants([]);
       return;
     }
@@ -712,7 +718,7 @@ export const PlayerCore = ({
     return () => {
       cancelled = true;
     };
-  }, [isHls, masterUri, sourceObj?.headers]);
+  }, [isHls, masterUri, isOfflineSource, sourceObj?.headers]);
 
   // -------------------------------------------------------------------------
   // Source construction. The `source` PROP given to `<Video>` is built ONCE

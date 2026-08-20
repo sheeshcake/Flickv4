@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 import {
   completeHandler,
@@ -10,12 +11,12 @@ import {
 import type { ReactVideoSource } from 'react-native-video';
 import { getTitle, type MediaItem } from '@/src/types';
 import { originOf } from '@/src/utils/streamUrl';
+import type { PlaybackServer } from '@/src/hooks/useServers';
 import type { ServerResolver } from '@/src/services/playbackHeaders';
 import { STREAMFLIX_PLAYBACK_HEADERS } from '@/src/services/StreamflixService';
 import {
   fetchHlsVariants,
   fetchMediaPlaylist,
-  probeTotalContentLength,
   rewriteMediaPlaylist,
   type Variant,
 } from '@/src/utils/hlsVariants';
@@ -24,6 +25,7 @@ import {
   ensureChannel as ensureNotifChannel,
   publishJobNotification,
 } from './DownloadNotifier';
+import { serveLocalHls, stopLocalHlsServer } from './LocalDownloadServer';
 import { WyzieService } from './WyzieService';
 
 // ---------------------------------------------------------------------------
@@ -85,20 +87,27 @@ export interface DownloadJob {
   /** Local subtitle files written next to the video (default language). */
   subtitles?: LocalDownloadedSubtitle[];
   headers: Record<string, string>;
+  /** Server used to resolve this job — resume uses this, not the playback server. */
+  serverId?: string;
+  serverName?: string;
+  /** Snapshot of the download server so resume can re-scrape without the global picker. */
+  server?: PlaybackServer;
+  /** IMDb id used for servers whose embed pattern needs `{imdbId}`. */
+  imdbId?: string | null;
   error?: string;
   createdAt: number;
   updatedAt: number;
 }
 
 export interface ResolveRequest {
-  baseUrl: string;
+  server: PlaybackServer;
   tmdbId: number;
   type: 'movie' | 'tv';
   season?: number;
   episode?: number;
   /** Raw show/movie title. */
   title?: string;
-  resolver?: ServerResolver;
+  imdbId?: string | null;
 }
 
 export interface ResolvedStream {
@@ -109,7 +118,8 @@ export interface ResolvedStream {
 export type Resolver = (req: ResolveRequest) => Promise<ResolvedStream>;
 
 export interface EnqueueOptions {
-  serverUrl: string;
+  /** Full server used for this download (not the global playback picker). */
+  server: PlaybackServer;
   qualityHeight: number;
   qualityLabel: string;
   season?: number;
@@ -127,7 +137,11 @@ export interface EnqueueOptions {
    * the user's Settings default). Empty/undefined skips subtitle download.
    */
   subtitleLanguage?: string;
-  resolver?: ServerResolver;
+  imdbId?: string | null;
+  /** Override request headers (e.g. Streamflix source Referer/Origin). */
+  headers?: Record<string, string>;
+  /** Display name for the Downloads list (may include Streamflix source). */
+  serverName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,10 +150,14 @@ export interface EnqueueOptions {
 
 const STORAGE_KEY = 'flick.downloads';
 const SEGMENT_CONCURRENCY = 4;
+const SEGMENT_RETRIES = 3;
 
 const TAG = '[DownloadService]';
 // eslint-disable-next-line no-console
 const log = (...args: unknown[]) => console.log(TAG, ...args);
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const pad = (n: number, width = 5) => n.toString().padStart(width, '0');
 
@@ -157,6 +175,8 @@ const extForUrl = (url: string, fallback = 'ts'): string => {
   if (ext.length > 5) return fallback;
   return ext;
 };
+
+const IOS_UNSUPPORTED_EXTS = new Set(['webm', 'mkv', 'avi']);
 
 const jobIdFor = (
   item: MediaItem,
@@ -339,8 +359,39 @@ class DownloadServiceImpl {
     if (!job || job.status !== 'completed' || !job.localUri) return null;
     return {
       uri: job.localUri,
+      isNetwork: false,
       type: job.kind === 'hls' ? 'm3u8' : undefined,
     };
+  }
+
+  /**
+   * Ready a completed job for `<Video>`. On iOS, HLS is served over a
+   * loopback HTTP server because AVPlayer will not play `file://` playlists.
+   * Android uses the on-disk `file://` URI.
+   */
+  async prepareLocalPlayback(id: string): Promise<ReactVideoSource | null> {
+    const base = this.getLocalSource(id);
+    if (!base) return null;
+    const job = this.jobs.get(id);
+    if (!job) return null;
+    if (Platform.OS === 'ios' && job.kind === 'hls') {
+      try {
+        const origin = await serveLocalHls(job.localDir);
+        return {
+          uri: `${origin.replace(/\/$/, '')}/local.m3u8`,
+          isNetwork: true,
+          type: 'm3u8',
+        };
+      } catch (e) {
+        log('prepareLocalPlayback: loopback server failed', e);
+        return null;
+      }
+    }
+    return base;
+  }
+
+  async stopLocalPlayback(): Promise<void> {
+    await stopLocalHlsServer();
   }
 
   // -------------------------------------------------------------------------
@@ -387,7 +438,11 @@ class DownloadServiceImpl {
       totalBytes: 0,
       localDir,
       subtitleLanguage: opts.subtitleLanguage?.trim() || undefined,
-      headers: buildHeaders(opts.serverUrl, opts.resolver),
+      headers: opts.headers ?? buildHeaders(opts.server.url, opts.server.resolver),
+      serverId: opts.server.id,
+      serverName: opts.serverName ?? opts.server.name,
+      server: opts.server,
+      imdbId: opts.imdbId,
       createdAt: now,
       updatedAt: now,
     };
@@ -438,23 +493,37 @@ class DownloadServiceImpl {
     this.updateJob(id, { status: 'paused' });
   }
 
-  async resume(id: string, serverUrl?: string): Promise<void> {
+  async resume(id: string, server?: PlaybackServer): Promise<void> {
     const job = this.jobs.get(id);
     if (!job) return;
     if (job.status !== 'paused' && job.status !== 'failed') return;
     this.cancelled.delete(id);
     this.updateJob(id, { status: 'queued', error: undefined });
+    const resolvedServer =
+      server ??
+      job.server ??
+      ({
+        id: job.serverId ?? '',
+        name: job.serverName ?? '',
+        url: this.serverUrlFromHeaders(job.headers),
+      } satisfies PlaybackServer);
+    if (server) {
+      this.updateJob(id, {
+        server,
+        serverId: server.id,
+        serverName: server.name,
+        headers: buildHeaders(server.url, server.resolver),
+      });
+    }
     void this.process(id, {
-      serverUrl: serverUrl ?? this.serverUrlFromHeaders(job.headers),
+      server: resolvedServer,
       qualityHeight: job.qualityHeight,
       qualityLabel: job.qualityLabel,
       season: job.season,
       episode: job.episode,
       title: job.title,
       subtitleLanguage: job.subtitleLanguage,
-      resolver: job.headers.Referer?.includes('vidrock.net')
-        ? 'streamflix'
-        : undefined,
+      imdbId: job.imdbId,
     }).catch((e) => log('resume: process failed', e));
   }
 
@@ -523,13 +592,13 @@ class DownloadServiceImpl {
       this.updateJob(id, { status: 'resolving' });
       try {
         const resolved = await this.resolver!({
-          baseUrl: opts.serverUrl,
+          server: opts.server,
           tmdbId: job.item.id,
           type: job.item.media_type === 'tv' ? 'tv' : 'movie',
           season: job.season,
           episode: job.episode,
           title: getTitle(job.item),
-          resolver: opts.resolver,
+          imdbId: opts.imdbId ?? job.imdbId,
         });
         streamUri = resolved.videoUrl;
         this.updateJob(id, {
@@ -632,6 +701,13 @@ class DownloadServiceImpl {
     this.updateJob(id, { status: 'downloading', totalSegments: 1 });
 
     const ext = extForUrl(url, 'mp4');
+    if (Platform.OS === 'ios' && IOS_UNSUPPORTED_EXTS.has(ext)) {
+      this.updateJob(id, {
+        status: 'failed',
+        error: `${ext.toUpperCase()} cannot be played offline on iOS`,
+      });
+      return;
+    }
     const dest = `${job.localDir}/video.${ext}`;
 
     await new Promise<void>((resolve, reject) => {
@@ -714,7 +790,21 @@ class DownloadServiceImpl {
       return;
     }
 
-    // 3) Build the URL map and prepare the segments folder.
+    const unsupported = media.keys.find((k) => {
+      const method = k.method.toUpperCase();
+      return method !== 'AES-128' && method !== 'NONE';
+    });
+    if (unsupported) {
+      this.updateJob(id, {
+        status: 'failed',
+        error: `HLS encryption ${unsupported.method} cannot be played offline`,
+      });
+      return;
+    }
+
+    // 3) Build the URL map (remote URI → relative path next to local.m3u8)
+    // and prepare the segments folder. Relative paths work for both the iOS
+    // loopback HTTP server and Android file:// HLS.
     const segmentsDirUri = `${job.localDir}/segments`;
     try {
       new Directory(segmentsDirUri).create({ intermediates: true });
@@ -722,21 +812,29 @@ class DownloadServiceImpl {
       /* exists */
     }
 
+    const absLocal = (rel: string): string => {
+      const dir = job.localDir.endsWith('/')
+        ? job.localDir.slice(0, -1)
+        : job.localDir;
+      return `${dir}/${rel}`;
+    };
+
     const urlMap = new Map<string, string>();
 
-    if (media.mapInit) {
-      urlMap.set(media.mapInit, `segments/init.${extForUrl(media.mapInit, 'mp4')}`);
-    }
-    if (media.key) {
-      urlMap.set(media.key.uri, 'segments/key.bin');
-    }
+    media.mapInits.forEach((uri, i) => {
+      urlMap.set(uri, `segments/init-${i}.${extForUrl(uri, 'mp4')}`);
+    });
+    media.keys.forEach((k, i) => {
+      urlMap.set(k.uri, `segments/key-${i}.bin`);
+    });
     media.segments.forEach((seg, idx) => {
       urlMap.set(seg.uri, `segments/${pad(idx)}.${extForUrl(seg.uri, 'ts')}`);
     });
 
     // Reset progress counters — `markSegmentComplete` is idempotent and
     // will re-tally as segments (already on disk or freshly downloaded)
-    // flow through it.
+    // flow through it. No full-playlist HEAD probe: that stampeded the CDN
+    // (~12 concurrent hits) and triggered 403/429 on the real downloads.
     this.updateJob(id, {
       status: 'downloading',
       totalSegments: media.segments.length,
@@ -746,31 +844,31 @@ class DownloadServiceImpl {
       totalBytes: 0,
     });
 
-    // 3b) HEAD-probe every segment (and init/key sidecars) to learn the true
-    //     total download size. Runs in parallel with the sidecar downloads
-    //     below so it doesn't delay actual bytes hitting disk.
-    const probeUris = [
-      ...(media.mapInit ? [media.mapInit] : []),
-      ...(media.key ? [media.key.uri] : []),
-      ...media.segments.map((s) => s.uri),
-    ];
-    void probeTotalContentLength(probeUris, job.headers)
-      .then((total) => {
-        if (total != null && total > 0 && !this.cancelled.has(id)) {
-          this.updateJob(id, { totalBytes: total });
-        }
-      })
-      .catch(() => {
-        /* leave totalBytes at 0 — UI will just show downloaded bytes */
-      });
-
-    // 4) Download every sidecar file (init + key) first.
-    if (media.mapInit) {
-      await this.downloadSidecar(id, media.mapInit, `${job.localDir}/${urlMap.get(media.mapInit)!}`);
+    // 4) Download every sidecar (every init + every rotated key) first.
+    for (const uri of media.mapInits) {
+      const ok = await this.downloadSidecar(id, uri, absLocal(urlMap.get(uri)!));
+      if (!ok) {
+        this.updateJob(id, {
+          status: 'failed',
+          error: 'Failed to download HLS init segment',
+        });
+        return;
+      }
       if (this.cancelled.has(id)) return;
     }
-    if (media.key) {
-      await this.downloadSidecar(id, media.key.uri, `${job.localDir}/${urlMap.get(media.key.uri)!}`);
+    for (const k of media.keys) {
+      const ok = await this.downloadSidecar(
+        id,
+        k.uri,
+        absLocal(urlMap.get(k.uri)!),
+      );
+      if (!ok) {
+        this.updateJob(id, {
+          status: 'failed',
+          error: 'Failed to download HLS encryption key',
+        });
+        return;
+      }
       if (this.cancelled.has(id)) return;
     }
 
@@ -784,8 +882,7 @@ class DownloadServiceImpl {
         const my = cursor++;
         const entry = queue[my];
         const rel = urlMap.get(entry.seg.uri)!;
-        const absDest = `${job.localDir}/${rel}`;
-        await this.downloadOneSegment(id, my, entry.seg.uri, absDest);
+        await this.downloadOneSegment(id, my, entry.seg.uri, absLocal(rel));
       }
     };
 
@@ -807,11 +904,26 @@ class DownloadServiceImpl {
       return;
     }
 
-    // 6) Rewrite playlist to local relative paths and save as local.m3u8.
+    // 6) Rewrite playlist to relative local paths and save as local.m3u8.
     // Reuses the raw text captured in step 2 — the network is *not* touched
     // here, so a stale/hung CDN cannot leave the job stuck at 100%.
     try {
-      const rewritten = rewriteMediaPlaylist(media.rawText, variantUri, urlMap);
+      const { playlist: rewritten, leftoverRemoteUris } = rewriteMediaPlaylist(
+        media.rawText,
+        variantUri,
+        urlMap,
+      );
+      if (leftoverRemoteUris.length) {
+        const sample = leftoverRemoteUris[0];
+        this.updateJob(id, {
+          status: 'failed',
+          error:
+            leftoverRemoteUris.length === 1
+              ? `Playlist still references remote: ${sample}`
+              : `Playlist still references ${leftoverRemoteUris.length} remote URLs (${sample})`,
+        });
+        return;
+      }
       const localPlaylist = new File(job.localDir, 'local.m3u8');
       if (localPlaylist.exists) localPlaylist.delete();
       localPlaylist.create();
@@ -838,45 +950,49 @@ class DownloadServiceImpl {
    * looks like spam in the notification shade.  A direct `File.downloadFileAsync`
    * uses OkHttp underneath with zero notifications.
    *
-   * Never rejects — segment-level errors are handled at the pipeline level
-   * via `completedSegments < totalSegments`. This mirrors the previous
-   * best-effort behaviour of the UIDT variant.
+   * Never rejects — returns false on failure so the pipeline can fail the job
+   * instead of marking an unplayable playlist complete.
    */
   private async downloadSidecar(
     id: string,
     url: string,
     destUri: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const job = this.jobs.get(id);
-    if (!job) return;
+    if (!job) return false;
     const destFile = new File(destUri);
     // Skip if already present on disk from a previous run.
     try {
-      if (destFile.exists) return;
+      if (destFile.exists) return true;
     } catch {
       /* fall through */
     }
 
-    const controller = new AbortController();
-    this.trackAbort(id, controller);
-    try {
-      await File.downloadFileAsync(url, destFile, {
-        headers: job.headers,
-        idempotent: true,
-        signal: controller.signal,
-      });
-    } catch (e) {
-      // Any failure (abort, network, non-2xx) leaves a partial or missing
-      // file behind — delete it so a future resume re-fetches cleanly.
+    for (let attempt = 1; attempt <= SEGMENT_RETRIES; attempt++) {
+      if (this.cancelled.has(id)) return false;
+      const controller = new AbortController();
+      this.trackAbort(id, controller);
       try {
-        if (destFile.exists) destFile.delete();
-      } catch {
-        /* noop */
+        await File.downloadFileAsync(url, destFile, {
+          headers: job.headers,
+          idempotent: true,
+          signal: controller.signal,
+        });
+        return true;
+      } catch (e) {
+        try {
+          if (destFile.exists) destFile.delete();
+        } catch {
+          /* noop */
+        }
+        log('sidecar download failed', `attempt ${attempt}/${SEGMENT_RETRIES}`, url, e);
+        if (this.cancelled.has(id)) return false;
+        if (attempt < SEGMENT_RETRIES) await sleep(300 * attempt);
+      } finally {
+        this.untrackAbort(id, controller);
       }
-      log('sidecar download failed', url, e);
-    } finally {
-      this.untrackAbort(id, controller);
     }
+    return false;
   }
 
   /**
@@ -910,48 +1026,55 @@ class DownloadServiceImpl {
       /* fall through and download */
     }
 
-    const controller = new AbortController();
-    this.trackAbort(id, controller);
-    let last = 0;
-    try {
-      await File.downloadFileAsync(url, destFile, {
-        headers: job.headers,
-        idempotent: true,
-        signal: controller.signal,
-        onProgress: ({ bytesWritten }) => {
-          const delta = bytesWritten - last;
-          last = bytesWritten;
-          if (delta <= 0) return;
-          const current = this.jobs.get(id);
-          if (!current || this.cancelled.has(id)) return;
-          this.updateJob(id, {
-            bytesWritten: current.bytesWritten + delta,
-          });
-        },
-      });
-      this.markSegmentComplete(id, idx);
-    } catch (e) {
-      // Abort or network error — remove the partial file so a future
-      // resume doesn't mistake garbage bytes for a completed segment.
+    for (let attempt = 1; attempt <= SEGMENT_RETRIES; attempt++) {
+      if (this.cancelled.has(id)) return;
+      const controller = new AbortController();
+      this.trackAbort(id, controller);
+      let last = 0;
       try {
-        if (destFile.exists) destFile.delete();
-      } catch {
-        /* noop */
-      }
-      // Roll back the byte counter for whatever we already reported so
-      // totalBytes/bytesWritten stays honest across a retry.
-      if (last > 0) {
-        const current = this.jobs.get(id);
-        if (current) {
-          this.updateJob(id, {
-            bytesWritten: Math.max(0, current.bytesWritten - last),
-          });
+        await File.downloadFileAsync(url, destFile, {
+          headers: job.headers,
+          idempotent: true,
+          signal: controller.signal,
+          onProgress: ({ bytesWritten }) => {
+            const delta = bytesWritten - last;
+            last = bytesWritten;
+            if (delta <= 0) return;
+            const current = this.jobs.get(id);
+            if (!current || this.cancelled.has(id)) return;
+            this.updateJob(id, {
+              bytesWritten: current.bytesWritten + delta,
+            });
+          },
+        });
+        this.markSegmentComplete(id, idx);
+        return;
+      } catch (e) {
+        try {
+          if (destFile.exists) destFile.delete();
+        } catch {
+          /* noop */
         }
+        if (last > 0) {
+          const current = this.jobs.get(id);
+          if (current) {
+            this.updateJob(id, {
+              bytesWritten: Math.max(0, current.bytesWritten - last),
+            });
+          }
+        }
+        log(
+          'segment',
+          idx,
+          `attempt ${attempt}/${SEGMENT_RETRIES}`,
+          'error',
+          e,
+        );
+        if (this.cancelled.has(id)) return;
+        if (attempt < SEGMENT_RETRIES) await sleep(300 * attempt);
+      } finally {
+        this.untrackAbort(id, controller);
       }
-      // Don't rethrow — the pipeline tally decides success/failure.
-      log('segment', idx, 'error', e);
-    } finally {
-      this.untrackAbort(id, controller);
     }
   }
 

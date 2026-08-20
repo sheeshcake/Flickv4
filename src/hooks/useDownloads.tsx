@@ -26,6 +26,8 @@ interface DownloadsContextValue {
   cancel: typeof DownloadService.cancel;
   remove: typeof DownloadService.remove;
   getLocalSource: typeof DownloadService.getLocalSource;
+  prepareLocalPlayback: typeof DownloadService.prepareLocalPlayback;
+  stopLocalPlayback: typeof DownloadService.stopLocalPlayback;
 }
 
 const DownloadsContext = createContext<DownloadsContextValue | null>(null);
@@ -52,6 +54,10 @@ export const DownloadsProvider = ({ children }: { children: ReactNode }) => {
       cancel: DownloadService.cancel.bind(DownloadService),
       remove: DownloadService.remove.bind(DownloadService),
       getLocalSource: DownloadService.getLocalSource.bind(DownloadService),
+      prepareLocalPlayback:
+        DownloadService.prepareLocalPlayback.bind(DownloadService),
+      stopLocalPlayback:
+        DownloadService.stopLocalPlayback.bind(DownloadService),
     }),
     [jobs],
   );

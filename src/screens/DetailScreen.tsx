@@ -42,6 +42,11 @@ import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { DownloadService } from '@/src/services/DownloadService';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
 import { playbackHeadersFor } from '@/src/services/playbackHeaders';
+import {
+  StreamflixService,
+  isStreamflixServer,
+  type StreamflixSource,
+} from '@/src/services/StreamflixService';
 import { ensureDownloadPermissions } from '@/src/utils/downloadPermissions';
 import { getComingSoon } from '@/src/utils/comingSoon';
 import type { EpisodeDownloadState } from '@/src/components/SeasonEpisodePicker';
@@ -115,7 +120,7 @@ export const DetailScreen = ({
     logoPath,
   } = useDetailData(item);
   const { isInList, toggle } = useMyList();
-  const { activeServer } = useServers();
+  const { servers, activeServer } = useServers();
   const { enqueue, getJobFor, resume, remove, pause } = useDownloads();
   const { settings: subtitleSettings } = useSubtitleSettings();
 
@@ -132,11 +137,28 @@ export const DetailScreen = ({
   const [muted, setMuted] = useState(true);
   const [liked, setLiked] = useState(false);
   const [castSheetOpen, setCastSheetOpen] = useState(false);
-  const [qualitySheet, setQualitySheet] = useState<{
-    variants: Variant[];
-    onSelect: (choice: DownloadQualityChoice) => void;
+  const [downloadTarget, setDownloadTarget] = useState<{
+    season?: number;
+    episode?: number;
+    title: string;
   } | null>(null);
+  const [downloadServerId, setDownloadServerId] = useState<string | null>(null);
+  const [downloadStreamflixSources, setDownloadStreamflixSources] = useState<
+    StreamflixSource[]
+  >([]);
+  const [downloadStreamflixSourceId, setDownloadStreamflixSourceId] = useState<
+    string | null
+  >(null);
+  const [downloadVariants, setDownloadVariants] = useState<Variant[]>([]);
+  const [downloadStreamUrl, setDownloadStreamUrl] = useState<string | null>(
+    null,
+  );
+  const [downloadStreamHeaders, setDownloadStreamHeaders] = useState<
+    Record<string, string> | null
+  >(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [resolvingDownload, setResolvingDownload] = useState(false);
+  const [imdbId, setImdbId] = useState<string | null>(null);
   /**
    * Which season/episode is currently being resolved (WebView scrape phase,
    * before the job actually lands in DownloadService). `null` for movies /
@@ -150,6 +172,21 @@ export const DetailScreen = ({
     item.id,
     selectedSeason,
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const request = movie
+      ? TMDBService.getMovieExternalIds(item.id)
+      : TMDBService.getTVExternalIds(item.id);
+    request
+      .then((res) => {
+        if (!cancelled) setImdbId(res.imdb_id ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [item.id, movie]);
 
   useEffect(() => {
     if (!movie && seasons.length && selectedSeason == null) {
@@ -234,78 +271,232 @@ export const DetailScreen = ({
   };
 
   /**
-   * Kick off a download by (a) resolving the stream URL via the hidden
-   * WebViewScraper, (b) fetching the HLS variant list, then (c) presenting
-   * the mandatory quality sheet.
+   * Kick off a download by opening the options sheet. Stream resolve waits
+   * until a server is chosen so the user can switch without changing the
+   * global playback server.
    */
+  const selectedDownloadServer =
+    servers.find((s) => s.id === (downloadServerId ?? activeServer.id)) ??
+    activeServer;
+
   const beginDownload = useCallback(
     async (opts: { season?: number; episode?: number; title: string }) => {
-      if (resolvingDownload) return;
-      // Ask (or re-ask) for notification permission before we start scraping.
-      // The user may have denied it on first launch — this gives them another
-      // chance the moment they actually try to download something.
+      if (downloadTarget) return;
       await ensureDownloadPermissions();
-      setResolvingDownload(true);
+      setDownloadServerId(activeServer.id);
+      setDownloadStreamflixSources([]);
+      setDownloadStreamflixSourceId(null);
+      setDownloadVariants([]);
+      setDownloadStreamUrl(null);
+      setDownloadStreamHeaders(null);
+      setDownloadError(null);
       if (opts.season != null && opts.episode != null) {
         setResolvingEpisodeKey(`s${opts.season}e${opts.episode}`);
       }
+      setDownloadTarget(opts);
+    },
+    [downloadTarget, activeServer.id],
+  );
+
+  const onSelectDownloadServer = useCallback((id: string) => {
+    setDownloadServerId(id);
+    setDownloadStreamflixSources([]);
+    setDownloadStreamflixSourceId(null);
+    setDownloadVariants([]);
+    setDownloadStreamUrl(null);
+    setDownloadStreamHeaders(null);
+    setDownloadError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!downloadTarget) {
+      setResolvingEpisodeKey(null);
+      setDownloadStreamflixSources([]);
+      setDownloadStreamflixSourceId(null);
+      setDownloadStreamHeaders(null);
+      return;
+    }
+    const target = downloadTarget;
+    const server = selectedDownloadServer;
+    let cancelled = false;
+
+    if (isStreamflixServer(server)) {
+      setResolvingDownload(true);
+      setDownloadError(null);
+      setDownloadVariants([]);
+      setDownloadStreamUrl(null);
+      setDownloadStreamHeaders(null);
+      void StreamflixService.listSources({
+        tmdbId: item.id,
+        mediaType: movie ? 'movie' : 'tv',
+        season: target.season,
+        episode: target.episode,
+        title: getTitle(item),
+        year: year ? String(year) : undefined,
+        imdbId,
+      })
+        .then((listed) => {
+          if (cancelled) return;
+          setDownloadStreamflixSources(listed);
+          setDownloadStreamflixSourceId((prev) =>
+            listed.some((s) => s.id === prev) ? prev : (listed[0]?.id ?? null),
+          );
+          if (!listed.length) {
+            setDownloadError('No Streamflix sources found');
+            setResolvingDownload(false);
+          }
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setDownloadStreamflixSources([]);
+          setDownloadError(
+            e instanceof Error ? e.message : 'Unable to list sources',
+          );
+          setResolvingDownload(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setDownloadStreamflixSources([]);
+    setDownloadStreamflixSourceId(null);
+    setResolvingDownload(true);
+    setDownloadError(null);
+    setDownloadVariants([]);
+    setDownloadStreamUrl(null);
+    setDownloadStreamHeaders(null);
+    void (async () => {
       try {
         const stream = await DownloadService.resolveStream({
-          baseUrl: activeServer.url,
+          server,
           tmdbId: item.id,
           type: movie ? 'movie' : 'tv',
-          season: opts.season,
-          episode: opts.episode,
+          season: target.season,
+          episode: target.episode,
           title: getTitle(item),
-          resolver: activeServer.resolver,
+          imdbId,
         });
-
-        const headers = playbackHeadersFor(activeServer);
+        const headers = playbackHeadersFor(server);
         const variants = stream.videoUrl.includes('.m3u8')
           ? await fetchHlsVariants(stream.videoUrl, headers)
           : [];
-
-        setQualitySheet({
-          variants,
-          onSelect: (choice) => {
-            // If the user picked a specific HLS variant, hand its child
-            // playlist to the service so it downloads exactly that ladder
-            // rung. Otherwise reuse the master URL (or the direct MP4 URL
-            // for non-HLS streams) so the service doesn't re-resolve.
-            const chosenVariant = variants.find(
-              (v) => v.height === choice.height,
-            );
-            const streamUri = chosenVariant?.uri ?? stream.videoUrl;
-            void enqueue(item, {
-              serverUrl: activeServer.url,
-              qualityHeight: choice.height,
-              qualityLabel: choice.label,
-              season: opts.season,
-              episode: opts.episode,
-              title: opts.title,
-              streamUri,
-              subtitleLanguage: subtitleSettings.defaultLanguage || undefined,
-              resolver: activeServer.resolver,
-            });
-          },
-        });
+        if (cancelled) return;
+        setDownloadStreamUrl(stream.videoUrl);
+        setDownloadStreamHeaders(headers);
+        setDownloadVariants(variants);
       } catch (e) {
-        Alert.alert(
-          'Download failed',
+        if (cancelled) return;
+        setDownloadError(
           e instanceof Error ? e.message : 'Unable to find stream',
         );
       } finally {
-        setResolvingDownload(false);
-        setResolvingEpisodeKey(null);
+        if (!cancelled) setResolvingDownload(false);
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    downloadTarget,
+    selectedDownloadServer,
+    item,
+    movie,
+    imdbId,
+    year,
+  ]);
+
+  useEffect(() => {
+    if (!downloadTarget) return;
+    if (!isStreamflixServer(selectedDownloadServer)) return;
+    const source = downloadStreamflixSources.find(
+      (s) => s.id === downloadStreamflixSourceId,
+    );
+    if (!source) return;
+    let cancelled = false;
+    setResolvingDownload(true);
+    setDownloadError(null);
+    setDownloadVariants([]);
+    setDownloadStreamUrl(null);
+    setDownloadStreamHeaders(null);
+    void StreamflixService.resolveSource(source)
+      .then(async (resolved) => {
+        if (cancelled) return;
+        if (!resolved?.uri) {
+          setDownloadError(`Unable to resolve ${source.name}`);
+          return;
+        }
+        const headers = resolved.headers ?? playbackHeadersFor(selectedDownloadServer);
+        const variants =
+          resolved.kind === 'hls' || resolved.uri.includes('.m3u8')
+            ? await fetchHlsVariants(resolved.uri, headers)
+            : [];
+        if (cancelled) return;
+        setDownloadStreamUrl(resolved.uri);
+        setDownloadStreamHeaders(headers);
+        setDownloadVariants(variants);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setDownloadError(
+          e instanceof Error ? e.message : 'Unable to find stream',
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setResolvingDownload(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    downloadTarget,
+    selectedDownloadServer,
+    downloadStreamflixSources,
+    downloadStreamflixSourceId,
+  ]);
+
+  const onPickDownloadQuality = useCallback(
+    (choice: DownloadQualityChoice) => {
+      if (!downloadTarget) return;
+      const chosenVariant = downloadVariants.find(
+        (v) => v.height === choice.height,
+      );
+      const streamUri = chosenVariant?.uri ?? downloadStreamUrl;
+      if (!streamUri) return;
+      const streamflixSource = downloadStreamflixSources.find(
+        (s) => s.id === downloadStreamflixSourceId,
+      );
+      const serverName = streamflixSource
+        ? `${selectedDownloadServer.name} · ${streamflixSource.name}`
+        : selectedDownloadServer.name;
+      void enqueue(item, {
+        server: selectedDownloadServer,
+        qualityHeight: choice.height,
+        qualityLabel: choice.label,
+        season: downloadTarget.season,
+        episode: downloadTarget.episode,
+        title: downloadTarget.title,
+        streamUri,
+        subtitleLanguage: subtitleSettings.defaultLanguage || undefined,
+        imdbId,
+        headers: downloadStreamHeaders ?? undefined,
+        serverName,
+      });
+      setDownloadTarget(null);
+      setResolvingEpisodeKey(null);
     },
     [
-      resolvingDownload,
-      activeServer,
-      item,
-      movie,
+      downloadTarget,
+      downloadVariants,
+      downloadStreamUrl,
+      downloadStreamHeaders,
+      downloadStreamflixSources,
+      downloadStreamflixSourceId,
       enqueue,
+      item,
+      selectedDownloadServer,
       subtitleSettings.defaultLanguage,
+      imdbId,
     ],
   );
 
@@ -331,8 +522,8 @@ export const DetailScreen = ({
   }, [movieJob, pause]);
 
   const onResumeMovie = useCallback(() => {
-    if (movieJob) void resume(movieJob.id, activeServer.url);
-  }, [movieJob, resume, activeServer.url]);
+    if (movieJob) void resume(movieJob.id);
+  }, [movieJob, resume]);
 
   const onPlayLocalMovie = useCallback(() => {
     if (!movieJob) return;
@@ -366,7 +557,7 @@ export const DetailScreen = ({
       const existing = getJobFor(item, ep.season_number, ep.episode_number);
       if (existing) {
         if (existing.status === 'paused' || existing.status === 'failed') {
-          void resume(existing.id, activeServer.url);
+          void resume(existing.id);
           return;
         }
         if (existing.status === 'completed') {
@@ -395,7 +586,7 @@ export const DetailScreen = ({
         title: `${getTitle(item)} — S${ep.season_number} E${ep.episode_number}`,
       });
     },
-    [beginDownload, getJobFor, item, resume, remove, activeServer.url],
+    [beginDownload, getJobFor, item, resume, remove],
   );
 
   const episodeDownloadStatus = useCallback(
@@ -581,8 +772,24 @@ export const DetailScreen = ({
         similarLoadingMore={similarLoadingMore}
         onLoadMoreSimilar={loadMoreSimilar}
         onPressSimilar={(picked) => navigation.push('Detail', { item: picked })}
-        qualitySheet={qualitySheet}
-        onCloseQualitySheet={() => setQualitySheet(null)}
+      />
+      <DownloadQualitySheet
+        visible={downloadTarget != null}
+        servers={servers}
+        selectedServerId={selectedDownloadServer.id}
+        onSelectServer={onSelectDownloadServer}
+        streamflixSources={downloadStreamflixSources}
+        selectedStreamflixSourceId={downloadStreamflixSourceId}
+        onSelectStreamflixSource={setDownloadStreamflixSourceId}
+        showStreamflixSourcePicker={isStreamflixServer(selectedDownloadServer)}
+        variants={downloadVariants}
+        resolving={resolvingDownload}
+        resolveError={downloadError}
+        onSelect={onPickDownloadQuality}
+        onClose={() => {
+          setDownloadTarget(null);
+          setResolvingEpisodeKey(null);
+        }}
       />
       <WatchPartyIntroModal
         visible={partyIntroOpen}
@@ -951,10 +1158,22 @@ export const DetailScreen = ({
       </Box>
 
       <DownloadQualitySheet
-        visible={qualitySheet != null}
-        variants={qualitySheet?.variants ?? []}
-        onSelect={(choice) => qualitySheet?.onSelect(choice)}
-        onClose={() => setQualitySheet(null)}
+        visible={downloadTarget != null}
+        servers={servers}
+        selectedServerId={selectedDownloadServer.id}
+        onSelectServer={onSelectDownloadServer}
+        streamflixSources={downloadStreamflixSources}
+        selectedStreamflixSourceId={downloadStreamflixSourceId}
+        onSelectStreamflixSource={setDownloadStreamflixSourceId}
+        showStreamflixSourcePicker={isStreamflixServer(selectedDownloadServer)}
+        variants={downloadVariants}
+        resolving={resolvingDownload}
+        resolveError={downloadError}
+        onSelect={onPickDownloadQuality}
+        onClose={() => {
+          setDownloadTarget(null);
+          setResolvingEpisodeKey(null);
+        }}
       />
 
       <CastSheet

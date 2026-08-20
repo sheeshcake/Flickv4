@@ -176,9 +176,14 @@ export interface HlsKey {
 
 export interface MediaPlaylist {
   segments: HlsSegment[];
+  /** Last `#EXT-X-KEY` seen (compat). Prefer `keys` for downloads. */
   key?: HlsKey;
-  /** Absolute URI of a `#EXT-X-MAP:URI="…"` init segment, if present (fMP4). */
+  /** Last `#EXT-X-MAP` seen (compat). Prefer `mapInits` for downloads. */
   mapInit?: string;
+  /** Every encryption key in playlist order (key rotation). */
+  keys: HlsKey[];
+  /** Every fMP4 init URI in playlist order. */
+  mapInits: string[];
   targetDuration: number;
   totalDuration: number;
 }
@@ -212,13 +217,15 @@ export const parseMediaPlaylist = (
   playlistUri: string,
 ): MediaPlaylist => {
   const segments: HlsSegment[] = [];
+  const keys: HlsKey[] = [];
+  const mapInits: string[] = [];
   let key: HlsKey | undefined;
   let mapInit: string | undefined;
   let targetDuration = 0;
   let totalDuration = 0;
 
   if (!text.startsWith('#EXTM3U')) {
-    return { segments, key, mapInit, targetDuration, totalDuration };
+    return { segments, key, mapInit, keys, mapInits, targetDuration, totalDuration };
   }
 
   const lines = text.split(/\r?\n/);
@@ -250,6 +257,9 @@ export const parseMediaPlaylist = (
           uri: resolveUri(uriAttr, playlistUri),
           iv: attr(attrs, 'IV'),
         };
+        if (!keys.some((k) => k.uri === key!.uri && k.method === key!.method)) {
+          keys.push(key);
+        }
       } else {
         key = undefined;
       }
@@ -258,7 +268,10 @@ export const parseMediaPlaylist = (
 
     if (line.startsWith('#EXT-X-MAP:')) {
       const uriAttr = attr(line.slice(11), 'URI');
-      if (uriAttr) mapInit = resolveUri(uriAttr, playlistUri);
+      if (uriAttr) {
+        mapInit = resolveUri(uriAttr, playlistUri);
+        if (!mapInits.includes(mapInit)) mapInits.push(mapInit);
+      }
       continue;
     }
 
@@ -271,7 +284,7 @@ export const parseMediaPlaylist = (
     pendingDuration = 0;
   }
 
-  return { segments, key, mapInit, targetDuration, totalDuration };
+  return { segments, key, mapInit, keys, mapInits, targetDuration, totalDuration };
 };
 
 /**
@@ -288,6 +301,8 @@ export const fetchMediaPlaylist = async (
 ): Promise<FetchedMediaPlaylist> => {
   const empty: FetchedMediaPlaylist = {
     segments: [],
+    keys: [],
+    mapInits: [],
     targetDuration: 0,
     totalDuration: 0,
     rawText: '',
@@ -302,127 +317,63 @@ export const fetchMediaPlaylist = async (
   }
 };
 
+const isRemoteHttpUri = (uri: string): boolean =>
+  /^https?:\/\//i.test(uri.trim());
+
+export interface RewriteMediaPlaylistResult {
+  playlist: string;
+  leftoverRemoteUris: string[];
+}
+
 /**
- * HEAD-probe every URL in `uris` (in parallel, with a small concurrency cap)
- * and sum up the `Content-Length` headers. Returns `undefined` if we couldn't
- * derive a total (e.g. the server refuses HEAD, or omits `Content-Length` on
- * more than a couple of segments).
+ * Rewrite a media playlist's remote URIs to **relative** local paths
+ * (`segments/00000.ts`) so a loopback HTTP server (iOS) and file:// HLS
+ * (Android) can both resolve them next to `local.m3u8`.
  *
- * The caller is responsible for concatenating all segment / key / init URIs
- * into `uris` — this helper doesn't know anything about HLS.
- */
-export const probeTotalContentLength = async (
-  uris: string[],
-  headers?: Record<string, string>,
-  concurrency = 8,
-): Promise<number | undefined> => {
-  if (uris.length === 0) return 0;
-
-  let total = 0;
-  let unknown = 0;
-  let cursor = 0;
-
-  const runner = async () => {
-    while (cursor < uris.length) {
-      const my = cursor++;
-      const uri = uris[my];
-      try {
-        // `HEAD` is what we actually want, but some CDNs 405 it. Fall back
-        // to a byte-range GET (0-0) which reveals `Content-Range` and never
-        // downloads more than a byte.
-        let len = await tryHead(uri, headers);
-        if (len == null) len = await tryRangeProbe(uri, headers);
-        if (len == null || Number.isNaN(len)) {
-          unknown++;
-        } else {
-          total += len;
-        }
-      } catch {
-        unknown++;
-      }
-    }
-  };
-
-  const workers = Array.from(
-    { length: Math.min(concurrency, uris.length) },
-    () => runner(),
-  );
-  await Promise.all(workers);
-
-  // If more than a small fraction of probes fail, bail out — a partial total
-  // is worse than showing nothing.
-  if (unknown > Math.max(2, Math.floor(uris.length * 0.1))) {
-    return undefined;
-  }
-  return total;
-};
-
-const tryHead = async (
-  uri: string,
-  headers?: Record<string, string>,
-): Promise<number | null> => {
-  const res = await fetch(uri, { method: 'HEAD', headers });
-  if (!res.ok) return null;
-  const raw = res.headers.get('content-length');
-  if (!raw) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-};
-
-const tryRangeProbe = async (
-  uri: string,
-  headers?: Record<string, string>,
-): Promise<number | null> => {
-  const res = await fetch(uri, {
-    method: 'GET',
-    headers: { ...(headers ?? {}), Range: 'bytes=0-0' },
-  });
-  // 206 responses expose `Content-Range: bytes 0-0/12345`.
-  const cr = res.headers.get('content-range');
-  if (cr) {
-    const total = cr.split('/').pop();
-    if (total && total !== '*') {
-      const n = Number(total);
-      if (Number.isFinite(n) && n > 0) return n;
-    }
-  }
-  // 200 responses with the whole body — best-effort, most CDNs skip this.
-  const cl = res.headers.get('content-length');
-  if (cl && res.status === 200) {
-    const n = Number(cl);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return null;
-};
-
-/**
- * Rewrite a media playlist's remote URIs to local relative paths so the file
- * can be played from disk.
+ * Quoted and unquoted `URI=` attributes on `#EXT-X-KEY` / `#EXT-X-MAP`
+ * are rewritten. Any remote URL that is not in `uriMap` is recorded in
+ * `leftoverRemoteUris` so the downloader can fail the job instead of
+ * marking a still-online playlist as complete.
+ *
+ * Appends `#EXT-X-ENDLIST` when missing so AVPlayer treats the file as VOD
+ * rather than waiting on a live window.
  *
  * @param text        Original playlist text.
  * @param playlistUri Absolute URI the playlist was fetched from.
- * @param uriMap      Map from absolute remote URI -> local relative path
- *                    (e.g. `"segments/0000.ts"`).
+ * @param uriMap      Map from absolute remote URI -> relative local path
+ *                    (e.g. `"segments/00000.ts"`).
  */
 export const rewriteMediaPlaylist = (
   text: string,
   playlistUri: string,
   uriMap: Map<string, string>,
-): string => {
+): RewriteMediaPlaylistResult => {
   const lines = text.split(/\r?\n/);
   const out: string[] = [];
+  const leftoverRemoteUris: string[] = [];
+  let hasEndList = false;
+
+  const rememberLeftover = (uri: string) => {
+    if (isRemoteHttpUri(uri) && !leftoverRemoteUris.includes(uri)) {
+      leftoverRemoteUris.push(uri);
+    }
+  };
 
   for (const raw of lines) {
-    const line = raw;
-    const trimmed = line.trim();
+    const trimmed = raw.trim();
+    if (trimmed === '#EXT-X-ENDLIST') hasEndList = true;
 
     if (trimmed.startsWith('#EXT-X-KEY:') || trimmed.startsWith('#EXT-X-MAP:')) {
-      const rewritten = line.replace(
-        /URI="([^"]+)"/,
-        (_m, uri: string) => {
-          const abs = resolveUri(uri, playlistUri);
+      const rewritten = raw.replace(
+        /URI=("([^"]*)"|([^,"\s]+))/i,
+        (_m, _all: string, quoted?: string, unquoted?: string) => {
+          const original = quoted ?? unquoted ?? '';
+          const abs = resolveUri(original, playlistUri);
           const local = uriMap.get(abs);
-          return `URI="${local ?? uri}"`;
+          if (local) return `URI="${local}"`;
+          rememberLeftover(abs);
+          rememberLeftover(original);
+          return `URI="${original}"`;
         },
       );
       out.push(rewritten);
@@ -430,14 +381,22 @@ export const rewriteMediaPlaylist = (
     }
 
     if (!trimmed || trimmed.startsWith('#')) {
-      out.push(line);
+      out.push(raw);
       continue;
     }
 
     const abs = resolveUri(trimmed, playlistUri);
     const local = uriMap.get(abs);
-    out.push(local ?? line);
+    if (local) {
+      out.push(local);
+    } else {
+      rememberLeftover(abs);
+      rememberLeftover(trimmed);
+      out.push(raw);
+    }
   }
 
-  return out.join('\n');
+  if (!hasEndList) out.push('#EXT-X-ENDLIST');
+
+  return { playlist: out.join('\n'), leftoverRemoteUris };
 };

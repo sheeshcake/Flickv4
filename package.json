@@ -4,6 +4,8 @@
   "main": "index.ts",
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^15.0.2",
+    "@dr.pogodin/react-native-fs": "^2.40.0",
+    "@dr.pogodin/react-native-static-server": "^0.28.0",
     "@expo/html-elements": "^0.12.5",
     "@gluestack-ui/core": "^5.0.15",
     "@gluestack-ui/utils": "^5.0.6",
