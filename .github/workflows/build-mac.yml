@@ -1,4 +1,4 @@
-name: Build macOS Catalyst App
+name: Build macOS Apple Silicon App
 on: workflow_dispatch
 
 jobs:
@@ -62,13 +62,13 @@ jobs:
           fi
           pod install --repo-update
 
-      - name: Build macOS Catalyst Application
+      - name: Build macOS iPad-Native App
         run: |
           cd ios
           xcodebuild -workspace Flick.xcworkspace \
             -scheme Flick \
             -configuration Release \
-            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+            -destination 'generic/platform=macOS,variant=Designed for iPad' \
             -archivePath build/FlickMac.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
