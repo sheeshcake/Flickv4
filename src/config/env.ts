@@ -51,3 +51,7 @@ export const UPDATE_CONFIG = {
   /** Delay in ms after mount before the first check, so app boot is snappy. */
   INITIAL_CHECK_DELAY_MS: 2000,
 } as const;
+export const TMDB_API_KEY = "10116fa302c8fe0c2cbc38be17aa65a5";
+export const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+export const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
+export const TMDB_READ_ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIxMDExNmZhMzAyYzhmZTBjMmNiYzM4YmUxN2FhNjVhNSIsIm5iZiI6MTc4NzE0MjkzMy4wNiwic3ViamVjdCI6IjZkNWEzMTU0NmQzN2ZlMzYxNjc0NDEzIiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.nHY8A-KhX4-MefoFpq7Wy32K5EVdn9uTsYkCfkcCi_I";
