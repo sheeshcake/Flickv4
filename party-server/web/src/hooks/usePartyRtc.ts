@@ -135,6 +135,7 @@ export const usePartyRtc = (
   const roomRef = useRef(room);
   const localRef = useRef<MediaStream | null>(null);
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
+  const remoteStreamsRef = useRef(new Map<string, MediaStream>());
   const pendingIceRef = useRef(new Map<string, PartyRtcSignalPayload[]>());
   const livePeerIdsRef = useRef(new Set<string>());
   const iceRestartedRef = useRef(new Set<string>());
@@ -149,6 +150,7 @@ export const usePartyRtc = (
   camOffRef.current = camOff;
 
   const dropRemote = useCallback((id: string) => {
+    remoteStreamsRef.current.delete(id);
     setRemotes((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
@@ -236,17 +238,24 @@ export const usePartyRtc = (
         });
       };
       pc.ontrack = (ev) => {
-        let stream = ev.streams[0];
-        if (!stream && ev.track) {
-          stream = new MediaStream([ev.track]);
-        } else if (stream && ev.track && !stream.getTracks().some((t) => t.id === ev.track.id)) {
-          stream.addTrack(ev.track);
+        const track = ev.track;
+        if (!track) return;
+        let stream = remoteStreamsRef.current.get(peerId);
+        if (!stream) {
+          stream = ev.streams[0] ?? new MediaStream();
+          remoteStreamsRef.current.set(peerId, stream);
         }
-        if (!stream) return;
+        if (!stream.getTracks().some((t) => t.id === track.id)) {
+          stream.addTrack(track);
+        }
         const name =
           roomRef.current?.members.find((m) => m.id === peerId)?.displayName ??
           'Guest';
         setRemotes((prev) => {
+          const existing = prev.find((r) => r.id === peerId);
+          if (existing && existing.stream === stream && existing.name === name) {
+            return prev;
+          }
           const next = prev.filter((r) => r.id !== peerId);
           next.push({ id: peerId, name, stream });
           return next;

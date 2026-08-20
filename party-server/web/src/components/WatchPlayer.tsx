@@ -1551,6 +1551,10 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
     if (!rtc.joined) setCallTilesHidden(false);
   }, [rtc.joined]);
 
+  const toggleCallTilesHidden = useCallback(() => {
+    setCallTilesHidden((prev) => !prev);
+  }, []);
+
   const toggleFullscreen = () => {
     const stage = stageRef.current;
     const video = videoRef.current;
@@ -1806,7 +1810,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           remotes={rtc.remotes}
           camOff={rtc.camOff}
           hidden={callTilesHidden}
-          onToggleHidden={() => setCallTilesHidden((prev) => !prev)}
+          onToggleHidden={toggleCallTilesHidden}
         />
         <ReactionOverlay items={reactions} onExpire={expireReaction} />
         <PlayerOverlay
@@ -1851,7 +1855,7 @@ export const WatchPlayer = ({ content: soloContent }: { content?: PartyContent }
           onToggleMute={rtc.toggleMute}
           onToggleCam={rtc.toggleCam}
           tilesHidden={callTilesHidden}
-          onToggleTilesHidden={() => setCallTilesHidden((prev) => !prev)}
+          onToggleTilesHidden={toggleCallTilesHidden}
           callError={rtc.error}
         />
         <ChatToast line={toast} onOpen={() => setChatOpen(true)} />

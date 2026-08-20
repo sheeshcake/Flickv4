@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import type { PartyRtcRemote } from '@/hooks/usePartyRtc';
 import { Button } from '@/components/ui/button';
@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 const SPEAK_HOLD_MS = 1000;
 const SPEAK_THRESHOLD = 0.04;
 
-const Tile = ({
+const Tile = memo(function Tile({
   stream,
   label,
   muted,
@@ -20,19 +20,29 @@ const Tile = ({
   mirror?: boolean;
   placeholder?: boolean;
   speaking?: boolean;
-}) => {
-  const ref = useRef<HTMLVideoElement | null>(null);
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
   useEffect(() => {
-    const el = ref.current;
+    const el = videoRef.current;
     if (!el) return;
-    if (stream && !placeholder) {
+    if (el.srcObject !== stream) {
       el.srcObject = stream;
-      el.muted = Boolean(muted);
-      void el.play().catch(() => {});
-      return;
     }
-    el.srcObject = null;
-  }, [muted, placeholder, stream]);
+    el.muted = Boolean(muted);
+    el.setAttribute('playsinline', '');
+    el.setAttribute('webkit-playsinline', '');
+    if (stream && el.paused) void el.play().catch(() => {});
+  }, [muted, stream]);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    return () => {
+      if (el) el.srcObject = null;
+    };
+  }, []);
+
+  const showVideo = Boolean(stream) && !placeholder;
 
   return (
     <div
@@ -40,24 +50,17 @@ const Tile = ({
         speaking ? 'border-primary' : 'border-border'
       }`}
     >
-      {stream && !placeholder ? (
-        <video
-          ref={(el) => {
-            ref.current = el;
-            if (!el) return;
-            el.setAttribute('playsinline', '');
-            el.setAttribute('webkit-playsinline', '');
-            el.muted = Boolean(muted);
-            el.srcObject = stream;
-            void el.play().catch(() => {});
-          }}
-          autoPlay
-          playsInline
-          muted={muted}
-          className={`h-full w-full object-cover ${mirror ? 'scale-x-[-1]' : ''}`}
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-muted text-xs text-muted-foreground">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={muted}
+        className={`h-full w-full object-cover ${mirror ? 'scale-x-[-1]' : ''} ${
+          showVideo ? '' : 'invisible'
+        }`}
+      />
+      {showVideo ? null : (
+        <div className="absolute inset-0 flex items-center justify-center bg-muted text-xs text-muted-foreground">
           {label.slice(0, 1).toUpperCase()}
         </div>
       )}
@@ -66,7 +69,7 @@ const Tile = ({
       </div>
     </div>
   );
-};
+});
 
 const rmsFromAnalyser = (
   analyser: AnalyserNode,
@@ -81,7 +84,7 @@ const rmsFromAnalyser = (
   return Math.sqrt(sum / buffer.length);
 };
 
-export const CallGrid = ({
+export const CallGrid = memo(function CallGrid({
   localStream,
   remotes,
   camOff,
@@ -93,14 +96,27 @@ export const CallGrid = ({
   camOff: boolean;
   hidden: boolean;
   onToggleHidden: () => void;
-}) => {
-  const [levels, setLevels] = useState<Record<string, number>>({});
+}) {
   const [speakerId, setSpeakerId] = useState<string | null>(null);
   const speakerUntilRef = useRef(0);
+  const remotesRef = useRef(remotes);
+  remotesRef.current = remotes;
+
+  const remoteAudioKey = useMemo(
+    () =>
+      remotes
+        .map((r) =>
+          `${r.id}:${r.stream.id}:${r.stream
+            .getAudioTracks()
+            .map((t) => t.id)
+            .join(',')}`,
+        )
+        .join('|'),
+    [remotes],
+  );
 
   useEffect(() => {
-    if (hidden || remotes.length === 0) {
-      setLevels({});
+    if (hidden || remotesRef.current.length === 0) {
       setSpeakerId(null);
       speakerUntilRef.current = 0;
       return;
@@ -116,7 +132,7 @@ export const CallGrid = ({
       analyser: AnalyserNode;
       buffer: Uint8Array<ArrayBuffer>;
     }[] = [];
-    for (const remote of remotes) {
+    for (const remote of remotesRef.current) {
       if (remote.stream.getAudioTracks().length === 0) continue;
       try {
         const source = ctx.createMediaStreamSource(remote.stream);
@@ -134,41 +150,28 @@ export const CallGrid = ({
     }
     void ctx.resume();
     const timer = window.setInterval(() => {
-      const next: Record<string, number> = {};
       let loudestId: string | null = null;
       let loudest = 0;
       for (const node of nodes) {
         const level = rmsFromAnalyser(node.analyser, node.buffer);
-        next[node.id] = level;
         if (level > loudest) {
           loudest = level;
           loudestId = node.id;
         }
       }
-      setLevels(next);
       const now = Date.now();
       if (loudestId && loudest >= SPEAK_THRESHOLD) {
-        setSpeakerId(loudestId);
         speakerUntilRef.current = now + SPEAK_HOLD_MS;
+        setSpeakerId((prev) => (prev === loudestId ? prev : loudestId));
       } else if (now > speakerUntilRef.current) {
-        setSpeakerId(null);
+        setSpeakerId((prev) => (prev === null ? prev : null));
       }
     }, 250);
     return () => {
       window.clearInterval(timer);
       void ctx?.close();
     };
-  }, [hidden, remotes]);
-
-  const sortedRemotes = useMemo(() => {
-    return [...remotes].sort((a, b) => {
-      const aLevel = levels[a.id] ?? 0;
-      const bLevel = levels[b.id] ?? 0;
-      if (a.id === speakerId) return -1;
-      if (b.id === speakerId) return 1;
-      return bLevel - aLevel;
-    });
-  }, [levels, remotes, speakerId]);
+  }, [hidden, remoteAudioKey]);
 
   if (!localStream && remotes.length === 0) return null;
 
@@ -195,7 +198,7 @@ export const CallGrid = ({
               placeholder={camOff}
             />
           ) : null}
-          {sortedRemotes.map((remote) => (
+          {remotes.map((remote) => (
             <Tile
               key={remote.id}
               stream={remote.stream}
@@ -207,4 +210,4 @@ export const CallGrid = ({
       )}
     </div>
   );
-};
+});
