@@ -5,8 +5,11 @@ jobs:
   build-ios:
     runs-on: macos-latest
     steps:
-      - name: Checkout Repo
+      - name: Checkout 2.3.1 Release
         uses: actions/checkout@v4
+        with:
+          repository: 'sheeshcake/Flickv4'
+          ref: '2.3.1'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -14,7 +17,7 @@ jobs:
           node-version: 22
           cache: 'npm'
 
-      - name: Inject TMDB Keys into Environment
+      - name: Inject TMDB Keys & Reset Environment
         run: |
           cat << 'EOF' > .env
           EXPO_PUBLIC_TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
@@ -26,9 +29,13 @@ jobs:
           EXPO_PUBLIC_SAMPLE_VIDEO_URL=https://media.w3.org/2010/05/sintel/trailer.mp4
           EXPO_PUBLIC_WATCH_PARTY_URL=
           TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
-          APP_VERSION=2.1.5
-          ANDROID_VERSION_CODE=20105
+          APP_VERSION=2.3.1
+          ANDROID_VERSION_CODE=20301
           EOF
+          # Hardcode fallback in src/config/env.ts if present
+          if [ -f src/config/env.ts ]; then
+            sed -i '' 's|process.env.EXPO_PUBLIC_TMDB_API_KEY.*| "10116fa302c8fe0c2cbc38be17aa65a5";|g' src/config/env.ts
+          fi
 
       - name: Install Node Dependencies
         run: npm install
@@ -36,7 +43,6 @@ jobs:
       - name: Fix MMKV and Install CocoaPods
         run: |
           cd ios
-          # Remove stale lockfile to allow downgrading MMKV to 2.3.0
           rm -f Podfile.lock
           if ! grep -q "pod 'MMKV', '2.3.0'" Podfile; then
             sed -i '' '/target '\''Flick'\'' do/a\
@@ -64,10 +70,10 @@ jobs:
           cd ios
           mkdir -p Payload
           cp -r build/Flick.xcarchive/Products/Applications/*.app Payload/
-          zip -r Flickv4.ipa Payload
+          zip -r Flickv4-2.3.1.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Flickv4-IPA
-          path: ios/Flickv4.ipa
+          name: Flickv4-2.3.1-IPA
+          path: ios/Flickv4-2.3.1.ipa
