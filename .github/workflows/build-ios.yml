@@ -17,28 +17,31 @@ jobs:
           node-version: 22
           cache: 'npm'
 
-      - name: Inject TMDB Keys & Reset Environment
+      - name: Hardcode TMDB Configuration in Source
         run: |
+          cat << 'EOF' > src/config/env.ts
+          export const TMDB_API_KEY = "10116fa302c8fe0c2cbc38be17aa65a5";
+          export const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+          export const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500";
+          export const TMDB_READ_ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIxMDExNmZhMzAyYzhmZTBjMmNiYzM4YmUxN2FhNjVhNSIsIm5iZiI6MTc4NzE0MjkzMy4wNiwic3ViamVjdCI6IjZkNWEzMTU0NmQzN2ZlMzYxNjc0NDEzIiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.nHY8A-KhX4-MefoFpq7Wy32K5EVdn9uTsYkCfkcCi_I";
+          export const WYZIE_BASE_URL = "https://sub.wyzie.io";
+          export const WYZIE_API_KEY = "";
+          export const SAMPLE_VIDEO_URL = "https://media.w3.org/2010/05/sintel/trailer.mp4";
+          export const WATCH_PARTY_URL = "";
+          export const APP_VERSION = "2.3.1";
+          EOF
+
           cat << 'EOF' > .env
           EXPO_PUBLIC_TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
           EXPO_PUBLIC_TMDB_BASE_URL=https://api.themoviedb.org/3
           EXPO_PUBLIC_TMDB_IMAGE_BASE_URL=https://image.tmdb.org/t/p/w500
           EXPO_PUBLIC_TMDB_READ_ACCESS_TOKEN=eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIxMDExNmZhMzAyYzhmZTBjMmNiYzM4YmUxN2FhNjVhNSIsIm5iZiI6MTc4NzE0MjkzMy4wNiwic3ViamVjdCI6IjZkNWEzMTU0NmQzN2ZlMzYxNjc0NDEzIiwic2NvcGVzIjpbImFwaV9yZWFkIl0sInZlcnNpb24iOjF9.nHY8A-KhX4-MefoFpq7Wy32K5EVdn9uTsYkCfkcCi_I
-          EXPO_PUBLIC_WYZIE_BASE_URL=https://sub.wyzie.io
-          EXPO_PUBLIC_WYZIE_API_KEY=
-          EXPO_PUBLIC_SAMPLE_VIDEO_URL=https://media.w3.org/2010/05/sintel/trailer.mp4
-          EXPO_PUBLIC_WATCH_PARTY_URL=
-          TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
           APP_VERSION=2.3.1
           ANDROID_VERSION_CODE=20301
           EOF
-          # Hardcode fallback in src/config/env.ts if present
-          if [ -f src/config/env.ts ]; then
-            sed -i '' 's|process.env.EXPO_PUBLIC_TMDB_API_KEY.*| "10116fa302c8fe0c2cbc38be17aa65a5";|g' src/config/env.ts
-          fi
 
       - name: Install Node Dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Fix MMKV and Install CocoaPods
         run: |
@@ -63,6 +66,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             archive
 
       - name: Package IPA
