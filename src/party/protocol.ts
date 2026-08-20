@@ -48,6 +48,7 @@ export interface PartyContent {
   season?: number;
   episode?: number;
   imdbId?: string | null;
+  year?: string;
 }
 
 export interface PartyChatLine {

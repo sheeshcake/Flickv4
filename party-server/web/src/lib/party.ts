@@ -15,6 +15,8 @@ export interface PartyMember {
 export interface PartySource {
   uri: string;
   kind: 'hls' | 'file';
+  referer?: string;
+  origin?: string;
   sourceId?: string;
 }
 
@@ -43,6 +45,7 @@ export interface PartyContent {
   season?: number;
   episode?: number;
   imdbId?: string | null;
+  year?: string;
 }
 
 export interface PartyChatLine {
@@ -148,6 +151,8 @@ export type ClientMessage =
       uri: string;
       kind: 'hls' | 'file';
       embedUrl?: string;
+      referer?: string;
+      origin?: string;
       sourceId?: string;
     }
   | { type: 'subtitles'; subtitles: PartySubtitles | null }
@@ -177,6 +182,7 @@ export const streamflixQueryUrl = (
   params.set('tmdbId', String(content.tmdbId));
   params.set('mediaType', content.mediaType);
   if (content.imdbId) params.set('imdbId', content.imdbId);
+  if (content.year) params.set('year', content.year);
   if (content.season != null) params.set('season', String(content.season));
   if (content.episode != null) params.set('episode', String(content.episode));
   if (sourceId) params.set('source', sourceId);
@@ -190,19 +196,26 @@ export const partyContentFromTitle = (
     title?: string;
     name?: string;
     poster_path?: string | null;
+    release_date?: string;
+    first_air_date?: string;
   },
   season?: number,
   episode?: number,
   imdbId?: string | null,
-): PartyContent => ({
-  tmdbId: item.id,
-  mediaType: item.media_type === 'tv' ? 'tv' : 'movie',
-  title: item.title || item.name || 'Untitled',
-  posterPath: item.poster_path ?? null,
-  season,
-  episode,
-  imdbId: imdbId ?? null,
-});
+): PartyContent => {
+  const date = item.media_type === 'tv' ? item.first_air_date : item.release_date;
+  const year = date?.slice(0, 4);
+  return {
+    tmdbId: item.id,
+    mediaType: item.media_type === 'tv' ? 'tv' : 'movie',
+    title: item.title || item.name || 'Untitled',
+    posterPath: item.poster_path ?? null,
+    season,
+    episode,
+    imdbId: imdbId ?? null,
+    ...(year && /^\d{4}$/.test(year) ? { year } : {}),
+  };
+};
 
 export const predictedHostTime = (clock: PartyClock, now = Date.now()): number => {
   if (clock.paused) return clock.positionSeconds;

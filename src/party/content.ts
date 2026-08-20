@@ -18,12 +18,17 @@ export const partyContentFromItem = (
   season?: number,
   episode?: number,
   imdbId?: string | null,
-): PartyContent => ({
-  tmdbId: item.id,
-  mediaType: item.media_type === 'tv' ? 'tv' : 'movie',
-  title: 'title' in item ? item.title : item.name,
-  posterPath: item.poster_path,
-  season,
-  episode,
-  imdbId: imdbId ?? null,
-});
+): PartyContent => {
+  const date = 'title' in item ? item.release_date : item.first_air_date;
+  const year = date?.slice(0, 4);
+  return {
+    tmdbId: item.id,
+    mediaType: item.media_type === 'tv' ? 'tv' : 'movie',
+    title: 'title' in item ? item.title : item.name,
+    posterPath: item.poster_path,
+    season,
+    episode,
+    imdbId: imdbId ?? null,
+    ...(year && /^\d{4}$/.test(year) ? { year } : {}),
+  };
+};

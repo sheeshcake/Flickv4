@@ -13,15 +13,9 @@ import {
   type SubtitleSettings,
 } from '@/lib/subtitleSettings';
 import { cn } from '@/lib/utils';
+import type { StreamflixWebSource } from '@/lib/streamflix';
 
-export interface StreamflixWebSource {
-  id: string;
-  name: string;
-  language?: string;
-  kind: 'hls' | 'file';
-  url: string;
-  subtitles: { label: string; file: string }[];
-}
+export type { StreamflixWebSource };
 
 export interface AudioOption {
   id: number;
