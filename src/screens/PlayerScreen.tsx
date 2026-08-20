@@ -786,6 +786,7 @@ export const PlayerScreen = ({
         extractorSubtitles={extractorSubtitles}
         onPlaybackFailed={playingDownloaded ? undefined : handlePlaybackFailed}
         localSubtitles={localSubtitles}
+        isLocalDownload={playingDownloaded}
         onPlayRecommendation={handlePlayRecommendation}
       />
     );

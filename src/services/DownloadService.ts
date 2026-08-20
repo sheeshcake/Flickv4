@@ -1,13 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
-import {
-  completeHandler,
-  createDownloadTask,
-  getExistingDownloadTasks,
-  setConfig,
-  type DownloadTask,
-} from '@kesha-antonov/react-native-background-downloader';
+import { getExistingDownloadTasks } from '@kesha-antonov/react-native-background-downloader';
 import type { ReactVideoSource } from 'react-native-video';
 import { getTitle, type MediaItem } from '@/src/types';
 import { originOf } from '@/src/utils/streamUrl';
@@ -17,7 +11,9 @@ import { STREAMFLIX_PLAYBACK_HEADERS } from '@/src/services/StreamflixService';
 import {
   fetchHlsVariants,
   fetchMediaPlaylist,
+  isPreferredVariant,
   rewriteMediaPlaylist,
+  toAbsoluteFilePlaylist,
   type Variant,
 } from '@/src/utils/hlsVariants';
 import {
@@ -133,6 +129,12 @@ export interface EnqueueOptions {
    */
   streamUri?: string;
   /**
+   * Stream container. Streamflix already knows this (`resolved.kind`); do
+   * not infer `'file'` from an extensionless HLS URL. When omitted, we
+   * fall back to `inferKind(streamUri)`.
+   */
+  kind?: 'hls' | 'file';
+  /**
    * ISO 639-1 code for the offline subtitle language to bundle (typically
    * the user's Settings default). Empty/undefined skips subtitle download.
    */
@@ -162,8 +164,7 @@ const sleep = (ms: number) =>
 const pad = (n: number, width = 5) => n.toString().padStart(width, '0');
 
 const inferKind = (url: string): 'hls' | 'file' => {
-  const lower = url.split('?')[0].toLowerCase();
-  if (lower.endsWith('.m3u8')) return 'hls';
+  if (/\.m3u8/i.test(url) || /[?&]type=m3u8\b/i.test(url)) return 'hls';
   return 'file';
 };
 
@@ -174,6 +175,67 @@ const extForUrl = (url: string, fallback = 'ts'): string => {
   const ext = lower.slice(dot + 1);
   if (ext.length > 5) return fallback;
   return ext;
+};
+
+const asciiHead = (bytes: Uint8Array, max = 32): string => {
+  const n = Math.min(bytes.length, max);
+  let s = '';
+  for (let i = 0; i < n; i++) s += String.fromCharCode(bytes[i]);
+  return s;
+};
+
+/** CDN 403/JSON bodies that File.downloadFileAsync still writes to disk. */
+const looksLikeErrorBody = (bytes: Uint8Array): boolean => {
+  if (!bytes.length) return true;
+  let i = 0;
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xef &&
+    bytes[1] === 0xbb &&
+    bytes[2] === 0xbf
+  ) {
+    i = 3;
+  }
+  while (
+    i < bytes.length &&
+    (bytes[i] === 0x20 ||
+      bytes[i] === 0x09 ||
+      bytes[i] === 0x0a ||
+      bytes[i] === 0x0d)
+  ) {
+    i += 1;
+  }
+  if (i >= bytes.length) return true;
+  const head = asciiHead(bytes.subarray(i)).toLowerCase();
+  return (
+    head.startsWith('<') ||
+    head.startsWith('{') ||
+    head.startsWith('[') ||
+    head.startsWith('error')
+  );
+};
+
+type DownloadedKind = 'segment' | 'sidecar' | 'file';
+
+const isPlausibleDownload = (
+  bytes: Uint8Array,
+  kind: DownloadedKind,
+): boolean => {
+  if (looksLikeErrorBody(bytes)) return false;
+  if (kind === 'sidecar') return bytes.length >= 16;
+  if (kind === 'file') return bytes.length >= 1024;
+  return bytes.length >= 32;
+};
+
+const assertPlausibleDownload = async (
+  destFile: File,
+  kind: DownloadedKind,
+): Promise<void> => {
+  const bytes = await destFile.bytes();
+  if (isPlausibleDownload(bytes, kind)) return;
+  throw new Error(
+    `Downloaded ${kind} looks like an error page (${bytes.length} bytes)`,
+  );
 };
 
 const IOS_UNSUPPORTED_EXTS = new Set(['webm', 'mkv', 'avi']);
@@ -212,13 +274,8 @@ class DownloadServiceImpl {
   private listeners = new Set<Listener>();
   private resolver: Resolver | null = null;
   private hydrated = false;
-  /** Live DownloadTask instances per job, keyed by task id. Only used by
-   *  the single-file path (large MP4s) that still goes through the
-   *  background-downloader library. HLS segments no longer create UIDT
-   *  jobs — see `downloadOneSegment` for the rationale. */
-  private taskIndex = new Map<string, Map<string, DownloadTask>>();
   /** In-flight `expo-file-system` fetch controllers per job. `pause()` /
-   *  `cancel()` abort every entry so segment downloads stop instantly. */
+   *  `cancel()` abort every entry so file and segment downloads stop. */
   private abortControllers = new Map<string, Set<AbortController>>();
   /** Cancellation flags per job. */
   private cancelled = new Set<string>();
@@ -230,25 +287,6 @@ class DownloadServiceImpl {
   async hydrate(): Promise<void> {
     if (this.hydrated) return;
     this.hydrated = true;
-
-    try {
-      // The background-downloader library is only used by the single-file
-      // (large MP4) path now — HLS segments run through `expo-file-system`
-      // to avoid the UIDT-mandated notification-per-job churn that Android
-      // 14+ imposes on every JobScheduler task.
-      //
-      // With `showNotificationsEnabled: false` the single leftover UIDT job
-      // posts one IMPORTANCE_MIN silent notification (invisible on the
-      // status bar; only appears at the bottom of the shade). Our notifee
-      // module owns the visible progress notification.
-      setConfig({
-        showNotificationsEnabled: false,
-        progressInterval: 1000,
-        maxParallelDownloads: SEGMENT_CONCURRENCY,
-      });
-    } catch (e) {
-      log('setConfig failed', e);
-    }
 
     // Notifee channel (Android). Idempotent — safe to call every hydrate.
     try {
@@ -283,12 +321,11 @@ class DownloadServiceImpl {
       log('hydrate: failed to load jobs', e);
     }
 
-    // Reattach any tasks the OS kept alive across a process death.
+    // Cancel leftover UIDT tasks from older builds that still used the
+    // background-downloader library. New jobs use `File.downloadFileAsync`.
     try {
       const existing = await getExistingDownloadTasks();
       for (const task of existing) {
-        // We don't know which job it belongs to unless we tag it via metadata;
-        // metadata support is limited here, so we simply cancel orphaned tasks.
         try {
           await task.stop();
         } catch {
@@ -361,13 +398,15 @@ class DownloadServiceImpl {
       uri: job.localUri,
       isNetwork: false,
       type: job.kind === 'hls' ? 'm3u8' : undefined,
+      textTracksAllowChunklessPreparation: false,
     };
   }
 
   /**
    * Ready a completed job for `<Video>`. On iOS, HLS is served over a
    * loopback HTTP server because AVPlayer will not play `file://` playlists.
-   * Android uses the on-disk `file://` URI.
+   * Android rewrites relative segment/key paths to absolute `file://` URIs
+   * so ExoPlayer's FileDataSource can decrypt AES-128.
    */
   async prepareLocalPlayback(id: string): Promise<ReactVideoSource | null> {
     const base = this.getLocalSource(id);
@@ -381,13 +420,40 @@ class DownloadServiceImpl {
           uri: `${origin.replace(/\/$/, '')}/local.m3u8`,
           isNetwork: true,
           type: 'm3u8',
+          textTracksAllowChunklessPreparation: false,
         };
       } catch (e) {
         log('prepareLocalPlayback: loopback server failed', e);
         return null;
       }
     }
-    return base;
+    if (Platform.OS === 'android' && job.kind === 'hls' && job.localUri) {
+      try {
+        const playlist = new File(job.localUri);
+        const text = await playlist.text();
+        const absolute = toAbsoluteFilePlaylist(text, job.localUri);
+        const playable = new File(job.localDir, 'local.file.m3u8');
+        if (playable.exists) playable.delete();
+        playable.create();
+        playable.write(absolute);
+        return {
+          uri: playable.uri,
+          isNetwork: false,
+          type: 'm3u8',
+          textTracksAllowChunklessPreparation: false,
+        };
+      } catch (e) {
+        log('prepareLocalPlayback: absolute playlist rewrite failed', e);
+        return {
+          ...base,
+          textTracksAllowChunklessPreparation: false,
+        };
+      }
+    }
+    return {
+      ...base,
+      textTracksAllowChunklessPreparation: false,
+    };
   }
 
   async stopLocalPlayback(): Promise<void> {
@@ -407,10 +473,38 @@ class DownloadServiceImpl {
     }
 
     const id = jobIdFor(item, opts.season, opts.episode, opts.qualityHeight);
+    const kind =
+      opts.kind ?? (opts.streamUri ? inferKind(opts.streamUri) : 'hls');
 
-    // If a job already exists for this key, return it (avoid duplicates).
+    // Restart a hung queued / paused / failed job instead of returning it
+    // forever. In-flight and completed jobs still de-dupe.
     const existing = this.jobs.get(id);
-    if (existing) return existing;
+    if (existing) {
+      if (
+        existing.status === 'queued' ||
+        existing.status === 'paused' ||
+        existing.status === 'failed'
+      ) {
+        this.cancelled.delete(id);
+        this.updateJob(id, {
+          streamUri: opts.streamUri ?? existing.streamUri,
+          kind,
+          headers: opts.headers ?? existing.headers,
+          serverName: opts.serverName ?? existing.serverName,
+          server: opts.server,
+          serverId: opts.server.id,
+          subtitleLanguage:
+            opts.subtitleLanguage?.trim() || existing.subtitleLanguage,
+          error: undefined,
+          status: 'queued',
+        });
+        void this.process(id, opts).catch((e) => {
+          log('unhandled process error for', id, e);
+        });
+        return this.jobs.get(id)!;
+      }
+      return existing;
+    }
 
     const localDir = `${Paths.document.uri}downloads/${id}`;
     try {
@@ -429,7 +523,7 @@ class DownloadServiceImpl {
       qualityHeight: opts.qualityHeight,
       qualityLabel: opts.qualityLabel,
       status: 'queued',
-      kind: opts.streamUri ? inferKind(opts.streamUri) : 'hls',
+      kind,
       streamUri: opts.streamUri,
       totalSegments: 0,
       completedSegments: 0,
@@ -463,22 +557,6 @@ class DownloadServiceImpl {
     if (!job) return;
     if (job.status !== 'downloading' && job.status !== 'resolving') return;
     this.cancelled.add(id);
-    // Physically stop every in-flight native task (single-file MP4 case)
-    // so pause feels instant instead of "wait for the current batch to
-    // drain".
-    const tasks = this.taskIndex.get(id);
-    if (tasks) {
-      for (const task of tasks.values()) {
-        try {
-          await task.stop();
-        } catch {
-          /* task may already be finished */
-        }
-      }
-      tasks.clear();
-    }
-    // Also abort every in-flight expo-file-system segment download so HLS
-    // jobs stop within a segment's worth of bytes.
     const aborts = this.abortControllers.get(id);
     if (aborts) {
       for (const ctrl of aborts) {
@@ -496,7 +574,13 @@ class DownloadServiceImpl {
   async resume(id: string, server?: PlaybackServer): Promise<void> {
     const job = this.jobs.get(id);
     if (!job) return;
-    if (job.status !== 'paused' && job.status !== 'failed') return;
+    if (
+      job.status !== 'paused' &&
+      job.status !== 'failed' &&
+      job.status !== 'queued'
+    ) {
+      return;
+    }
     this.cancelled.delete(id);
     this.updateJob(id, { status: 'queued', error: undefined });
     const resolvedServer =
@@ -515,15 +599,19 @@ class DownloadServiceImpl {
         headers: buildHeaders(server.url, server.resolver),
       });
     }
+    const latest = this.jobs.get(id) ?? job;
     void this.process(id, {
       server: resolvedServer,
-      qualityHeight: job.qualityHeight,
-      qualityLabel: job.qualityLabel,
-      season: job.season,
-      episode: job.episode,
-      title: job.title,
-      subtitleLanguage: job.subtitleLanguage,
-      imdbId: job.imdbId,
+      qualityHeight: latest.qualityHeight,
+      qualityLabel: latest.qualityLabel,
+      season: latest.season,
+      episode: latest.episode,
+      title: latest.title,
+      streamUri: latest.streamUri,
+      kind: latest.kind,
+      subtitleLanguage: latest.subtitleLanguage,
+      imdbId: latest.imdbId,
+      headers: latest.headers,
     }).catch((e) => log('resume: process failed', e));
   }
 
@@ -538,20 +626,6 @@ class DownloadServiceImpl {
     this.cancelled.add(id);
     const job = this.jobs.get(id);
     if (!job) return;
-    // Stop any in-flight native tasks and fetches before deleting the
-    // directory beneath them — otherwise the OkHttp writers would race
-    // against `dir.delete()` and log spurious ENOENT errors.
-    const tasks = this.taskIndex.get(id);
-    if (tasks) {
-      for (const task of tasks.values()) {
-        try {
-          await task.stop();
-        } catch {
-          /* noop */
-        }
-      }
-      this.taskIndex.delete(id);
-    }
     const aborts = this.abortControllers.get(id);
     if (aborts) {
       for (const ctrl of aborts) {
@@ -603,7 +677,7 @@ class DownloadServiceImpl {
         streamUri = resolved.videoUrl;
         this.updateJob(id, {
           streamUri,
-          kind: inferKind(streamUri),
+          kind: opts.kind ?? inferKind(streamUri),
         });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
@@ -614,8 +688,12 @@ class DownloadServiceImpl {
 
     if (this.cancelled.has(id)) return;
 
+    // Leave Queued as soon as we have a URL — playlist fetch used to keep
+    // the UI on "Preparing download…" until the first segment started.
+    this.updateJob(id, { status: 'downloading' });
+
     // 2) Branch: HLS multi-segment, or single-file.
-    const kind = this.jobs.get(id)?.kind ?? inferKind(streamUri);
+    const kind = opts.kind ?? this.jobs.get(id)?.kind ?? inferKind(streamUri);
     if (kind === 'file') {
       await this.downloadSingleFile(id, streamUri, opts.qualityLabel);
     } else {
@@ -698,7 +776,13 @@ class DownloadServiceImpl {
     const job = this.jobs.get(id);
     if (!job) return;
 
-    this.updateJob(id, { status: 'downloading', totalSegments: 1 });
+    this.updateJob(id, {
+      status: 'downloading',
+      totalSegments: 1,
+      completedSegments: 0,
+      bytesWritten: 0,
+      totalBytes: 0,
+    });
 
     const ext = extForUrl(url, 'mp4');
     if (Platform.OS === 'ios' && IOS_UNSUPPORTED_EXTS.has(ext)) {
@@ -708,50 +792,58 @@ class DownloadServiceImpl {
       });
       return;
     }
-    const dest = `${job.localDir}/video.${ext}`;
+    const destUri = `${job.localDir}/video.${ext}`;
+    const destFile = new File(destUri);
+    try {
+      if (destFile.exists) destFile.delete();
+    } catch {
+      /* noop */
+    }
 
-    await new Promise<void>((resolve, reject) => {
-      const task = createDownloadTask({
-        id,
-        url,
-        destination: dest,
-        headers: job.headers as unknown as Record<string, string>,
-        metadata: { jobId: id, kind: 'file' },
-      });
-      this.trackTask(id, task);
-
-      task.begin(({ expectedBytes }) => {
-        this.updateJob(id, { totalBytes: expectedBytes || 0 });
-      });
-      task.progress(({ bytesDownloaded, bytesTotal }) => {
-        if (this.cancelled.has(id)) return;
-        this.updateJob(id, {
-          bytesWritten: bytesDownloaded,
-          totalBytes: bytesTotal || undefined,
+    for (let attempt = 1; attempt <= SEGMENT_RETRIES; attempt++) {
+      if (this.cancelled.has(id)) return;
+      const controller = new AbortController();
+      this.trackAbort(id, controller);
+      try {
+        await File.downloadFileAsync(url, destFile, {
+          headers: job.headers,
+          idempotent: true,
+          signal: controller.signal,
+          onProgress: ({ bytesWritten, totalBytes }) => {
+            if (this.cancelled.has(id)) return;
+            this.updateJob(id, {
+              bytesWritten,
+              totalBytes: totalBytes > 0 ? totalBytes : undefined,
+            });
+          },
         });
-      });
-      task.done(() => {
-        this.untrackTask(id, id);
+        await assertPlausibleDownload(destFile, 'file');
         this.updateJob(id, {
           status: 'completed',
           completedSegments: 1,
-          localUri: dest,
+          localUri: destUri,
         });
-        void completeHandler(id);
-        resolve();
-      });
-      task.error(({ error }) => {
-        this.untrackTask(id, id);
-        this.updateJob(id, { status: 'failed', error });
-        void completeHandler(id);
-        reject(new Error(error));
-      });
+        return;
+      } catch (e) {
+        try {
+          if (destFile.exists) destFile.delete();
+        } catch {
+          /* noop */
+        }
+        log(
+          'single-file download failed',
+          `attempt ${attempt}/${SEGMENT_RETRIES}`,
+          e,
+        );
+        if (this.cancelled.has(id)) return;
+        if (attempt < SEGMENT_RETRIES) await sleep(300 * attempt);
+      } finally {
+        this.untrackAbort(id, controller);
+      }
+    }
 
-      // Kick the task off. `createDownloadTask` alone leaves the task in the
-      // PENDING state — nothing is dispatched to the native downloader until
-      // `.start()` is called. Skipping this was why progress stayed at 0.
-      task.start();
-    }).catch((e) => log('single-file download failed', e));
+    if (this.cancelled.has(id)) return;
+    this.updateJob(id, { status: 'failed', error: 'Download failed' });
   }
 
   private async downloadHls(
@@ -961,11 +1053,17 @@ class DownloadServiceImpl {
     const job = this.jobs.get(id);
     if (!job) return false;
     const destFile = new File(destUri);
-    // Skip if already present on disk from a previous run.
     try {
-      if (destFile.exists) return true;
+      if (destFile.exists) {
+        await assertPlausibleDownload(destFile, 'sidecar');
+        return true;
+      }
     } catch {
-      /* fall through */
+      try {
+        if (destFile.exists) destFile.delete();
+      } catch {
+        /* noop */
+      }
     }
 
     for (let attempt = 1; attempt <= SEGMENT_RETRIES; attempt++) {
@@ -978,6 +1076,7 @@ class DownloadServiceImpl {
           idempotent: true,
           signal: controller.signal,
         });
+        await assertPlausibleDownload(destFile, 'sidecar');
         return true;
       } catch (e) {
         try {
@@ -1019,11 +1118,16 @@ class DownloadServiceImpl {
     // instead of re-downloading the whole thing.
     try {
       if (destFile.exists) {
+        await assertPlausibleDownload(destFile, 'segment');
         this.markSegmentComplete(id, idx);
         return;
       }
     } catch {
-      /* fall through and download */
+      try {
+        if (destFile.exists) destFile.delete();
+      } catch {
+        /* fall through and download */
+      }
     }
 
     for (let attempt = 1; attempt <= SEGMENT_RETRIES; attempt++) {
@@ -1047,6 +1151,7 @@ class DownloadServiceImpl {
             });
           },
         });
+        await assertPlausibleDownload(destFile, 'segment');
         this.markSegmentComplete(id, idx);
         return;
       } catch (e) {
@@ -1099,19 +1204,6 @@ class DownloadServiceImpl {
   // -------------------------------------------------------------------------
   // Task tracking
   // -------------------------------------------------------------------------
-
-  private trackTask(jobId: string, task: DownloadTask): void {
-    let map = this.taskIndex.get(jobId);
-    if (!map) {
-      map = new Map();
-      this.taskIndex.set(jobId, map);
-    }
-    map.set(task.id, task);
-  }
-
-  private untrackTask(jobId: string, taskId: string): void {
-    this.taskIndex.get(jobId)?.delete(taskId);
-  }
 
   private trackAbort(jobId: string, ctrl: AbortController): void {
     let set = this.abortControllers.get(jobId);
@@ -1178,12 +1270,19 @@ class DownloadServiceImpl {
   }
 }
 
-// Pick the variant whose height is <= target, or the lowest available.
-const pickClosest = (variants: Variant[], targetHeight: number): Variant | null => {
+// Pick the variant whose height is <= target, preferring AVC over HEVC/DV.
+const pickClosest = (
+  variants: Variant[],
+  targetHeight: number,
+): Variant | null => {
   if (!variants.length) return null;
-  const sorted = [...variants].sort((a, b) => b.height - a.height);
-  const capped = sorted.find((v) => v.height <= targetHeight);
-  return capped ?? sorted[sorted.length - 1] ?? null;
+  const eligible = variants.filter((v) => v.height <= targetHeight);
+  const pool = eligible.length ? eligible : variants;
+  const maxHeight = Math.max(...pool.map((v) => v.height));
+  const atHeight = pool.filter((v) => v.height === maxHeight);
+  return atHeight.reduce((best, v) =>
+    isPreferredVariant(v, best) ? v : best,
+  );
 };
 
 export const formatBytes = (bytes: number): string => {

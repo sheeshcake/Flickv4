@@ -153,6 +153,9 @@ export const DetailScreen = ({
   const [downloadStreamUrl, setDownloadStreamUrl] = useState<string | null>(
     null,
   );
+  const [downloadStreamKind, setDownloadStreamKind] = useState<
+    'hls' | 'file' | null
+  >(null);
   const [downloadStreamHeaders, setDownloadStreamHeaders] = useState<
     Record<string, string> | null
   >(null);
@@ -288,6 +291,7 @@ export const DetailScreen = ({
       setDownloadStreamflixSourceId(null);
       setDownloadVariants([]);
       setDownloadStreamUrl(null);
+      setDownloadStreamKind(null);
       setDownloadStreamHeaders(null);
       setDownloadError(null);
       if (opts.season != null && opts.episode != null) {
@@ -304,6 +308,7 @@ export const DetailScreen = ({
     setDownloadStreamflixSourceId(null);
     setDownloadVariants([]);
     setDownloadStreamUrl(null);
+    setDownloadStreamKind(null);
     setDownloadStreamHeaders(null);
     setDownloadError(null);
   }, []);
@@ -313,6 +318,8 @@ export const DetailScreen = ({
       setResolvingEpisodeKey(null);
       setDownloadStreamflixSources([]);
       setDownloadStreamflixSourceId(null);
+      setDownloadStreamUrl(null);
+      setDownloadStreamKind(null);
       setDownloadStreamHeaders(null);
       return;
     }
@@ -325,6 +332,7 @@ export const DetailScreen = ({
       setDownloadError(null);
       setDownloadVariants([]);
       setDownloadStreamUrl(null);
+      setDownloadStreamKind(null);
       setDownloadStreamHeaders(null);
       void StreamflixService.listSources({
         tmdbId: item.id,
@@ -365,6 +373,7 @@ export const DetailScreen = ({
     setDownloadError(null);
     setDownloadVariants([]);
     setDownloadStreamUrl(null);
+    setDownloadStreamKind(null);
     setDownloadStreamHeaders(null);
     void (async () => {
       try {
@@ -378,11 +387,20 @@ export const DetailScreen = ({
           imdbId,
         });
         const headers = playbackHeadersFor(server);
-        const variants = stream.videoUrl.includes('.m3u8')
-          ? await fetchHlsVariants(stream.videoUrl, headers)
-          : [];
+        const variants =
+          /\.m3u8/i.test(stream.videoUrl) ||
+          /[?&]type=m3u8\b/i.test(stream.videoUrl)
+            ? await fetchHlsVariants(stream.videoUrl, headers)
+            : [];
         if (cancelled) return;
         setDownloadStreamUrl(stream.videoUrl);
+        setDownloadStreamKind(
+          variants.length ||
+            /\.m3u8/i.test(stream.videoUrl) ||
+            /[?&]type=m3u8\b/i.test(stream.videoUrl)
+            ? 'hls'
+            : 'file',
+        );
         setDownloadStreamHeaders(headers);
         setDownloadVariants(variants);
       } catch (e) {
@@ -418,6 +436,7 @@ export const DetailScreen = ({
     setDownloadError(null);
     setDownloadVariants([]);
     setDownloadStreamUrl(null);
+    setDownloadStreamKind(null);
     setDownloadStreamHeaders(null);
     void StreamflixService.resolveSource(source)
       .then(async (resolved) => {
@@ -433,6 +452,14 @@ export const DetailScreen = ({
             : [];
         if (cancelled) return;
         setDownloadStreamUrl(resolved.uri);
+        setDownloadStreamKind(
+          resolved.kind === 'hls' ||
+            variants.length ||
+            /\.m3u8/i.test(resolved.uri) ||
+            /[?&]type=m3u8\b/i.test(resolved.uri)
+            ? 'hls'
+            : resolved.kind,
+        );
         setDownloadStreamHeaders(headers);
         setDownloadVariants(variants);
       })
@@ -477,6 +504,7 @@ export const DetailScreen = ({
         episode: downloadTarget.episode,
         title: downloadTarget.title,
         streamUri,
+        kind: downloadStreamKind ?? undefined,
         subtitleLanguage: subtitleSettings.defaultLanguage || undefined,
         imdbId,
         headers: downloadStreamHeaders ?? undefined,
@@ -489,6 +517,7 @@ export const DetailScreen = ({
       downloadTarget,
       downloadVariants,
       downloadStreamUrl,
+      downloadStreamKind,
       downloadStreamHeaders,
       downloadStreamflixSources,
       downloadStreamflixSourceId,
@@ -556,7 +585,7 @@ export const DetailScreen = ({
     (ep: Episode) => {
       const existing = getJobFor(item, ep.season_number, ep.episode_number);
       if (existing) {
-        if (existing.status === 'paused' || existing.status === 'failed') {
+        if (existing.status === 'paused' || existing.status === 'failed' || existing.status === 'queued') {
           void resume(existing.id);
           return;
         }
@@ -577,7 +606,7 @@ export const DetailScreen = ({
           );
           return;
         }
-        // downloading / queued / resolving — no-op tap.
+        // downloading / resolving — no-op tap.
         return;
       }
       void beginDownload({

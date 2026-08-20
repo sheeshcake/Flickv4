@@ -1,11 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 import * as Brightness from 'expo-brightness';
 import { VolumeManager } from 'react-native-volume-manager';
+
+const clamp01 = (n: number): number => {
+  if (!Number.isFinite(n)) return 0.5;
+  return Math.min(1, Math.max(0, n));
+};
+
+const readDisplayedBrightness = async (): Promise<number> => {
+  const current =
+    Platform.OS === 'android'
+      ? await Brightness.getSystemBrightnessAsync().catch(() =>
+          Brightness.getBrightnessAsync(),
+        )
+      : await Brightness.getBrightnessAsync();
+  return clamp01(current);
+};
 
 /**
  * In-player sliders bound to the phone’s real media volume and screen
  * brightness. Not sent over watch party.
+ *
+ * Brightness is a session window override (Netflix-style): we never write
+ * global system brightness. The slider is seeded from the currently
+ * displayed level; dragging overrides the activity window until unmount.
  */
 export const useDevicePlaybackLevels = () => {
   const [volume, setVolumeState] = useState(1);
@@ -14,6 +33,7 @@ export const useDevicePlaybackLevels = () => {
   const initialBrightnessRef = useRef<number | null>(null);
   const brightnessSupportedRef = useRef(true);
   const settingVolumeRef = useRef(false);
+  const userOverrodeRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,33 +62,50 @@ export const useDevicePlaybackLevels = () => {
 
   useEffect(() => {
     let cancelled = false;
-    let sub: { remove: () => void } | undefined;
-    void (async () => {
+    let brightnessSub: { remove: () => void } | undefined;
+
+    const seed = async () => {
       try {
-        const current =
-          Platform.OS === 'android'
-            ? await Brightness.getSystemBrightnessAsync().catch(() =>
-                Brightness.getBrightnessAsync(),
-              )
-            : await Brightness.getBrightnessAsync();
+        const current = await readDisplayedBrightness();
         if (cancelled) return;
+        if (userOverrodeRef.current) return;
         initialBrightnessRef.current = current;
         setBrightness(current);
       } catch {
         brightnessSupportedRef.current = false;
         if (!cancelled) setBrightness(undefined);
       }
-    })();
-    if (Platform.OS === 'ios') {
-      sub = Brightness.addBrightnessListener(({ brightness: next }) => {
-        setBrightness(next);
+    };
+
+    void seed();
+
+    if (Platform.OS === 'ios' || Platform.OS === 'android') {
+      brightnessSub = Brightness.addBrightnessListener(({ brightness: next }) => {
+        if (userOverrodeRef.current) return;
+        const clamped = clamp01(next);
+        initialBrightnessRef.current = clamped;
+        setBrightness(clamped);
       });
     }
+
+    const onAppState = (state: AppStateStatus) => {
+      if (state !== 'active') return;
+      if (userOverrodeRef.current) return;
+      void seed();
+    };
+    const appSub = AppState.addEventListener('change', onAppState);
+
     return () => {
       cancelled = true;
-      sub?.remove();
+      brightnessSub?.remove();
+      appSub.remove();
+      if (!brightnessSupportedRef.current) return;
+      if (Platform.OS === 'android') {
+        void Brightness.restoreSystemBrightnessAsync().catch(() => {});
+        return;
+      }
       const restore = initialBrightnessRef.current;
-      if (restore != null && brightnessSupportedRef.current) {
+      if (restore != null) {
         void Brightness.setBrightnessAsync(restore).catch(() => {});
       }
     };
@@ -92,8 +129,10 @@ export const useDevicePlaybackLevels = () => {
   );
 
   const onBrightnessChange = useCallback((value: number) => {
-    setBrightness(value);
-    void Brightness.setBrightnessAsync(value).catch(() => {
+    const next = clamp01(value);
+    userOverrodeRef.current = true;
+    setBrightness(next);
+    void Brightness.setBrightnessAsync(next).catch(() => {
       brightnessSupportedRef.current = false;
       setBrightness(undefined);
     });

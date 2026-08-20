@@ -1,0 +1,380 @@
+diff --git a/node_modules/expo-brightness/android/src/main/java/expo/modules/brightness/BrightnessModule.kt b/node_modules/expo-brightness/android/src/main/java/expo/modules/brightness/BrightnessModule.kt
+index 7e4bde5..8a64e83 100644
+--- a/node_modules/expo-brightness/android/src/main/java/expo/modules/brightness/BrightnessModule.kt
++++ b/node_modules/expo-brightness/android/src/main/java/expo/modules/brightness/BrightnessModule.kt
+@@ -1,6 +1,13 @@
+ package expo.modules.brightness
+ 
+ import android.Manifest
++import android.database.ContentObserver
++import android.hardware.display.BrightnessInfo
++import android.hardware.display.DisplayManager
++import android.os.Build
++import android.os.Handler
++import android.os.Looper
++import android.os.PowerManager
+ import android.provider.Settings
+ import android.view.WindowManager
+ import expo.modules.core.errors.InvalidArgumentException
+@@ -9,20 +16,44 @@ import expo.modules.kotlin.Promise
+ import expo.modules.kotlin.functions.Queues
+ import expo.modules.kotlin.modules.Module
+ import expo.modules.kotlin.modules.ModuleDefinition
++import kotlin.math.exp
++import kotlin.math.ln
+ import kotlin.math.roundToInt
++import kotlin.math.sqrt
+ 
+ const val brightnessChangeEvent = "Expo.brightnessDidChange"
+ 
++/**
++ * Hybrid Log Gamma constants from AOSP BrightnessUtils. The OS brightness
++ * slider lives in this perceptual space; Display backlight is linear.
++ */
++private const val HLG_R = 0.5f
++private const val HLG_A = 0.17883277f
++private const val HLG_B = 0.28466892f
++private const val HLG_C = 0.55991073f
++
+ class BrightnessModule : Module() {
+   private val currentActivity
+     get() = appContext.throwingActivity
+ 
++  private val mainHandler = Handler(Looper.getMainLooper())
++  private var brightnessObserver: ContentObserver? = null
++  private var displayListener: DisplayManager.DisplayListener? = null
++  private var lastEmittedSlider = Float.NaN
++
+   override fun definition() = ModuleDefinition {
+     Name("ExpoBrightness")
+ 
+-    // This is unused on Android. It is only here to suppress the native event emitter warning
+     Events(brightnessChangeEvent)
+ 
++    OnStartObserving {
++      startWatchingBrightness()
++    }
++
++    OnStopObserving {
++      stopWatchingBrightness()
++    }
++
+     AsyncFunction("requestPermissionsAsync") { promise: Promise ->
+       Permissions.askForPermissionsWithPermissionsManager(appContext.permissions, promise, Manifest.permission.WRITE_SETTINGS)
+     }
+@@ -32,41 +63,36 @@ class BrightnessModule : Module() {
+     }
+ 
+     AsyncFunction("setBrightnessAsync") { brightnessValue: Float ->
++      val range = displayedBrightnessRange()
+       val lp = currentActivity.window.attributes
+-      lp.screenBrightness = brightnessValue
+-      currentActivity.window.attributes = lp // must be done on UI thread
++      // JS / the in-player slider is perceptual 0–1 (same as QS). The window
++      // override is linear backlight, so convert before applying.
++      lp.screenBrightness = convertGamma01ToLinear(brightnessValue, range.min, range.max)
++      currentActivity.window.attributes = lp
+     }.runOnQueue(Queues.MAIN)
+ 
+     AsyncFunction<Float>("getBrightnessAsync") {
+       val lp = currentActivity.window.attributes
+-      val brightness = if (lp.screenBrightness == WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE) {
+-        // system brightness is not overridden by the current activity, so just resolve with it
+-        getSystemBrightness()
+-      } else {
+-        lp.screenBrightness
++      if (lp.screenBrightness == WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE) {
++        return@AsyncFunction getSystemBrightness()
+       }
+-
+-      return@AsyncFunction brightness
++      val range = displayedBrightnessRange()
++      return@AsyncFunction convertLinearToGamma01(lp.screenBrightness, range.min, range.max)
+     }.runOnQueue(Queues.MAIN)
+ 
+     AsyncFunction<Float>("getSystemBrightnessAsync") {
+       return@AsyncFunction getSystemBrightness()
+-    }
++    }.runOnQueue(Queues.MAIN)
+ 
+     AsyncFunction("setSystemBrightnessAsync") { brightnessValue: Float ->
+-      // we have to just check this every time
+-      // if we try to store a value for this permission, there is no way to know if the user has changed it
+       if (!Settings.System.canWrite(currentActivity)) {
+         throw BrightnessPermissionsException()
+       }
+-      // manual mode must be set in order to change system brightness (sets the automatic mode off)
+       Settings.System.putInt(
+         currentActivity.contentResolver,
+         Settings.System.SCREEN_BRIGHTNESS_MODE,
+         Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+       )
+-      // Android's SCREEN_BRIGHTNESS accepts values from 1 to 255 (not 0 to 255)
+-      // Map input range [0, 1] to Android's valid range [1, 255]
+       Settings.System.putInt(
+         currentActivity.contentResolver,
+         Settings.System.SCREEN_BRIGHTNESS,
+@@ -77,7 +103,7 @@ class BrightnessModule : Module() {
+     AsyncFunction<Unit>("restoreSystemBrightnessAsync") {
+       val lp = currentActivity.window.attributes
+       lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+-      currentActivity.window.attributes = lp // must be done on UI thread
++      currentActivity.window.attributes = lp
+     }.runOnQueue(Queues.MAIN)
+ 
+     AsyncFunction<Boolean>("isUsingSystemBrightnessAsync") {
+@@ -94,8 +120,6 @@ class BrightnessModule : Module() {
+     }
+ 
+     AsyncFunction("setSystemBrightnessModeAsync") { brightnessMode: Int ->
+-      // we have to just check this every time
+-      // if we try to store a value for this permission, there is no way to know if the user has changed it
+       if (!Settings.System.canWrite(currentActivity)) {
+         throw BrightnessPermissionsException()
+       }
+@@ -107,26 +131,229 @@ class BrightnessModule : Module() {
+     }
+   }
+ 
++  /**
++   * Perceptual 0–1 that matches the system brightness slider (Settings / QS),
++   * including OxygenOS 16 adaptive brightness.
++   */
+   private fun getSystemBrightness(): Float {
+-    val brightnessMode = Settings.System.getInt(
+-      currentActivity.contentResolver,
+-      Settings.System.SCREEN_BRIGHTNESS_MODE
+-    )
+-    return if (brightnessMode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC) {
+-      val brightness = Settings.System.getFloat(
+-        currentActivity.contentResolver, // https://stackoverflow.com/questions/29349153/change-adaptive-brightness-level-programatically
+-        // this setting cannot be changed starting in targetSdkVersion 23, but it can still be read
+-        "screen_auto_brightness_adj"
+-      )
+-      (brightness + 1.0f) / 2
++    val range = displayedBrightnessRange()
++    return convertLinearToGamma01(range.current, range.min, range.max)
++  }
++
++  private data class BrightnessRange(
++    val current: Float,
++    val min: Float,
++    val max: Float,
++  )
++
++  private fun displayedBrightnessRange(): BrightnessRange {
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
++      try {
++        val display = currentActivity.display
++        val info = display?.brightnessInfo
++        if (info != null && info.brightnessMaximum > info.brightnessMinimum) {
++          return BrightnessRange(
++            current = info.brightness,
++            min = info.brightnessMinimum,
++            max = userVisibleMax(info),
++          )
++        }
++      } catch (_: Throwable) {
++      }
++    }
++    val linear = settingsLinearBrightness()
++    return BrightnessRange(current = linear, min = 0f, max = 1f)
++  }
++
++  /**
++   * QS / Settings map 100% to the HBM transition, not peak nits, while HBM
++   * is off. Using peak as max makes a full OS slider sit around 50%.
++   */
++  private fun userVisibleMax(info: BrightnessInfo): Float {
++    val transition = info.highBrightnessTransitionPoint
++    if (
++      transition > info.brightnessMinimum &&
++      transition < info.brightnessMaximum &&
++      info.highBrightnessMode == BrightnessInfo.HIGH_BRIGHTNESS_MODE_OFF &&
++      info.brightness <= transition + 0.02f
++    ) {
++      return transition
++    }
++    return info.brightnessMaximum
++  }
++
++  private fun settingsLinearBrightness(): Float {
++    val resolver = currentActivity.contentResolver
++    try {
++      val floatBrightness = Settings.System.getFloat(resolver, "screen_brightness_float")
++      if (floatBrightness in 0f..1f) {
++        return floatBrightness
++      }
++    } catch (_: Settings.SettingNotFoundException) {
++    } catch (_: Throwable) {
++    }
++
++    val raw = try {
++      Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS)
++    } catch (_: Settings.SettingNotFoundException) {
++      128
++    }
++    val max = deviceMaxBrightness(raw)
++    return (raw.toFloat() / max).coerceIn(0f, 1f)
++  }
++
++  private fun deviceMaxBrightness(raw: Int): Float {
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++      try {
++        val powerManager = currentActivity.getSystemService(PowerManager::class.java)
++        val constraint = powerManager.getBrightnessConstraint(
++          PowerManager.BRIGHTNESS_CONSTRAINT_TYPE_MAXIMUM
++        )
++        if (constraint > 1f) {
++          return constraint
++        }
++      } catch (_: Throwable) {
++      }
++    }
++    if (raw > 255) {
++      val buckets = intArrayOf(1023, 2047, 4095, 8191, 65535)
++      for (bucket in buckets) {
++        if (raw <= bucket) return bucket.toFloat()
++      }
++      return 65535f
++    }
++    return 255f
++  }
++
++  private fun convertLinearToGamma01(linear: Float, min: Float, max: Float): Float {
++    val range = max - min
++    if (range <= 0f) return 0.5f
++    val linear01 = ((linear - min) / range).coerceIn(0f, 1f)
++    if (gammaConversionDisabled()) {
++      return linear01
++    }
++    val normalized = linear01 * 12f
++    val gamma = if (normalized <= 1f) {
++      sqrt(normalized) * HLG_R
+     } else {
+-      val brightness = Settings.System.getString(
+-        currentActivity.contentResolver,
+-        Settings.System.SCREEN_BRIGHTNESS
++      HLG_A * ln((normalized - HLG_B).toDouble()).toFloat() + HLG_C
++    }
++    return if (gamma.isFinite()) gamma.coerceIn(0f, 1f) else 0.5f
++  }
++
++  private fun convertGamma01ToLinear(gamma: Float, min: Float, max: Float): Float {
++    val g = gamma.coerceIn(0f, 1f)
++    val linear01 = if (gammaConversionDisabled()) {
++      g
++    } else {
++      val hlg = if (g <= HLG_R) {
++        val n = g / HLG_R
++        n * n
++      } else {
++        exp(((g - HLG_C) / HLG_A).toDouble()).toFloat() + HLG_B
++      }
++      (hlg / 12f).coerceIn(0f, 1f)
++    }
++    return min + linear01 * (max - min)
++  }
++
++  /**
++   * ColorOS / OxygenOS often gamma-corrects in the panel, then sets
++   * `sys.brightness.disable_gamma_conversion` so the OS slider is linear.
++   */
++  private fun gammaConversionDisabled(): Boolean {
++    return try {
++      val clazz = Class.forName("android.os.SystemProperties")
++      val getBoolean = clazz.getMethod(
++        "getBoolean",
++        String::class.java,
++        Boolean::class.javaPrimitiveType
+       )
+-      // Map Android's range [1, 255] back to [0, 1]
+-      (brightness.toInt() - 1) / 254f
++      getBoolean.invoke(null, "sys.brightness.disable_gamma_conversion", false) as Boolean
++    } catch (_: Throwable) {
++      false
++    }
++  }
++
++  private fun startWatchingBrightness() {
++    stopWatchingBrightness()
++    val activity = try {
++      currentActivity
++    } catch (_: Throwable) {
++      return
++    }
++
++    val observer = object : ContentObserver(mainHandler) {
++      override fun onChange(selfChange: Boolean) {
++        emitSliderIfChanged()
++      }
++    }
++    val resolver = activity.contentResolver
++    resolver.registerContentObserver(
++      Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS),
++      false,
++      observer
++    )
++    resolver.registerContentObserver(
++      Settings.System.getUriFor("screen_brightness_float"),
++      false,
++      observer
++    )
++    resolver.registerContentObserver(
++      Settings.System.getUriFor(Settings.System.SCREEN_BRIGHTNESS_MODE),
++      false,
++      observer
++    )
++    brightnessObserver = observer
++
++    val manager = activity.getSystemService(DisplayManager::class.java) ?: return
++    val listener = object : DisplayManager.DisplayListener {
++      override fun onDisplayAdded(displayId: Int) {}
++      override fun onDisplayRemoved(displayId: Int) {}
++      override fun onDisplayChanged(displayId: Int) {
++        emitSliderIfChanged()
++      }
++    }
++    manager.registerDisplayListener(listener, mainHandler)
++    displayListener = listener
++  }
++
++  private fun stopWatchingBrightness() {
++    val activity = try {
++      appContext.currentActivity
++    } catch (_: Throwable) {
++      null
++    }
++    brightnessObserver?.let { observer ->
++      try {
++        activity?.contentResolver?.unregisterContentObserver(observer)
++      } catch (_: Throwable) {
++      }
++    }
++    brightnessObserver = null
++
++    displayListener?.let { listener ->
++      try {
++        activity?.getSystemService(DisplayManager::class.java)
++          ?.unregisterDisplayListener(listener)
++      } catch (_: Throwable) {
++      }
++    }
++    displayListener = null
++    lastEmittedSlider = Float.NaN
++  }
++
++  private fun emitSliderIfChanged() {
++    val next = try {
++      getSystemBrightness()
++    } catch (_: Throwable) {
++      return
++    }
++    if (next.isFinite() && kotlin.math.abs(next - lastEmittedSlider) < 0.004f) {
++      return
+     }
++    lastEmittedSlider = next
++    sendEvent(brightnessChangeEvent, mapOf("brightness" to next))
+   }
+ 
+   private fun brightnessModeNativeToJS(nativeValue: Int): Int {

@@ -3,6 +3,7 @@ import { Platform, Pressable, StatusBar, StyleSheet, useWindowDimensions } from 
 import { useIsFocused } from '@react-navigation/native';
 import Video, {
   SelectedTrackType,
+  SelectedVideoTrackType,
   TextTrackType,
   type AudioTrack,
   type BufferConfig,
@@ -122,6 +123,11 @@ interface PlayerCoreProps {
    * `useSubtitles` skips the Wyzie network search and loads these files.
    */
   localSubtitles?: LocalDownloadedSubtitle[];
+  /**
+   * Playing a completed download. Native decode errors then tell the user
+   * to delete and re-download instead of implying a stream/server failure.
+   */
+  isLocalDownload?: boolean;
   /** Mobile: play a recommended title after the current video ends. */
   onPlayRecommendation?: (item: MediaItem) => void;
 }
@@ -156,10 +162,10 @@ type PlaybackStatus = 'loading' | 'ready' | 'error';
 /**
  * Owns the react-native-video player instance and all playback UI. Created
  * once with a final, resolved source so the player is never recreated
- * mid-playback — all later changes (quality swap, sidecar subtitle tracks
- * arriving) go through the imperative `VideoRef.setSource()` call instead of
- * changing the `source` prop, exactly mirroring how this used to work with
- * expo-video's `player.replaceAsync()`.
+ * mid-playback — sidecar subtitle tracks arriving go through the
+ * imperative `VideoRef.setSource()` call instead of changing the `source`
+ * prop. HLS quality stays on the master URI and is pinned with
+ * `selectedVideoTrack` / `maxBitRate`.
  */
 export const PlayerCore = ({
   source,
@@ -180,6 +186,7 @@ export const PlayerCore = ({
   extractorSubtitles = [],
   onPlaybackFailed,
   localSubtitles,
+  isLocalDownload = false,
   onPlayRecommendation,
 }: PlayerCoreProps) => {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -408,7 +415,7 @@ export const PlayerCore = ({
 
   useEffect(() => {
     if (partyRole !== 'host') return;
-    const uri = selectedVariantUri ?? masterUri;
+    const uri = masterUri;
     if (!uri || !isPartyStreamUri(uri)) return;
     const headers = playbackHeadersFor(activeServer);
     sendParty({
@@ -423,7 +430,6 @@ export const PlayerCore = ({
     });
   }, [
     partyRole,
-    selectedVariantUri,
     masterUri,
     sendParty,
     activeServer,
@@ -722,12 +728,11 @@ export const PlayerCore = ({
 
   // -------------------------------------------------------------------------
   // Source construction. The `source` PROP given to `<Video>` is built ONCE
-  // at mount (`initialSource` below) and never changed afterwards — quality
-  // swaps and the sidecar text-track list arriving both go through the
-  // imperative `videoRef.current.setSource()` instead (see `swapToUri` and
-  // the sidecar-apply effect), each one folding in whatever the OTHER
-  // dimension's latest value is via these refs, so neither clobbers the
-  // other.
+  // at mount (`initialSource` below) and never changed afterwards — sidecar
+  // text tracks arriving go through the imperative
+  // `videoRef.current.setSource()` (see the sidecar-apply effect). HLS
+  // quality stays on the master URI and is pinned with `selectedVideoTrack`
+  // / `maxBitRate` so demuxed AUDIO groups keep working.
   // -------------------------------------------------------------------------
   const activeUriRef = useRef<string | null>(masterUri);
   const activeTextTracksRef = useRef<TextTracks | undefined>(undefined);
@@ -752,22 +757,29 @@ export const PlayerCore = ({
     buildSource(masterUri ?? '', undefined),
   );
 
-  // Swap the current stream URI while preserving the play head. Called by
-  // both the initial-preference effect and the user-facing quality picker.
-  const swapToUri = useCallback(
-    (nextUri: string) => {
-      if (!sourceObj) return;
-      pendingSeekRef.current = currentTimeRef.current;
-      activeUriRef.current = nextUri;
-      videoRef.current?.setSource(
-        buildSource(nextUri, activeTextTracksRef.current),
-      );
-    },
-    [sourceObj, buildSource],
+  const selectedVariant = useMemo(
+    () => variants.find((v) => v.uri === selectedVariantUri) ?? null,
+    [variants, selectedVariantUri],
   );
 
+  const selectedVideoTrack = useMemo(() => {
+    if (Platform.OS !== 'android' || !isHls) return undefined;
+    if (!selectedVariant) {
+      return { type: SelectedVideoTrackType.AUTO };
+    }
+    return {
+      type: SelectedVideoTrackType.RESOLUTION,
+      value: selectedVariant.height,
+    };
+  }, [isHls, selectedVariant]);
+
+  const maxBitRate =
+    Platform.OS === 'ios' && isHls
+      ? selectedVariant?.bandwidth ?? 0
+      : undefined;
+
   // Apply the persisted preferred quality once variants land. `pickInitial`
-  // returns null for `auto` so we leave the master URI alone (ABR).
+  // returns null for `auto` so we leave ABR on the master URI.
   useEffect(() => {
     if (didApplyInitialQualityRef.current) return;
     if (!variants.length) return;
@@ -775,18 +787,11 @@ export const PlayerCore = ({
     didApplyInitialQualityRef.current = true;
     if (!initial) return;
     setSelectedVariantUri(initial.uri);
-    swapToUri(initial.uri);
-  }, [variants, pickInitialVariant, swapToUri]);
+  }, [variants, pickInitialVariant]);
 
-  const onSelectQuality = useCallback(
-    (variant: Variant | null) => {
-      if (!masterUri) return;
-      const nextUri = variant?.uri ?? masterUri;
-      setSelectedVariantUri(variant?.uri ?? null);
-      swapToUri(nextUri);
-    },
-    [masterUri, swapToUri],
-  );
+  const onSelectQuality = useCallback((variant: Variant | null) => {
+    setSelectedVariantUri(variant?.uri ?? null);
+  }, []);
 
   const finishSidecarResume = useCallback(() => {
     const resumeAt =
@@ -877,6 +882,12 @@ export const PlayerCore = ({
   const onError = useCallback(
     (e: OnVideoErrorData) => {
       setStatus('error');
+      if (isLocalDownload) {
+        setErrorMessage(
+          "This download can't be decoded on this device — delete it and re-download.",
+        );
+        return;
+      }
       const err = e.error;
       setErrorMessage(
         err?.localizedDescription ||
@@ -889,7 +900,7 @@ export const PlayerCore = ({
       // fresh `PlayerCore` against the next one.
       onPlaybackFailed?.(currentTimeRef.current);
     },
-    [onPlaybackFailed],
+    [onPlaybackFailed, isLocalDownload],
   );
 
   const onProgress = useCallback(
@@ -1207,6 +1218,8 @@ export const PlayerCore = ({
               ? { type: SelectedTrackType.INDEX, value: selectedAudioIndex }
               : undefined
           }
+          selectedVideoTrack={selectedVideoTrack}
+          maxBitRate={maxBitRate}
           onError={onError}
           onEnd={onEnd}
           onProgress={onProgress}
