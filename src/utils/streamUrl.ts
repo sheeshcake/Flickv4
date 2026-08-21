@@ -84,7 +84,7 @@ const typeLabelFor = (server: ServerUrlConfig, type: 'movie' | 'tv'): string =>
 /** Resolve the pattern to use for a given type: that type's custom
  * override (if set), otherwise the app default for that type. Also reports
  * whether a custom pattern was actually used, since that changes whether
- * `autoPlay=true` gets appended (see `buildEmbedUrl`). */
+ * `autoplay=true` gets appended (see `buildEmbedUrl`). */
 const patternFor = (
   server: ServerUrlConfig,
   type: 'movie' | 'tv',
@@ -120,15 +120,17 @@ export const buildEmbedUrl = (
     episode: episode != null ? String(episode) : '',
   });
 
-  // `autoPlay=true` is only appended for the app's own default pattern.
+  // `autoplay=true` is only appended for the app's own default pattern.
   // Custom patterns are written verbatim by the user (e.g. already
   // including their own query params like `?streaming=true`) — appending
   // an extra param they didn't ask for could break servers that validate
-  // the query string.
+  // the query string. Lowercase `autoplay` (not `autoPlay`) — most embed
+  // players (VidSrc's nxsha inner player, Videasy, VidFast) read
+  // `searchParams.get("autoplay") === "true"` case-sensitively.
   if (isCustom) return url;
 
   const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}autoPlay=true`;
+  return `${url}${separator}autoplay=true`;
 };
 
 /**

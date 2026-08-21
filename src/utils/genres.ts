@@ -7,6 +7,9 @@ export const GENRE_IDS = {
   documentary: 99,
   sciFi: 878,
   animation: 16,
+  drama: 18,
+  crime: 80,
+  thriller: 53,
 } as const;
 
 const GENRE_NAMES: Record<number, string> = {

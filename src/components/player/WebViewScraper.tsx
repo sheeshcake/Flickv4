@@ -58,9 +58,9 @@ interface WebViewScraperProps {
    */
   muted?: boolean;
   /**
-   * Auto-click play overlays so a hidden scrape can start the stream.
-   * Defaults to on when `debug` is off; debug leaves the page alone so you
-   * can tap yourself.
+   * Auto-click play overlays (and rewrite nested iframes to autoplay=true)
+   * so a hidden scrape can start the stream. Defaults to on when `debug`
+   * is off; debug leaves the page alone so you can tap yourself.
    */
   autoTap?: boolean;
 }
@@ -85,11 +85,16 @@ const TAG = '[WebViewScraper]';
 // eslint-disable-next-line no-console
 const log = (...args: unknown[]) => console.log(TAG, ...args);
 
-// Injected into the page (and every frame): hooks XMLHttpRequest AND fetch()
-// to catch video responses (m3u8/mp4/webm/mkv) and posts the resolved URL
-// back to React Native. Some newer players (hls.js configured with a fetch
-// loader, native <video> + MSE via fetch, etc.) issue segment/manifest
-// requests through `fetch` instead of `XMLHttpRequest`, so both are patched.
+/** Native-side URL check — mirrors the injected `VIDEO_RE` / `VIDEO_HINT_RE`. */
+const NATIVE_VIDEO_RE = /\.(m3u8|mpd|mp4|webm|mkv)($|\?)|m3u8|mpegurl/i;
+
+// Injected into the page (and every frame): hooks XMLHttpRequest, fetch(),
+// <video>.src, and resource timings to catch video (m3u8/mpd/mp4/webm/mkv)
+// and posts the resolved URL back to React Native. Some players (VidLink,
+// Vidstack, JW) never put `.m3u8` on the request URL — they return JSON
+// with `stream.playlist` and then assign it to a media element, or fetch a
+// proxied manifest whose path has no extension — so we also walk JSON
+// bodies and treat `#EXTM3U` / DASH MPD responses as streams.
 // Also forwards debug logs (type: 'log') so they surface in devtools.
 //
 // `timeoutMs` (the same give-up timeout the component arms in
@@ -109,18 +114,87 @@ const buildInjectedJavaScript = (
   }
   function log(m) { post({ type: 'log', message: String(m), frame: location.href }); }
 
-  var VIDEO_RE = /\\.(m3u8|mp4|webm|mkv)($|\\?)/i;
-  var streamFound = false;
+  var VIDEO_RE = /\\.(m3u8|mpd|mp4|webm|mkv)($|\\?)/i;
+  var VIDEO_HINT_RE = /m3u8|mpegurl|\\.mpd($|\\?)/i;
+  var SKIP_RE = /\\.(jpe?g|png|gif|webp|svg|ico|css|woff2?|js|vtt|srt)($|\\?)/i;
+  var SKIP_HOST_RE = /image\\.tmdb\\.org|wsrv\\.nl|googletagmanager|doubleclick|adsystem|google-analytics|clarity\\.ms|yandex/i;
+  function isStreamFound() { return !!window.__flickStreamFound; }
 
-  function reportIfVideo(url, source) {
-    if (!url || !VIDEO_RE.test(url)) return;
-    streamFound = true;
+  function isHttpUrl(url) {
+    return typeof url === 'string' && /^https?:\\/\\//i.test(url);
+  }
+  function isSkippable(url) {
+    return !isHttpUrl(url) || SKIP_RE.test(url) || SKIP_HOST_RE.test(url);
+  }
+  function emitVideo(url, source) {
+    if (isStreamFound() || isSkippable(url)) return;
+    window.__flickStreamFound = true;
     log(source + ' ' + url);
     post({
       type: 'video',
       responseURL: url,
       isWebM: /\\.webm($|\\?)/i.test(url)
     });
+  }
+  function reportIfVideo(url, source) {
+    if (!url || (!VIDEO_RE.test(url) && !VIDEO_HINT_RE.test(url))) return;
+    emitVideo(url, source);
+  }
+  function reportMediaSrc(url, source) {
+    reportIfVideo(url, source);
+  }
+  function reportPlaylist(url, source) {
+    emitVideo(url, source);
+  }
+
+  function walkJson(node) {
+    if (!node || isStreamFound()) return;
+    if (typeof node === 'string') {
+      reportIfVideo(node, 'json');
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (var i = 0; i < node.length && !isStreamFound(); i++) walkJson(node[i]);
+      return;
+    }
+    if (typeof node !== 'object') return;
+    // VidLink (and similar): { stream: { playlist, requiresProxy, qualities } }.
+    // If the playlist needs their proxy rewrite, skip it and wait for the
+    // player to request the rewritten URL (caught via fetch/video.src).
+    if (typeof node.playlist === 'string' && node.requiresProxy !== true) {
+      reportPlaylist(node.playlist, 'json.playlist');
+      if (isStreamFound()) return;
+    }
+    if (typeof node.file === 'string') reportIfVideo(node.file, 'json.file');
+    if (isStreamFound()) return;
+    if (typeof node.url === 'string' && isHttpUrl(node.url)) {
+      var kind = String(node.type || node.kind || node.format || '').toLowerCase();
+      if (VIDEO_RE.test(node.url) || VIDEO_HINT_RE.test(node.url) || /^(hls|dash|mp4|mpegurl|m3u8|mpd)$/i.test(kind)) {
+        emitVideo(node.url, 'json.url');
+        if (isStreamFound()) return;
+      }
+    }
+    for (var key in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+      if (key === 'playlist' || key === 'file') continue;
+      walkJson(node[key]);
+      if (isStreamFound()) return;
+    }
+  }
+
+  function inspectBody(text, url, source) {
+    if (!text || isStreamFound()) return;
+    var trimmed = String(text).trim();
+    if (trimmed.indexOf('#EXTM3U') === 0) {
+      reportPlaylist(url, source + '-hls');
+      return;
+    }
+    if (trimmed.indexOf('<') === 0 && /<MPD[\\s>]/i.test(trimmed.slice(0, 400))) {
+      reportPlaylist(url, source + '-dash');
+      return;
+    }
+    if (trimmed.charAt(0) !== '{' && trimmed.charAt(0) !== '[') return;
+    try { walkJson(JSON.parse(trimmed)); } catch (e) {}
   }
 
   log('hook installed');
@@ -135,7 +209,8 @@ const buildInjectedJavaScript = (
       try { nodes[i].volume = 0; } catch (e) {}
     }
   }
-  if (MUTE_MEDIA) {
+  if (MUTE_MEDIA && !window.__flickScraperMuted) {
+    window.__flickScraperMuted = true;
     muteMedia();
     setInterval(muteMedia, 1000);
     try {
@@ -146,6 +221,57 @@ const buildInjectedJavaScript = (
     } catch (e) {}
   }
 
+  // Lowercase autoplay=true — nxsha/Videasy/VidFast check
+  // searchParams.get("autoplay") === "true"; autoplay=1 and autoPlay=true are ignored.
+  function withAutoplay(url) {
+    if (!url || url === 'about:blank' || url === 'about:srcdoc') return url;
+    try {
+      var u = new URL(url, location.href);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return url;
+      var current = u.searchParams.get('autoplay') || u.searchParams.get('autoPlay');
+      if (current === 'true') return url;
+      u.searchParams.set('autoplay', 'true');
+      return u.toString();
+    } catch (e) {
+      return url;
+    }
+  }
+
+  function harvestPlayingVideo() {
+    if (isStreamFound()) return;
+    var nodes = document.querySelectorAll('video');
+    for (var i = 0; i < nodes.length; i++) {
+      var v = nodes[i];
+      var url = v.currentSrc || v.getAttribute('src') || '';
+      if (!url || url.indexOf('blob:') === 0) continue;
+      reportIfVideo(url, 'video.currentSrc');
+      if (!v.paused && isHttpUrl(url) && !isSkippable(url) &&
+          url.split('#')[0] !== location.href.split('#')[0]) {
+        emitVideo(url, 'video.playing');
+      }
+    }
+    try {
+      if (window.videojs && typeof window.videojs.getPlayers === 'function') {
+        var players = window.videojs.getPlayers();
+        for (var k in players) {
+          var p = players[k];
+          if (!p || typeof p.currentSource !== 'function') continue;
+          var src = p.currentSource();
+          var u = src && (src.src || src.url);
+          var mime = (src && src.type) || '';
+          if (!u) continue;
+          reportIfVideo(u, 'videojs.currentSource');
+          if (isHttpUrl(u) && !isSkippable(u) && /mpegurl|m3u8|mp4|dash|mpd/i.test(mime)) {
+            emitVideo(u, 'videojs.currentSource');
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (!window.__flickScraperHooked) {
+  window.__flickScraperHooked = true;
+
   var originalOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function() {
     this.addEventListener('load', function() {
@@ -154,6 +280,8 @@ const buildInjectedJavaScript = (
         if (!responseURL) return;
         log('xhr ' + responseURL);
         reportIfVideo(responseURL, 'xhr');
+        var text = typeof this.responseText === 'string' ? this.responseText : '';
+        inspectBody(text, responseURL, 'xhr');
       } catch (error) {
         log('xhr listener error: ' + error);
       }
@@ -170,6 +298,13 @@ const buildInjectedJavaScript = (
           var responseURL = response.url || requestUrl;
           log('fetch ' + responseURL);
           reportIfVideo(responseURL, 'fetch');
+          var ct = '';
+          try { ct = (response.headers && response.headers.get('content-type')) || ''; } catch (e) {}
+          if (!ct || /json|mpegurl|m3u8|dash|mpd|text|octet-stream|video|mpegurl|application\\/vnd/i.test(ct) || /\\/api\\//i.test(responseURL || '')) {
+            response.clone().text().then(function(text) {
+              inspectBody(text, responseURL, 'fetch');
+            }).catch(function() {});
+          }
         } catch (error) {
           log('fetch listener error: ' + error);
         }
@@ -178,24 +313,129 @@ const buildInjectedJavaScript = (
     };
   }
 
+  try {
+    var mediaProto = window.HTMLMediaElement && window.HTMLMediaElement.prototype;
+    if (mediaProto && !mediaProto.__flickSrcHooked) {
+      mediaProto.__flickSrcHooked = true;
+      var srcDesc = Object.getOwnPropertyDescriptor(mediaProto, 'src');
+      if (srcDesc && srcDesc.set) {
+        Object.defineProperty(mediaProto, 'src', {
+          configurable: true,
+          enumerable: srcDesc.enumerable,
+          get: function() { return srcDesc.get.call(this); },
+          set: function(v) {
+            reportMediaSrc(String(v || ''), 'video.src');
+            srcDesc.set.call(this, v);
+          }
+        });
+      }
+      var origSetAttr = mediaProto.setAttribute;
+      mediaProto.setAttribute = function(name, value) {
+        if (String(name).toLowerCase() === 'src') {
+          reportMediaSrc(String(value || ''), 'video.attr');
+        }
+        return origSetAttr.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  // ScreenScape (video.js) sets the stream via player.src([{src, type}])
+  // rather than <video>.src — VHS then fetches HLS, but the src URL often
+  // has no .m3u8 suffix. Wrap Player.prototype.src once video.js loads.
+  function hookVideoJsSrc() {
+    try {
+      var vjs = window.videojs;
+      if (!vjs || vjs.__flickSrcHooked) return;
+      var Player = vjs.getComponent && vjs.getComponent('Player');
+      if (!Player || !Player.prototype || typeof Player.prototype.src !== 'function') return;
+      vjs.__flickSrcHooked = true;
+      var origVjsSrc = Player.prototype.src;
+      Player.prototype.src = function(source) {
+        try {
+          var list = Array.isArray(source) ? source : (source ? [source] : []);
+          for (var i = 0; i < list.length; i++) {
+            var s = list[i];
+            var url = typeof s === 'string' ? s : (s && (s.src || s.url));
+            var mime = typeof s === 'object' && s ? String(s.type || '') : '';
+            if (!url) continue;
+            reportIfVideo(String(url), 'videojs.src');
+            // Extensionless HLS/mp4: trust video.js's MIME, not a bare http URL
+            // (ScreenScape also src()'s failed servers / embed pages).
+            if (!isStreamFound() && isHttpUrl(url) && !isSkippable(url) &&
+                /mpegurl|m3u8|mp4|dash|mpd/i.test(mime)) {
+              emitVideo(String(url), 'videojs.src');
+            }
+          }
+        } catch (e) {}
+        return origVjsSrc.apply(this, arguments);
+      };
+      log('videojs.src hooked');
+    } catch (e) {}
+  }
+  hookVideoJsSrc();
+  harvestPlayingVideo();
+  setInterval(function() {
+    hookVideoJsSrc();
+    harvestPlayingVideo();
+  }, 1000);
+
+  try {
+    new PerformanceObserver(function(list) {
+      var entries = list.getEntries();
+      for (var i = 0; i < entries.length; i++) {
+        reportIfVideo(entries[i].name, 'perf');
+      }
+    }).observe({ type: 'resource', buffered: true });
+  } catch (e) {}
+
+  // VidSrc (and similar wrappers) load the real player in a nested iframe
+  // *without* forwarding autoplay, and often with a sandbox attribute that
+  // blocks playback. Normalize iframe URLs to \`autoplay=true\` (the value
+  // nxsha / Videasy / VidFast actually check — \`autoplay=1\` is ignored)
+  // and strip sandbox *before* the iframe navigates.
+  try {
+    var iframeProto = window.HTMLIFrameElement && window.HTMLIFrameElement.prototype;
+    if (iframeProto && !iframeProto.__flickSrcHooked) {
+      iframeProto.__flickSrcHooked = true;
+      var iframeSrcDesc = Object.getOwnPropertyDescriptor(iframeProto, 'src');
+      if (iframeSrcDesc && iframeSrcDesc.set) {
+        Object.defineProperty(iframeProto, 'src', {
+          configurable: true,
+          enumerable: iframeSrcDesc.enumerable,
+          get: function() { return iframeSrcDesc.get.call(this); },
+          set: function(v) {
+            iframeSrcDesc.set.call(this, withAutoplay(String(v || '')));
+          }
+        });
+      }
+      var origIframeSetAttr = iframeProto.setAttribute;
+      iframeProto.setAttribute = function(name, value) {
+        var n = String(name).toLowerCase();
+        if (n === 'sandbox') {
+          log('blocked iframe sandbox');
+          return;
+        }
+        if (n === 'src') value = withAutoplay(String(value || ''));
+        return origIframeSetAttr.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  } // __flickScraperHooked
+
   // Many embed players only start (and issue their video request) once
-  // their "play" overlay is clicked. Try to find and click that overlay via
-  // known selector patterns, falling back to a plain viewport-center click
-  // (elementFromPoint) if no known button is found. Retries on an interval
-  // (rather than a single attempt) since the overlay may not have rendered
-  // yet, or the first click may land on an ad/consent layer instead of the
-  // real button — keeps trying until a stream is found or \`timeoutMs\`
-  // elapses (matching the component's own give-up timeout).
-  var CENTER_CLICK_INTERVAL_MS = 3000;
+  // their "play" overlay is clicked. VidSrc in particular ignores
+  // autoplay on its own URL and loads the real player in a nested iframe
+  // — a MouseEvent on that <iframe> does not reach the inner document, so
+  // we also: strip sandbox, rewrite iframe src to autoplay=true, call
+  // video.play() (WebView has mediaPlaybackRequiresUserAction=false), and
+  // recurse into same-origin frames. Retries until a stream is found or
+  // timeoutMs elapses.
+  var CENTER_CLICK_INTERVAL_MS = 1000;
   var CENTER_CLICK_TIMEOUT_MS = ${timeoutMs};
   var centerClickIntervalId = null;
   var centerClickStartedAt = 0;
 
-  // Known play-button skins used by common embed/video players. Checked in
-  // order; first visible match wins. Custom-built players (e.g. Videasy's
-  // own React player) don't match any of these — findByText/
-  // findNearCenterClickable below, then the plain viewport-center click as
-  // a last resort, cover those.
   var PLAY_BUTTON_SELECTORS = [
     '.vjs-big-play-button',
     '.jw-icon-playback',
@@ -207,22 +447,36 @@ const buildInjectedJavaScript = (
     '.fluid_initial_play_button',
     '.clappr-play-wrapper',
     '.vjs-poster',
-    '[class*="play-button" i]',
-    '[class*="playbutton" i]',
-    '[class*="play_button" i]',
-    '[class*="play-btn" i]',
-    '[id*="play-button" i]',
+    'button.vjs-big-play-button',
     '[aria-label*="play" i]',
     '[title="Play" i]',
+    '[title="play" i]',
   ];
-
-  // Short, exact-ish labels used by "click to start" buttons that don't use
-  // any of the class names above (icon+text custom buttons).
+  var PLAY_CLASS_RE = /play-btn|playbtn|playbutton|play-button|big-play|overlay-play|icon-play|play-icon/i;
   var PLAY_TEXT_RE = /^(play|play now|play video|watch now|start watching|tap to play|click to play)$/i;
+
+  function classNameOf(el) {
+    var cls = el.className;
+    if (!cls) return '';
+    if (typeof cls === 'string') return cls;
+    if (typeof cls.baseVal === 'string') return cls.baseVal;
+    return String(cls);
+  }
+
+  function inPlayerChrome(el) {
+    var n = el;
+    while (n && n !== document && n !== document.documentElement) {
+      var c = classNameOf(n).toLowerCase();
+      if (c.indexOf('controls-bar') !== -1 || c.indexOf('control-bar') !== -1 ||
+          c.indexOf('vjs-control') !== -1) return true;
+      n = n.parentElement;
+    }
+    return false;
+  }
 
   function isVisible(el) {
     var rect = el.getBoundingClientRect();
-    if (rect.width < 10 || rect.height < 10) return false;
+    if (rect.width < 8 || rect.height < 8) return false;
     var style = window.getComputedStyle(el);
     if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) return false;
     return true;
@@ -230,10 +484,12 @@ const buildInjectedJavaScript = (
 
   function findBySelector() {
     for (var i = 0; i < PLAY_BUTTON_SELECTORS.length; i++) {
-      var matches = document.querySelectorAll(PLAY_BUTTON_SELECTORS[i]);
-      for (var j = 0; j < matches.length; j++) {
-        if (isVisible(matches[j])) return matches[j];
-      }
+      try {
+        var matches = document.querySelectorAll(PLAY_BUTTON_SELECTORS[i]);
+        for (var j = 0; j < matches.length; j++) {
+          if (isVisible(matches[j]) && !inPlayerChrome(matches[j])) return matches[j];
+        }
+      } catch (e) {}
     }
     return null;
   }
@@ -243,15 +499,55 @@ const buildInjectedJavaScript = (
     for (var i = 0; i < candidates.length; i++) {
       var el = candidates[i];
       var text = (el.textContent || '').trim();
-      if (text && text.length <= 24 && PLAY_TEXT_RE.test(text) && isVisible(el)) return el;
+      if (text && text.length <= 24 && PLAY_TEXT_RE.test(text) && isVisible(el) && !inPlayerChrome(el)) return el;
     }
     return null;
   }
 
-  // Fully custom/icon-only player skins (no recognizable class name or
-  // label — e.g. an SVG triangle in a plain <div>) fall back to a geometric
-  // guess: the smallest visibly-clickable (cursor: pointer) element close to
-  // the viewport center, excluding near-full-bleed backdrops/containers.
+  function findByClassPlay() {
+    var candidates = document.querySelectorAll('button, [role="button"], a, div, span, i');
+    for (var i = 0; i < candidates.length; i++) {
+      if (PLAY_CLASS_RE.test(classNameOf(candidates[i])) && isVisible(candidates[i]) && !inPlayerChrome(candidates[i])) {
+        return candidates[i];
+      }
+    }
+    return null;
+  }
+
+  // Icon-only circular play buttons (e.g. nxsha's rounded-full SVG button)
+  // have no "play" class/label and often no cursor:pointer.
+  function findCenterIconButton() {
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var cx = vw / 2;
+    var cy = vh / 2;
+    var maxDist = Math.min(vw, vh) * 0.45;
+    var buttons = document.querySelectorAll('button, [role="button"]');
+    var best = null;
+    var bestDist = Infinity;
+    for (var i = 0; i < buttons.length; i++) {
+      var el = buttons[i];
+      var rect = el.getBoundingClientRect();
+      if (!isVisible(el) || inPlayerChrome(el)) continue;
+      if (rect.width < 24 || rect.height < 24) continue;
+      if (rect.width > 220 || rect.height > 220) continue;
+      var label = (el.getAttribute('aria-label') || el.getAttribute('title') || '').toLowerCase();
+      var hasIcon = !!el.querySelector('svg, i') || /play/.test(label);
+      var text = (el.textContent || '').trim();
+      var looksRound = Math.abs(rect.width - rect.height) < 16;
+      if (!hasIcon && !(looksRound && !text)) continue;
+      var dist = Math.sqrt(
+        Math.pow(rect.left + rect.width / 2 - cx, 2) +
+        Math.pow(rect.top + rect.height / 2 - cy, 2)
+      );
+      if (dist <= maxDist && dist < bestDist) {
+        best = el;
+        bestDist = dist;
+      }
+    }
+    return best;
+  }
+
   function findNearCenterClickable() {
     var vw = window.innerWidth;
     var vh = window.innerHeight;
@@ -270,9 +566,11 @@ const buildInjectedJavaScript = (
       var ey = rect.top + rect.height / 2;
       var dist = Math.sqrt((ex - cx) * (ex - cx) + (ey - cy) * (ey - cy));
       if (dist > maxDist) continue;
-      if (!isVisible(el)) continue;
+      if (!isVisible(el) || inPlayerChrome(el)) continue;
+      var tag = (el.tagName || '').toLowerCase();
       var style = window.getComputedStyle(el);
-      if (style.cursor !== 'pointer') continue;
+      var clickable = tag === 'button' || el.getAttribute('role') === 'button' || style.cursor === 'pointer';
+      if (!clickable) continue;
       var score = dist + rect.width * rect.height * 0.02;
       if (score < bestScore) {
         bestScore = score;
@@ -282,20 +580,160 @@ const buildInjectedJavaScript = (
     return best;
   }
 
+  function findVideoEl() {
+    var nodes = document.querySelectorAll('video');
+    for (var i = 0; i < nodes.length; i++) {
+      if (isVisible(nodes[i]) || nodes[i].readyState > 0) return nodes[i];
+    }
+    return nodes[0] || null;
+  }
+
   function findPlayButton() {
-    return findBySelector() || findByText() || findNearCenterClickable();
+    return findBySelector() || findByText() || findByClassPlay() ||
+      findCenterIconButton() || findNearCenterClickable() || findVideoEl();
   }
 
   function dispatchClick(el, x, y) {
-    ['mousedown', 'mouseup', 'click'].forEach(function (type) {
-      el.dispatchEvent(new MouseEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: x,
-        clientY: y,
+    var opts = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: x,
+      clientY: y,
+      button: 0,
+      buttons: 1,
+    };
+    try {
+      el.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, cancelable: true, view: window,
+        clientX: x, clientY: y, button: 0, buttons: 1,
+        pointerId: 1, pointerType: 'touch', isPrimary: true
       }));
-    });
+    } catch (e) {}
+    try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch (e) {}
+    try {
+      el.dispatchEvent(new PointerEvent('pointerup', {
+        bubbles: true, cancelable: true, view: window,
+        clientX: x, clientY: y, button: 0, buttons: 1,
+        pointerId: 1, pointerType: 'touch', isPrimary: true
+      }));
+    } catch (e) {}
+    try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch (e) {}
+    try { el.click(); } catch (e) {}
+    try { el.dispatchEvent(new MouseEvent('click', opts)); } catch (e) {}
+  }
+
+  function playAllMedia(root) {
+    root = root || document;
+    var nodes = root.querySelectorAll('video, audio');
+    for (var i = 0; i < nodes.length; i++) {
+      try {
+        nodes[i].setAttribute('playsinline', '');
+        nodes[i].setAttribute('webkit-playsinline', '');
+        if (MUTE_MEDIA) {
+          nodes[i].muted = true;
+          nodes[i].defaultMuted = true;
+        }
+        var p = nodes[i].play();
+        if (p && p.catch) p.catch(function() {});
+      } catch (e) {}
+    }
+    try {
+      if (window.videojs && typeof window.videojs.getPlayers === 'function') {
+        var players = window.videojs.getPlayers();
+        for (var k in players) {
+          if (!players[k]) continue;
+          try { if (MUTE_MEDIA && players[k].muted) players[k].muted(true); } catch (e) {}
+          try { players[k].play(); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    try {
+      if (typeof window.jwplayer === 'function') {
+        var jw = window.jwplayer();
+        if (jw && jw.play) jw.play();
+      }
+    } catch (e) {}
+  }
+
+  function unlockIframes() {
+    var frames = document.querySelectorAll('iframe');
+    for (var i = 0; i < frames.length; i++) {
+      var f = frames[i];
+      if (f.hasAttribute('sandbox')) {
+        f.removeAttribute('sandbox');
+        log('removed iframe sandbox');
+      }
+      try {
+        var allow = 'autoplay; fullscreen; picture-in-picture; encrypted-media';
+        if (f.getAttribute('allow') !== allow) f.setAttribute('allow', allow);
+      } catch (e) {}
+      var src = f.getAttribute('src') || '';
+      if (!src) continue;
+      var next = withAutoplay(src);
+      if (next && next !== src) {
+        log('iframe autoplay rewrite ' + src + ' -> ' + next);
+        f.src = next;
+      }
+    }
+    promotePlayerIframe();
+  }
+
+  // Android WebView only injects our hooks into the *main* frame, so a
+  // VidSrc-style wrapper (video playing in a cross-origin iframe) never
+  // reports the stream. Navigate the WebView to that iframe's src so the
+  // next load runs the scraper inside the real player document.
+  var PLAYER_IFRAME_RE = /\\/embed|\\/player|\\/watch|\\/tv\\/|\\/movie\\/|nxsha|videasy|vidfast|vidsrc|cinesrc|screenscape|vidlink/i;
+  function promotePlayerIframe() {
+    if (isStreamFound()) return false;
+    var count = window.__flickPromoteCount || 0;
+    if (count >= 3) return false;
+    var vw = window.innerWidth || 1;
+    var vh = window.innerHeight || 1;
+    var frames = document.querySelectorAll('iframe');
+    var best = null;
+    var bestScore = 0;
+    for (var i = 0; i < frames.length; i++) {
+      var f = frames[i];
+      var src = f.src || f.getAttribute('src') || '';
+      if (!src || src === 'about:blank') continue;
+      try { src = new URL(src, location.href).href; } catch (e) { continue; }
+      if (!isHttpUrl(src) || SKIP_HOST_RE.test(src)) continue;
+      if (src.split('#')[0] === location.href.split('#')[0]) continue;
+      var rect = f.getBoundingClientRect();
+      var fills = rect.width >= vw * 0.45 && rect.height >= vh * 0.45;
+      var looksPlayer = PLAYER_IFRAME_RE.test(src);
+      if (!fills && !looksPlayer) continue;
+      var score = rect.width * rect.height + (looksPlayer ? 10000000 : 0);
+      if (score > bestScore) {
+        best = src;
+        bestScore = score;
+      }
+    }
+    if (!best) return false;
+    window.__flickPromoteCount = count + 1;
+    log('promoting iframe to top: ' + best);
+    try { location.replace(best); } catch (e) {}
+    return true;
+  }
+
+  function clickInsideIframe(iframe, x, y) {
+    try {
+      var doc = iframe.contentDocument;
+      if (!doc) return false;
+      var rect = iframe.getBoundingClientRect();
+      var ix = x - rect.left;
+      var iy = y - rect.top;
+      var inner = doc.elementFromPoint(ix, iy) || doc.querySelector('video, button, [role="button"]') || doc.body;
+      if (inner && inner !== doc.documentElement) {
+        dispatchClick(inner, ix, iy);
+        log('clicked inside same-origin iframe: ' + (inner.tagName || 'unknown'));
+      }
+      playAllMedia(doc);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   function stopCenterClicking() {
@@ -306,7 +744,7 @@ const buildInjectedJavaScript = (
   }
 
   function clickCenter() {
-    if (streamFound) {
+    if (isStreamFound()) {
       log('center click: stream already found, stopping retries');
       stopCenterClicking();
       return;
@@ -317,13 +755,32 @@ const buildInjectedJavaScript = (
       return;
     }
     try {
+      unlockIframes();
+      if (promotePlayerIframe()) return;
+      playAllMedia();
+      harvestPlayingVideo();
+      // ScreenScape's play button toggles pause and its control bar also
+      // switches *their* server. Once a <video> is loading/playing, only
+      // call play() — a second click pauses the stream and trips failover.
+      var videos = document.querySelectorAll('video');
+      var mediaArmed = false;
+      for (var vi = 0; vi < videos.length; vi++) {
+        if (!videos[vi].paused || videos[vi].readyState > 0 || videos[vi].currentSrc) {
+          mediaArmed = true;
+          break;
+        }
+      }
+      if (mediaArmed) {
+        log('video already started, skipping overlay click');
+        return;
+      }
       var target = findPlayButton();
       var x, y;
       if (target) {
         var rect = target.getBoundingClientRect();
         x = Math.floor(rect.left + rect.width / 2);
         y = Math.floor(rect.top + rect.height / 2);
-        log('found play button: ' + (target.className || target.tagName));
+        log('found play button: ' + (classNameOf(target) || target.tagName));
       } else {
         x = Math.floor(window.innerWidth / 2);
         y = Math.floor(window.innerHeight / 2);
@@ -331,31 +788,57 @@ const buildInjectedJavaScript = (
         log('no known play button matched, falling back to viewport center');
       }
       if (!target) { log('center click: nothing at ' + x + ',' + y); return; }
+      if ((target.tagName || '').toLowerCase() === 'iframe') {
+        if (clickInsideIframe(target, x, y)) return;
+        log('iframe is cross-origin; promoting instead of clicking');
+        if (promotePlayerIframe()) return;
+      }
       dispatchClick(target, x, y);
+      if ((target.tagName || '').toLowerCase() === 'video') {
+        try {
+          var playP = target.play();
+          if (playP && playP.catch) playP.catch(function() {});
+        } catch (e) {}
+      }
       log('click dispatched on ' + (target.tagName || 'unknown'));
     } catch (e) {
       log('center click error: ' + e);
     }
   }
 
-  // Guard against the race where a (nested/fast-loading) frame's 'load'
-  // event has already fired by the time this script is injected into it —
-  // in that case addEventListener('load', ...) would never fire, and the
-  // click loop would silently never start.
+  // Start immediately — don't wait for window 'load'. Nested/fast-loading
+  // frames often fire load before this script is injected, so a load
+  // listener would never run. MutationObserver catches play overlays and
+  // iframes that appear after first paint (VidSrc's delayed iframe.src).
+  function hidePlayerChrome() {
+    if (window.__flickChromeHidden || !document.documentElement) return;
+    window.__flickChromeHidden = true;
+    try {
+      var s = document.createElement('style');
+      s.textContent = '.controls-bar,.vjs-control-bar,.vjs-big-play-button{opacity:0!important;pointer-events:none!important}';
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) {}
+  }
+
   function startCenterClickLoop() {
-    if (centerClickStartedAt !== 0) return;
+    if (centerClickStartedAt !== 0 || window.__flickScraperClicking) return;
+    window.__flickScraperClicking = true;
     centerClickStartedAt = Date.now();
+    hidePlayerChrome();
+    unlockIframes();
     clickCenter();
     centerClickIntervalId = setInterval(clickCenter, CENTER_CLICK_INTERVAL_MS);
+    try {
+      new MutationObserver(function() {
+        if (isStreamFound()) return;
+        unlockIframes();
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    } catch (e) {}
   }
 
   var AUTO_TAP = ${autoTap ? 'true' : 'false'};
   if (AUTO_TAP) {
-    if (document.readyState === 'complete') {
-      startCenterClickLoop();
-    } else {
-      window.addEventListener('load', startCenterClickLoop);
-    }
+    startCenterClickLoop();
   } else {
     log('auto tap disabled (debug)');
   }
@@ -434,6 +917,29 @@ export const WebViewScraper = ({
     setWebViewKey((prev) => prev + 1);
   }, [embedUrl]);
 
+  const emitExtracted = useCallback(
+    (url: string, isWebM: boolean) => {
+      if (hasExtractedDataRef.current) return;
+      hasExtractedDataRef.current = true;
+      if (loadingTimerRef.current) {
+        clearTimeout(loadingTimerRef.current);
+        loadingTimerRef.current = null;
+      }
+      log('resolved stream:', url, `(webm=${isWebM})`);
+      onDataExtracted({ videoUrl: url, isWebM });
+      onLoading?.(false);
+    },
+    [onDataExtracted, onLoading],
+  );
+
+  const extractFromUrl = useCallback(
+    (url?: string) => {
+      if (!url || !NATIVE_VIDEO_RE.test(url)) return;
+      emitExtracted(url, /\.webm($|\?)/i.test(url));
+    },
+    [emitExtracted],
+  );
+
   // Handle messages posted from the page.
   const handleMessage = useCallback(
     (event: WebViewMessageEvent) => {
@@ -451,20 +957,11 @@ export const WebViewScraper = ({
         return;
       }
 
-      if (hasExtractedDataRef.current) return;
-
       if (data.type === 'video' && data.responseURL) {
-        hasExtractedDataRef.current = true;
-        if (loadingTimerRef.current) {
-          clearTimeout(loadingTimerRef.current);
-          loadingTimerRef.current = null;
-        }
-        log('resolved stream:', data.responseURL, `(webm=${!!data.isWebM})`);
-        onDataExtracted({ videoUrl: data.responseURL, isWebM: !!data.isWebM });
-        onLoading?.(false);
+        emitExtracted(data.responseURL, !!data.isWebM);
       }
     },
-    [onDataExtracted, onLoading, onError],
+    [emitExtracted, onError],
   );
 
   const handleLoadStart = useCallback(() => {
@@ -524,6 +1021,10 @@ export const WebViewScraper = ({
         userAgent={USER_AGENT}
         applicationNameForUserAgent="Chrome/126.0.0.0"
         injectedJavaScript={injectedJavaScript}
+        // Patch fetch/XHR/<video>.src before the page's own JS runs so we
+        // catch VidLink's /api/b/* JSON and the subsequent playlist request.
+        injectedJavaScriptBeforeContentLoaded={injectedJavaScript}
+        injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
         // Inject into nested (cross-origin) iframes too - the stream request
         // originates inside the embedded player frame, not the top document.
         injectedJavaScriptForMainFrameOnly={false}
@@ -533,6 +1034,9 @@ export const WebViewScraper = ({
         onError={handleError}
         onShouldStartLoadWithRequest={(req) => {
           log('navigation:', req.url);
+          // Native media loads (esp. iOS HLS) sometimes show up here
+          // instead of going through the page's fetch/XHR hooks.
+          extractFromUrl(req.url);
           return true;
         }}
         javaScriptEnabled
@@ -547,6 +1051,11 @@ export const WebViewScraper = ({
         // Let the interactive challenge open in the same view.
         setSupportMultipleWindows={false}
         originWhitelist={['*']}
+        style={
+          visible
+            ? StyleSheet.absoluteFill
+            : [StyleSheet.absoluteFill, styles.webviewHidden]
+        }
       />
     </View>
   );
@@ -561,6 +1070,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    opacity: 0,
+  },
+  // Android often ignores opacity on a parent View wrapping a WebView, so
+  // hide the WebView itself too — otherwise ScreenScape's control bar is
+  // visible during a scrape and our auto-click hits its server switcher.
+  webviewHidden: {
     opacity: 0,
   },
 });

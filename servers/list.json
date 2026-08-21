@@ -1,5 +1,25 @@
 [
     {
+        "id": "vidlink",
+        "name": "VidLink",
+        "url": "https://vidlink.pro",
+        "movie_url_pattern": "{url}/movie/{tmdbId}?autoplay=true",
+        "tv_url_pattern": "{url}/tv/{tmdbId}/{season}/{episode}?autoplay=true",
+        "movie_alias": null,
+        "tv_alias": null,
+        "scraper_timeout_seconds": 45
+    },
+    {
+        "id": "vidsrc",
+        "name": "VidSrc",
+        "url": "https://vidsrc.sbs",
+        "movie_url_pattern": "{url}/embed/movie/{tmdbId}?autoplay=true",
+        "tv_url_pattern": "{url}/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true",
+        "movie_alias": null,
+        "tv_alias": null,
+        "scraper_timeout_seconds": 45
+    },
+    {
         "id": "cinejoy",
         "name": "CineJoy",
         "url": "https://cinejoy.to",
@@ -38,6 +58,16 @@
         "movie_alias": null,
         "tv_alias": null,
         "scraper_timeout_seconds": 30
+    },
+    {
+        "id": "screenscape",
+        "name": "ScreenScape",
+        "url": "https://screenscape.me",
+        "movie_url_pattern": "{url}/embed?tmdb={tmdbId}&type=movie&autoplay=true",
+        "tv_url_pattern": "{url}/embed?tmdb={tmdbId}&type=tv&s={season}&e={episode}&autoplay=true",
+        "movie_alias": null,
+        "tv_alias": null,
+        "scraper_timeout_seconds": 45
     },
     {
         "id": "videasy",
