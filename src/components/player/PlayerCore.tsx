@@ -86,6 +86,14 @@ import type { LocalDownloadedSubtitle } from '@/src/services/DownloadService';
 import type { Episode, MediaItem } from '@/src/types';
 import { isTV } from '@/src/utils/tv';
 
+const formatPlaybackUri = (url: string | null | undefined): string => {
+  if (!url) return '';
+  if (url.startsWith('/') && !url.startsWith('file://')) {
+    return `file://${url}`;
+  }
+  return url;
+};
+
 interface PlayerCoreProps {
   source: ReactVideoSource;
   title: string;
@@ -97,49 +105,21 @@ interface PlayerCoreProps {
   resumeFrom?: number;
   onBack: () => void;
   onLeaveParty?: () => void;
-  /** TV only: called when the user picks a different episode from the drawer. */
   onSelectEpisode?: (season: number, episode: Episode) => void;
-  /**
-   * Called when the user picks a different server from the Settings
-   * drawer, with the current playhead so `PlayerScreen` can resume near
-   * where playback was after re-resolving against the new server. Omit to
-   * hide the Server setting entirely (e.g. while playing a local download,
-   * where there's no scraper to re-run).
-   */
   onSelectServer?: (serverId: string, resumeFrom: number) => void;
   streamflixSources?: StreamflixSource[];
   activeStreamflixSourceId?: string | null;
   onSelectStreamflixSource?: (id: string, resumeFrom: number) => void;
   extractorSubtitles?: StreamflixSubtitle[];
-  /**
-   * Called when the resolved stream fails to actually play (native
-   * `<Video>` error) with the current playhead, so `PlayerScreen` can fail
-   * over to another server instead of leaving the inline error card up.
-   */
   onPlaybackFailed?: (resumeFrom: number) => void;
-  /**
-   * Offline captions bundled with a completed download. When present,
-   * `useSubtitles` skips the Wyzie network search and loads these files.
-   */
   localSubtitles?: LocalDownloadedSubtitle[];
-  /** Mobile: play a recommended title after the current video ends. */
   onPlayRecommendation?: (item: MediaItem) => void;
 }
 
-/** Android has no PiP concept below API 26; iOS/tvOS support it wherever the
- * OS itself does. There's no react-native-video free function for this,
- * unlike expo-video's `isPictureInPictureSupported()`. */
 const isPipSupported = (): boolean =>
   Platform.OS === 'ios' ||
   (Platform.OS === 'android' && Number(Platform.Version) >= 26);
 
-/** Approximates expo-video's old `preferredForwardBufferDuration` (seconds)
- * as ExoPlayer `bufferConfig` (ms-based) for Android. iOS uses the RNV
- * top-level `preferredForwardBufferDuration` prop directly instead.
- * `cacheSizeMB` approximates the old `useCaching: true` — expo-video's
- * persistent cache only ever worked for HLS on Android anyway (iOS/
- * AVFoundation never supported HLS caching), so this preserves that half
- * of the behavior without needing a per-request opt-in. */
 const toAndroidBufferConfig = (forwardBufferSeconds: number): BufferConfig => {
   const minBufferMs = Math.round(forwardBufferSeconds * 1000);
   return {
@@ -153,14 +133,6 @@ const toAndroidBufferConfig = (forwardBufferSeconds: number): BufferConfig => {
 
 type PlaybackStatus = 'loading' | 'ready' | 'error';
 
-/**
- * Owns the react-native-video player instance and all playback UI. Created
- * once with a final, resolved source so the player is never recreated
- * mid-playback — all later changes (quality swap, sidecar subtitle tracks
- * arriving) go through the imperative `VideoRef.setSource()` call instead of
- * changing the `source` prop, exactly mirroring how this used to work with
- * expo-video's `player.replaceAsync()`.
- */
 export const PlayerCore = ({
   source,
   title,
@@ -210,20 +182,12 @@ export const PlayerCore = ({
   const waitingForGuestsRef = useRef(false);
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
-  // Set right before autoplay hands off to the next episode. Guards the
-  // unmount cleanup below from clobbering the Continue Watching entry we
-  // just re-pointed at the next episode (see `playNextEpisode`).
   const advancingRef = useRef(false);
-  // Latest position/duration mirrored into refs so unmount cleanup never
-  // touches the (already released) player during back navigation.
   const currentTimeRef = useRef(0);
   const durationRef = useRef(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [episodesOpen, setEpisodesOpen] = useState(false);
   const [pipActive, setPipActive] = useState(false);
-  // Session-only: resets to Normal every time a new video/PlayerCore mounts,
-  // rather than persisting app-wide — see the flick-player-controls skill's
-  // "session-only vs per-server vs persisted" table.
   const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(1);
   const {
     volume,
@@ -240,9 +204,6 @@ export const PlayerCore = ({
     videoRef.current?.enterPictureInPicture();
   }, []);
 
-  // The Settings drawer only needs to hand back a server id — the live
-  // playhead (for resuming near the same spot after the switch) is read
-  // from the ref `PlayerScreen` doesn't have access to.
   const handleSelectServer = useCallback(
     (id: string) => {
       onSelectServer?.(id, currentTimeRef.current);
@@ -279,22 +240,11 @@ export const PlayerCore = ({
     [extractorSubtitles],
   );
 
-  // "Up Next" autoplay, gated on `onSelectEpisode` being provided (the
-  // caller opts a TV show into episode switching at all — see
-  // `PlayerScreen.tsx`). `useNextEpisode` takes this flag directly instead
-  // of re-deriving its own gating, so there's a single source of truth for
-  // "should autoplay-next run at all" — passing a mismatched gate here vs.
-  // inside the hook is exactly what caused next-episode lookups to always
-  // resolve to "nothing" even when more episodes existed.
   const autoplayNextEnabled = isTVShow && !!onSelectEpisode;
   const { nextEpisode: nextEpisodeInfo, loading: nextEpisodeLoading } =
     useNextEpisode(item, season, episode, autoplayNextEnabled);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
   const [seriesEnded, setSeriesEnded] = useState(false);
-  // Set when the video plays to its natural end; the actual advance/"series
-  // end" decision is deferred to the effect below until `useNextEpisode` has
-  // definitively resolved things (not just "hasn't found one yet") —
-  // otherwise a still-loading result gets misread as a confirmed finale.
   const [pendingAdvance, setPendingAdvance] = useState(false);
   const watchNextEnabled =
     !isTV && !partyRoom && !!onPlayRecommendation;
@@ -303,12 +253,11 @@ export const PlayerCore = ({
   const [showWatchNext, setShowWatchNext] = useState(false);
   const [pendingWatchNext, setPendingWatchNext] = useState(false);
 
-  // HLS-variant state. The master URI is captured once from the initial
-  // `source` prop so quality swaps can always jump back to Auto.
   const sourceObj = typeof source === 'object' && source ? source : null;
-  const masterUri = typeof sourceObj?.uri === 'string' ? sourceObj.uri : null;
+  const rawMasterUri = typeof sourceObj?.uri === 'string' ? sourceObj.uri : null;
+  const masterUri = useMemo(() => formatPlaybackUri(rawMasterUri), [rawMasterUri]);
   const isHls =
-    !!masterUri && (sourceObj?.type === 'm3u8' || masterUri.includes('.m3u8'));
+    !!masterUri && (sourceObj?.type === 'm3u8' || masterUri.includes('.m3u8') || masterUri.startsWith('file://'));
   const [variants, setVariants] = useState<Variant[]>([]);
   const [selectedVariantUri, setSelectedVariantUri] = useState<string | null>(
     null,
@@ -316,12 +265,6 @@ export const PlayerCore = ({
   const didApplyInitialQualityRef = useRef(false);
   const { pickInitial: pickInitialVariant } = useVideoQuality();
 
-  // Settings > "Buffering" — user-editable forward-buffer window, defaulting
-  // to a recommendation derived from the device's RAM (see
-  // `deviceRecommendations.ts`). Snapshotted once here: like `resumeFrom`
-  // and the other options below, this only applies at player-creation time
-  // (the player is never recreated mid-playback — see the class doc
-  // comment above).
   const { effectiveForwardBufferSeconds } = usePlaybackSettings();
   const initialForwardBufferSecondsRef = useRef(effectiveForwardBufferSeconds);
   const androidBufferConfigRef = useRef<BufferConfig | undefined>(
@@ -332,23 +275,9 @@ export const PlayerCore = ({
 
   const { settings: subtitleSettings } = useSubtitleSettings();
   const nativeSubtitlesEnabled = subtitleSettings.renderMode === 'native';
-  // Sidecar (native OS) subtitle rendering via react-native-video's
-  // `source.textTracks` works on Android always, but NOT with HLS playlists
-  // on iOS (AVFoundation limitation — sidecar text tracks are only
-  // supported for individual files there, not HLS manifests). Since this
-  // app's scraped streams are virtually always HLS, that one
-  // platform+format combination falls back to the exact same
-  // component-mode rendering path below (Wyzie SRT fetched/parsed and
-  // drawn by `SubtitleOverlay`) instead of showing nothing, which is what
-  // "native" mode did before this migration (there was never anything
-  // embedded to select).
   const useNativeSidecar =
     nativeSubtitlesEnabled && !(Platform.OS === 'ios' && isHls);
 
-  // Online: Wyzie SRT search drives the picker (format=vtt often returns an
-  // empty list). Offline: `localSubtitles` skips the network. Cue parse is
-  // skipped in native mode — we convert the selected SRT to a local VTT
-  // file instead and hand that to RNV (same pattern as the working sample).
   const {
     tracks: wyzieTracks,
     selectedId: wyzieSelectedId,
@@ -368,15 +297,12 @@ export const PlayerCore = ({
     extraTracks: extraSubtitleTracks,
   });
 
-  // The picker list is identical in both render modes.
   const subtitleTrackOptions = wyzieTracks.map((t) => ({
     id: t.id,
     label: `${t.display}${t.isHearingImpaired ? ' (CC)' : ''}`,
   }));
   const subtitlesActive = wyzieSelectedId != null;
 
-  // Stable ids for native sidecar effects — avoid refetch/cancel races when
-  // the track object identity changes but the selection did not.
   const selectedWyzieTrackId = selectedWyzieTrack?.id ?? null;
   const selectedWyzieIsLocal =
     selectedWyzieTrack != null && 'localUri' in selectedWyzieTrack;
@@ -386,21 +312,12 @@ export const PlayerCore = ({
       : selectedWyzieTrack.url
     : null;
 
-  // Drives the consolidated Settings button's "something's customized"
-  // highlight (see `PlayerSettingsDrawer`) now that quality/aspect/speed/
-  // subtitles no longer each get their own top-bar icon to flag at a
-  // glance.
   const settingsActive =
     playbackRate !== 1 ||
     subtitlesActive ||
     selectedVariantUri != null ||
     aspect !== 'contain';
 
-  // Session-only sync offset (seconds) for the currently selected track.
-  // Component mode applies it in cue lookup; native mode rewrites the local
-  // VTT sidecar timestamps (see effects below). Reset whenever the selected
-  // track changes, since a different track's natural sync is unrelated to
-  // whatever offset fixed the previous one.
   const [subtitleOffsetSeconds, setSubtitleOffsetSeconds] = useState(0);
   useEffect(() => {
     setSubtitleOffsetSeconds(0);
@@ -453,9 +370,6 @@ export const PlayerCore = ({
     sendParty,
   ]);
 
-  // Local WebVTT URI for the currently selected native track (converted
-  // from Wyzie/offline SRT/VTT). Raw text is kept so sync offset changes can
-  // rewrite the sidecar without re-fetching.
   const [nativeRawText, setNativeRawText] = useState<string | null>(null);
   const [nativeVttUri, setNativeVttUri] = useState<string | null>(null);
   const [nativeVttTrackId, setNativeVttTrackId] = useState<string | null>(null);
@@ -500,9 +414,6 @@ export const PlayerCore = ({
     selectedWyzieIsLocal,
   ]);
 
-  // Rewrite the local VTT whenever raw text or sync offset changes so ExoPlayer
-  // loads a new sidecar URI (filename includes the offset). Debounce offset
-  // bumps so rapid +/- taps coalesce into one setSource.
   useEffect(() => {
     if (
       !useNativeSidecar ||
@@ -541,12 +452,10 @@ export const PlayerCore = ({
     subtitleOffsetSeconds,
   ]);
 
-  // Single local VTT sidecar — matches the probe that rendered successfully.
   const sidecarTextTracks = useMemo<TextTracks | undefined>(() => {
     if (!useNativeSidecar || !nativeVttUri || !selectedWyzieTrack) {
       return undefined;
     }
-    // Only apply once the cache matches the currently selected track.
     if (nativeVttTrackId !== selectedWyzieTrack.id) return undefined;
     const language = /^[a-z]{2}$/i.test(selectedWyzieTrack.language)
       ? selectedWyzieTrack.language.toLowerCase()
@@ -569,10 +478,6 @@ export const PlayerCore = ({
     return { type: SelectedTrackType.INDEX, value: 0 };
   }, [useNativeSidecar, selectedWyzieTrack, sidecarTextTracks]);
 
-  // -------------------------------------------------------------------------
-  // Player state (mirrors what expo-video's `useEvent`/`player.*` used to
-  // expose, now derived from react-native-video's declarative props/events).
-  // -------------------------------------------------------------------------
   const [paused, setPaused] = useState(partyRole === 'guest');
   const pausedRef = useRef(false);
   useEffect(() => {
@@ -587,9 +492,6 @@ export const PlayerCore = ({
   const buffered =
     duration > 0 && playableDuration > 0 ? playableDuration / duration : 0;
 
-  // Component mode (or the iOS+HLS native fallback): drive `SubtitleOverlay`
-  // off the playhead ourselves. Positive offset = captions appear later
-  // (delayed), so we look up the cue as of `currentTime - offset`.
   const activeCue = useNativeSidecar
     ? null
     : cueAt(currentTime - subtitleOffsetSeconds);
@@ -603,8 +505,6 @@ export const PlayerCore = ({
     partyLobbyOpen;
   const { visible, show, toggle } = useControlsVisibility(isPlaying, controlsHold);
 
-  // Seconds left in the episode; `Infinity` until the player reports a real
-  // duration so the Up Next card never flashes on load.
   const remaining = duration > 0 ? duration - currentTime : Infinity;
   const showUpNext =
     autoplayNextEnabled &&
@@ -616,10 +516,6 @@ export const PlayerCore = ({
 
   const playNextEpisode = useCallback(() => {
     if (nextEpisodeInfo) {
-      // Re-point the show's Continue Watching entry at the next episode
-      // *before* handing off, so it never disappears mid-transition (the
-      // outgoing PlayerCore's unmount save would otherwise remove it, since
-      // it finished this episode at ~100%). See `advancingRef` below.
       advancingRef.current = true;
       advanceEpisode(
         item,
@@ -630,10 +526,6 @@ export const PlayerCore = ({
     }
   }, [nextEpisodeInfo, onSelectEpisode, advanceEpisode, item]);
 
-  // Fires once when the video plays through to its natural end. Just flags
-  // that an advance decision is due — the actual decision is made by the
-  // effect below, once `nextEpisodeLoading` confirms we actually know
-  // whether there's a next episode (see comment on `pendingAdvance` above).
   const onEnd = useCallback(() => {
     if (autoplayNextEnabled) {
       setPendingAdvance(true);
@@ -651,12 +543,6 @@ export const PlayerCore = ({
     return false;
   }, [recommendation]);
 
-  // Resolve the pending advance: autoplay straight into the next episode
-  // (unless the user already cancelled the Up Next card), or — only once
-  // we've definitively confirmed there's nothing left to play — show a
-  // brief "caught up" state before backing out to Detail. While
-  // `nextEpisodeLoading` is true this intentionally does nothing and waits
-  // for the next run once loading settles.
   useEffect(() => {
     if (!pendingAdvance || nextEpisodeLoading) return;
     if (!nextEpisodeInfo && watchNextEnabled && recommendationLoading) return;
@@ -681,25 +567,21 @@ export const PlayerCore = ({
     if (!pendingWatchNext || recommendationLoading) return;
     setPendingWatchNext(false);
     if (!offerWatchNext()) {
-      // No similar title — leave the last frame; controls can come back.
+      // No similar title fallback
     }
   }, [pendingWatchNext, recommendationLoading, offerWatchNext]);
 
-  // Series finale: hold the "caught up" card briefly, then return to Detail.
   useEffect(() => {
     if (!seriesEnded) return;
     const timer = setTimeout(onBack, 2500);
     return () => clearTimeout(timer);
   }, [seriesEnded, onBack]);
 
-  // Mirror the latest position/duration into refs for safe cleanup reads.
   useEffect(() => {
     currentTimeRef.current = currentTime;
     durationRef.current = duration;
   }, [currentTime, duration]);
 
-  // Fetch HLS variants once per source. For non-HLS sources this stays empty
-  // and the quality button is hidden.
   useEffect(() => {
     if (!isHls || !masterUri) {
       setVariants([]);
@@ -714,31 +596,25 @@ export const PlayerCore = ({
     };
   }, [isHls, masterUri, sourceObj?.headers]);
 
-  // -------------------------------------------------------------------------
-  // Source construction. The `source` PROP given to `<Video>` is built ONCE
-  // at mount (`initialSource` below) and never changed afterwards — quality
-  // swaps and the sidecar text-track list arriving both go through the
-  // imperative `videoRef.current.setSource()` instead (see `swapToUri` and
-  // the sidecar-apply effect), each one folding in whatever the OTHER
-  // dimension's latest value is via these refs, so neither clobbers the
-  // other.
-  // -------------------------------------------------------------------------
   const activeUriRef = useRef<string | null>(masterUri);
   const activeTextTracksRef = useRef<TextTracks | undefined>(undefined);
   const pendingSeekRef = useRef<number | null>(null);
-  // Native sync/offset sidecar reloads call setSource and briefly jump to 0 —
-  // freeze the real playhead here so onProgress cannot clobber it.
   const sidecarReloadInFlightRef = useRef(false);
   const sidecarResumeSecRef = useRef<number | null>(null);
   const sidecarWasPlayingRef = useRef(false);
 
   const buildSource = useCallback(
-    (uri: string, textTracks: TextTracks | undefined): ReactVideoSource => ({
-      ...(sourceObj ?? {}),
-      uri,
-      bufferConfig: androidBufferConfigRef.current,
-      textTracks,
-    }),
+    (uri: string, textTracks: TextTracks | undefined): ReactVideoSource => {
+      const formatted = formatPlaybackUri(uri);
+      const isLocal = formatted.startsWith('file://') || formatted.includes('.m3u8');
+      return {
+        ...(sourceObj ?? {}),
+        uri: formatted,
+        type: isLocal ? 'm3u8' : undefined,
+        bufferConfig: androidBufferConfigRef.current,
+        textTracks,
+      };
+    },
     [sourceObj],
   );
 
@@ -746,8 +622,6 @@ export const PlayerCore = ({
     buildSource(masterUri ?? '', undefined),
   );
 
-  // Swap the current stream URI while preserving the play head. Called by
-  // both the initial-preference effect and the user-facing quality picker.
   const swapToUri = useCallback(
     (nextUri: string) => {
       if (!sourceObj) return;
@@ -760,8 +634,6 @@ export const PlayerCore = ({
     [sourceObj, buildSource],
   );
 
-  // Apply the persisted preferred quality once variants land. `pickInitial`
-  // returns null for `auto` so we leave the master URI alone (ABR).
   useEffect(() => {
     if (didApplyInitialQualityRef.current) return;
     if (!variants.length) return;
@@ -801,9 +673,6 @@ export const PlayerCore = ({
     }
   }, []);
 
-  // Apply (or clear) the local-VTT sidecar whenever the converted file is
-  // ready or the user turns captions Off / changes sync offset. Preserve
-  // playhead across setSource so native sync does not jump to 0.
   const lastSidecarKeyRef = useRef<string>('');
   useEffect(() => {
     if (!useNativeSidecar) return;
@@ -827,12 +696,10 @@ export const PlayerCore = ({
           resumeAt = pos;
         }
       } catch {
-        // Keep currentTimeRef snapshot.
+        // Keep snapshot
       }
       if (cancelled) return;
 
-      // Mid-playback reload (sync offset / track swap) — freeze playhead.
-      // First attach near 0 leaves resumeFrom / pendingSeek alone.
       if (resumeAt > 1) {
         sidecarReloadInFlightRef.current = true;
         sidecarResumeSecRef.current = resumeAt;
@@ -878,9 +745,6 @@ export const PlayerCore = ({
           err?.error ||
           'The source could not be loaded.',
       );
-      // Let `PlayerScreen` fail over to another server — this inline error
-      // card gets unmounted anyway once it nulls `source` and remounts a
-      // fresh `PlayerCore` against the next one.
       onPlaybackFailed?.(currentTimeRef.current);
     },
     [onPlaybackFailed],
@@ -891,7 +755,6 @@ export const PlayerCore = ({
       setPlayableDuration(e.playableDuration);
       if (sidecarReloadInFlightRef.current) {
         const resumeAt = sidecarResumeSecRef.current;
-        // Backup seek if onLoad missed and we're still at the reload origin.
         if (resumeAt != null && resumeAt > 1 && e.currentTime < 1) {
           videoRef.current?.seek(resumeAt);
           return;
@@ -900,7 +763,6 @@ export const PlayerCore = ({
           finishSidecarResume();
           return;
         }
-        // Keep scrubber frozen at the resume target while reloading.
         return;
       }
       setCurrentTime(e.currentTime);
@@ -915,7 +777,6 @@ export const PlayerCore = ({
     [],
   );
 
-  // Persist continue-watching progress. Reads ONLY from refs.
   const saveProgress = useCallback(() => {
     const pos = currentTimeRef.current;
     const dur = durationRef.current;
@@ -931,11 +792,6 @@ export const PlayerCore = ({
 
   useEffect(() => {
     return () => {
-      // Skip the "episode finished" save when we're mid-handoff to the next
-      // episode — `playNextEpisode` already re-pointed the Continue
-      // Watching entry at the new episode, and this call's ratio>0.95
-      // removal would otherwise immediately delete it again (same
-      // per-show dedupe key).
       if (advancingRef.current) return;
       saveProgress();
     };
@@ -1091,16 +947,6 @@ export const PlayerCore = ({
     });
   }, [enqueueReaction, partyRoom, subscribeParty]);
 
-  // On Android TV, `TVEventHandler`'s raw remote-event feed and the native
-  // focus engine's own "click the focused view" handling both react to the
-  // same physical Select/D-pad press. With this hook always listening, a
-  // Select press on a row inside one of the drawers below (episode list,
-  // settings menu/submenu) gets consumed here as a global "toggle controls"
-  // instead of reaching that row's own onPress — so the row visibly focuses
-  // but never actually selects. Suspend every handler here while any of
-  // those overlays are open so their own Focusable rows own
-  // Select/Left/Right/Up/Down uncontested. The Up Next card and the
-  // series-end state get the same treatment for the same reason.
   const overlayOpen =
     settingsOpen ||
     episodesOpen ||
@@ -1113,19 +959,8 @@ export const PlayerCore = ({
     showWatchNext;
 
   useTVRemote({
-    // The hidden-state fallback `Pressable` (focusable, hasTVPreferredFocus,
-    // onPress={show}) already covers "Select while hidden" on its own, and
-    // while visible, Select should only ever fire whichever button is
-    // currently focused (e.g. the Settings gear) — a global `toggle` here
-    // would flip the whole HUD's visibility on top of that in the same
-    // press. Always leave Select unhandled globally.
     onSelect: undefined,
     onPlayPause: overlayOpen ? undefined : togglePlay,
-    // Only steal Left/Right for the seek shortcut while controls are
-    // hidden, where there's nothing else to focus horizontally anyway.
-    // Once visible, leave Left/Right to the native focus engine so D-pad
-    // can reach every top-bar/transport button (seeking is still available
-    // there via the focusable RotateCcw/RotateCw buttons).
     onLeft: overlayOpen || visible ? undefined : () => seekBy(-10),
     onRight: overlayOpen || visible ? undefined : () => seekBy(10),
     onUp: overlayOpen ? undefined : show,
@@ -1148,9 +983,15 @@ export const PlayerCore = ({
               ? StyleSheet.absoluteFill
               : { width: windowWidth, height: windowHeight }
           }
-          controls={false}
+          controls={Platform.OS === 'ios'}
+          fullscreen={Platform.OS === 'ios'}
+          fullscreenAutorotate={true}
+          fullscreenOrientation="landscape"
+          allowsExternalPlayback={true}
+          pictureInPicture={true}
+          playInBackground={true}
           resizeMode={toResizeMode(aspect)}
-          pointerEvents="none"
+          pointerEvents={Platform.OS === 'ios' ? 'auto' : 'none'}
           paused={paused}
           rate={playbackRate}
           volume={videoVolume}
@@ -1162,14 +1003,9 @@ export const PlayerCore = ({
           }
           selectedTextTrack={selectedTextTrack}
           subtitleStyle={{
-            // PiP window is tiny — force a small caption size so native
-            // SubtitleView doesn't dominate the mini player (Android).
             fontSize: pipActive
               ? Math.min(PIP_SUBTITLE_FONT_SIZE, subtitleSettings.fontSize)
               : subtitleSettings.fontSize,
-            // RNV sets SubtitleView to GONE when opacity === 0. App-caption
-            // "background opacity" of 0% must not hide native cues. iOS only
-            // honors 0/1 — always fully visible there.
             opacity:
               Platform.OS === 'ios'
                 ? 1
@@ -1177,8 +1013,6 @@ export const PlayerCore = ({
                     1,
                     Math.max(0.2, subtitleSettings.backgroundOpacity || 1),
                   ),
-            // Lift cues above the control bar when it's visible; hug the
-            // bottom edge in PiP where there are no controls.
             paddingBottom: pipActive
               ? 8
               : Platform.OS === 'android'
@@ -1188,8 +1022,6 @@ export const PlayerCore = ({
                 : visible
                   ? 72
                   : 24,
-            // Cover/fill crop the video frame — keep captions on the player
-            // bounds instead (requires the ExoPlayerView patch).
             subtitlesFollowVideo: aspect === 'contain',
           }}
           enterPictureInPictureOnLeave
@@ -1230,13 +1062,6 @@ export const PlayerCore = ({
         </Center>
       )}
 
-      {/*
-        SubtitleOverlay stays mounted even while `pipActive` so Android's
-        activity-level PiP renders our SRT captions inside the mini window.
-        NOTE: on iOS the AVKit PiP window shows only the video surface, so
-        RN overlays like this cannot appear there. Fixing that would require
-        burning subtitles into the stream (out of scope).
-      */}
       <SubtitleOverlay
         text={activeCue?.text ?? null}
         controlsVisible={visible}
@@ -1267,6 +1092,7 @@ export const PlayerCore = ({
         !seriesEnded &&
         !showWatchNext &&
         !showUpNext &&
+        Platform.OS !== 'ios' &&
         (visible ? (
           <PlayerControls
             title={title}
