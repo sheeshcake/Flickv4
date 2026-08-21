@@ -5,11 +5,11 @@ jobs:
   build-ios:
     runs-on: macos-latest
     steps:
-      - name: Checkout 2.3.1 Release
+      - name: Checkout 2.3.2 Release
         uses: actions/checkout@v4
         with:
           repository: 'sheeshcake/Flickv4'
-          ref: '2.3.1'
+          ref: '2.3.2'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -91,5 +91,5 @@ jobs:
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Flickv4-2.3.1-IPA
-          path: ios/Flickv4-2.3.1.ipa
+          name: Flickv4-2.3.2
+          path: ios/Flickv4-2.3.2.ipa
