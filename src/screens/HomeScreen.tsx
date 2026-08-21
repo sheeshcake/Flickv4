@@ -18,6 +18,8 @@ import { VStack } from '@/components/ui/vstack';
 import { AppHeader } from '@/src/components/AppHeader';
 import { HeroCarousel } from '@/src/components/HeroCarousel';
 import { ContentRow } from '@/src/components/ContentRow';
+import { CatalogRow } from '@/src/components/CatalogRow';
+import { BrowseChips } from '@/src/components/BrowseChips';
 import { HomeScreenTV } from '@/src/components/tv/HomeScreenTV';
 import type { TVSideNavHandle } from '@/src/components/tv/TVSideNav';
 import { useHomeData } from '@/src/hooks/useHomeData';
@@ -208,6 +210,14 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
         </Box>
 
         <Box className="mt-4">
+          <BrowseChips
+            deviceKind={deviceKind}
+            onSelect={(title, query) =>
+              navigation.navigate('ViewMore', { title, query })
+            }
+            onRegionPress={() => navigation.navigate('RegionSettings')}
+          />
+
           {continueItems.length > 0 && (
             <ContentRow
               title="Continue Watching"
@@ -241,10 +251,9 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
           )}
 
           {rows.map((row) => (
-            <ContentRow
-              key={row.title}
-              title={row.title}
-              data={row.data}
+            <CatalogRow
+              key={row.id}
+              row={row}
               deviceKind={deviceKind}
               screenWidth={width}
               onItemPress={openDetail}

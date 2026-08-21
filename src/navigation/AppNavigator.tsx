@@ -13,6 +13,7 @@ import { SubtitleSettingsScreen } from '@/src/screens/SubtitleSettingsScreen';
 import { ServerSettingsScreen } from '@/src/screens/ServerSettingsScreen';
 import { VideoQualitySettingsScreen } from '@/src/screens/VideoQualitySettingsScreen';
 import { VideoAspectSettingsScreen } from '@/src/screens/VideoAspectSettingsScreen';
+import { RegionSettingsScreen } from '@/src/screens/RegionSettingsScreen';
 import { PlaybackPerformanceScreen } from '@/src/screens/PlaybackPerformanceScreen';
 import { DisclaimerScreen } from '@/src/screens/DisclaimerScreen';
 import { CreditsScreen } from '@/src/screens/CreditsScreen';
@@ -101,6 +102,7 @@ export const AppNavigator = () => {
           name="VideoAspectSettings"
           component={VideoAspectSettingsScreen}
         />
+        <Stack.Screen name="RegionSettings" component={RegionSettingsScreen} />
         <Stack.Screen
           name="PlaybackPerformance"
           component={PlaybackPerformanceScreen}

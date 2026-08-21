@@ -56,6 +56,12 @@ export const getCardWidth = (kind: DeviceKind, screenWidth: number): number => {
 
 export const POSTER_ASPECT_RATIO = 1.5; // height / width for TMDB posters
 
+/** Poster card width (px) for ranked Top 10 rows — slightly larger than standard. */
+export const getTopTenCardWidth = (
+  kind: DeviceKind,
+  screenWidth: number,
+): number => Math.round(getCardWidth(kind, screenWidth) * 1.15);
+
 export const getHorizontalPadding = (kind: DeviceKind): number => {
   switch (kind) {
     case 'tv':

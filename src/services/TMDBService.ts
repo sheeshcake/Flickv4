@@ -91,29 +91,56 @@ class TMDBServiceImpl {
     return this.request<TMDBResponse<TVShow>>('/trending/tv/week', { page });
   }
 
-  getPopularMovies(page = 1) {
-    return this.request<TMDBResponse<Movie>>('/movie/popular', { page });
+  getPopularMovies(page = 1, region?: string) {
+    return this.request<TMDBResponse<Movie>>('/movie/popular', {
+      page,
+      region,
+    });
   }
 
-  getPopularTVShows(page = 1) {
-    return this.request<TMDBResponse<TVShow>>('/tv/popular', { page });
+  getPopularTVShows(page = 1, region?: string) {
+    return this.request<TMDBResponse<TVShow>>('/tv/popular', {
+      page,
+      region,
+    });
   }
 
   getTopRatedMovies(page = 1) {
     return this.request<TMDBResponse<Movie>>('/movie/top_rated', { page });
   }
 
-  discoverMoviesByGenre(genreId: number, page = 1) {
+  discoverMoviesByGenre(genreId: number, page = 1, region?: string) {
     return this.request<TMDBResponse<Movie>>('/discover/movie', {
       with_genres: genreId,
       sort_by: 'popularity.desc',
       page,
+      region,
+      watch_region: region,
     });
   }
 
-  discoverTVByGenre(genreId: number, page = 1) {
+  discoverTVByGenre(genreId: number, page = 1, region?: string) {
     return this.request<TMDBResponse<TVShow>>('/discover/tv', {
       with_genres: genreId,
+      sort_by: 'popularity.desc',
+      page,
+      region,
+      watch_region: region,
+    });
+  }
+
+  discoverByWatchProvider(
+    media: 'movie' | 'tv',
+    providerId: number,
+    page = 1,
+    region = 'US',
+  ) {
+    const path = media === 'movie' ? '/discover/movie' : '/discover/tv';
+    return this.request<TMDBResponse<Movie | TVShow>>(path, {
+      with_watch_providers: providerId,
+      watch_region: region,
+      region,
+      with_watch_monetization_types: 'flatrate',
       sort_by: 'popularity.desc',
       page,
     });

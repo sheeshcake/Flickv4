@@ -11,6 +11,8 @@ import { VStack } from '@/components/ui/vstack';
 import { UpdateModal } from '@/src/components/UpdateModal';
 import loadingMessages from '@/src/constants/loadingMessages.json';
 import { useServers } from '@/src/hooks/useServers';
+import { useHomeData } from '@/src/hooks/useHomeData';
+import { useCatalogRegion } from '@/src/hooks/useCatalogRegion';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 import {
   updateService,
@@ -24,15 +26,9 @@ import {
 } from '@/src/utils/updateCheckStorage';
 
 const MESSAGES = loadingMessages as string[];
-const MESSAGE_INTERVAL = 900;
-const SPLASH_DURATION = 2700;
+const MESSAGE_INTERVAL = 2000;
 
 const pickMessage = () => MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
-
-const delay = (ms: number) =>
-  new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
 
 /** Soft-fail update check so a network blip never blocks entering Main. */
 const checkUpdatesSafe = async (): Promise<UpdateInfo | null> => {
@@ -51,6 +47,8 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
   const [message, setMessage] = useState(pickMessage);
   const initialMessage = useMemo(() => message, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { refreshBuiltInServers } = useServers();
+  const { prefetch } = useHomeData();
+  const { loaded: regionLoaded } = useCatalogRegion();
 
   const [updaterOpen, setUpdaterOpen] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -87,12 +85,18 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
     setMessage(initialMessage);
     const rotator = setInterval(() => setMessage(pickMessage()), MESSAGE_INTERVAL);
 
+    if (!regionLoaded) {
+      return () => {
+        clearInterval(rotator);
+      };
+    }
+
     let cancelled = false;
     void (async () => {
-      const [, , info] = await Promise.all([
-        delay(SPLASH_DURATION),
+      const [, info] = await Promise.all([
         refreshBuiltInServers(),
         checkUpdatesSafe(),
+        prefetch(),
       ]);
       if (cancelled) return;
 
@@ -123,6 +127,8 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
     scale,
     initialMessage,
     refreshBuiltInServers,
+    prefetch,
+    regionLoaded,
     goMain,
   ]);
 

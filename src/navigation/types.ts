@@ -11,6 +11,7 @@ export type RootStackParamList = {
   ServerSettings: undefined;
   VideoQualitySettings: undefined;
   VideoAspectSettings: undefined;
+  RegionSettings: undefined;
   PlaybackPerformance: undefined;
   Disclaimer: undefined;
   Credits: undefined;

@@ -10,6 +10,8 @@ import { ContinueWatchingProvider } from '@/src/hooks/useContinueWatching';
 import { FinishedMoviesProvider } from '@/src/hooks/useFinishedMovies';
 import { ServersProvider } from '@/src/hooks/useServers';
 import { MyListProvider } from '@/src/hooks/useMyList';
+import { CatalogRegionProvider } from '@/src/hooks/useCatalogRegion';
+import { HomeDataProvider } from '@/src/hooks/useHomeData';
 import { VideoQualityProvider } from '@/src/hooks/useVideoQuality';
 import { VideoAspectProvider } from '@/src/hooks/useVideoAspect';
 import { PlayerDebugSettingsProvider } from '@/src/hooks/usePlayerDebugSettings';
@@ -38,28 +40,32 @@ export default function App() {
         <GluestackUIProvider mode="dark">
           <ServersProvider>
             <MyListProvider>
-              <SubtitleSettingsProvider>
-                <VideoQualityProvider>
-                  <VideoAspectProvider>
-                    <PlayerDebugSettingsProvider>
-                      <PlaybackSettingsProvider>
-                        <FinishedMoviesProvider>
-                          <ContinueWatchingProvider>
-                            <DownloadsProvider>
-                              <WatchPartyProvider>
-                                <StatusBar style="light" />
-                                <AppNavigator />
-                                <DownloadResolverHost />
-                                <UpdateChecker />
-                              </WatchPartyProvider>
-                            </DownloadsProvider>
-                          </ContinueWatchingProvider>
-                        </FinishedMoviesProvider>
-                      </PlaybackSettingsProvider>
-                    </PlayerDebugSettingsProvider>
-                  </VideoAspectProvider>
-                </VideoQualityProvider>
-              </SubtitleSettingsProvider>
+              <CatalogRegionProvider>
+                <HomeDataProvider>
+                  <SubtitleSettingsProvider>
+                    <VideoQualityProvider>
+                      <VideoAspectProvider>
+                        <PlayerDebugSettingsProvider>
+                          <PlaybackSettingsProvider>
+                            <FinishedMoviesProvider>
+                              <ContinueWatchingProvider>
+                                <DownloadsProvider>
+                                  <WatchPartyProvider>
+                                    <StatusBar style="light" />
+                                    <AppNavigator />
+                                    <DownloadResolverHost />
+                                    <UpdateChecker />
+                                  </WatchPartyProvider>
+                                </DownloadsProvider>
+                              </ContinueWatchingProvider>
+                            </FinishedMoviesProvider>
+                          </PlaybackSettingsProvider>
+                        </PlayerDebugSettingsProvider>
+                      </VideoAspectProvider>
+                    </VideoQualityProvider>
+                  </SubtitleSettingsProvider>
+                </HomeDataProvider>
+              </CatalogRegionProvider>
             </MyListProvider>
           </ServersProvider>
         </GluestackUIProvider>

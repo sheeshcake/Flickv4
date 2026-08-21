@@ -10,6 +10,7 @@ import {
   Download,
   Gauge,
   Info,
+  Globe,
   Heart,
   MonitorPlay,
   Ratio,
@@ -37,6 +38,7 @@ import {
   useVideoAspect,
 } from '@/src/hooks/useVideoAspect';
 import { getLanguageLabel } from '@/src/constants/languages';
+import { getRegionName, useCatalogRegion } from '@/src/hooks/useCatalogRegion';
 import { UpdateModal } from '@/src/components/UpdateModal';
 import { updateService } from '@/src/services/UpdateService';
 import { useFinishedMovies } from '@/src/hooks/useFinishedMovies';
@@ -65,6 +67,8 @@ export const SettingsScreen = () => {
   const subtitleLangLabel = getLanguageLabel(subtitleSettings.defaultLanguage);
   const videoQualityLabel = getQualityLabel(videoQuality);
   const videoAspectLabel = getAspectLabel(videoAspect);
+  const { region } = useCatalogRegion();
+  const regionName = getRegionName(region);
   const [updaterOpen, setUpdaterOpen] = useState(false);
   const { displayName, setDisplayName } = useWatchParty();
   const [nameDraft, setNameDraft] = useState(displayName);
@@ -116,6 +120,12 @@ export const SettingsScreen = () => {
             label="Playback server"
             value={activeServer.name}
             onPress={() => navigation.navigate('ServerSettings')}
+          />
+          <MenuRow
+            icon={Globe}
+            label="Catalog region"
+            value={regionName}
+            onPress={() => navigation.navigate('RegionSettings')}
           />
           <MenuRow
             icon={MonitorPlay}

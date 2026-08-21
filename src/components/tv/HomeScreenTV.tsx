@@ -4,6 +4,7 @@ import { Box } from '@/components/ui/box';
 import { HeroCarousel } from '@/src/components/HeroCarousel';
 import { HeroBannerTV } from '@/src/components/tv/HeroBannerTV';
 import { ContentRow } from '@/src/components/ContentRow';
+import { CatalogRow } from '@/src/components/CatalogRow';
 import type { TVSideNavHandle } from '@/src/components/tv/TVSideNav';
 import type { HomeRow } from '@/src/hooks/useHomeData';
 import type { MediaItem } from '@/src/types';
@@ -140,10 +141,9 @@ export const HomeScreenTV = ({
             )}
 
             {rows.map((row) => (
-              <ContentRow
-                key={row.title}
-                title={row.title}
-                data={row.data}
+              <CatalogRow
+                key={row.id}
+                row={row}
                 deviceKind="tv"
                 screenWidth={paneSize.width}
                 onItemPress={onPress}
