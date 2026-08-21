@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 import {
   completeHandler,
@@ -56,33 +57,17 @@ export interface DownloadJob {
   qualityHeight: number;
   qualityLabel: string;
   status: DownloadStatus;
-  /** Kind of media on disk (drives which player source we return). */
   kind: 'hls' | 'file';
-  /** Original resolved stream URL from the scraper. */
   streamUri?: string;
-  /** HLS variant playlist we picked (if HLS). */
   variantUri?: string;
-  /** Total segments to download (HLS). 1 for direct-file. */
   totalSegments: number;
   completedSegments: number;
-  /**
-   * Segment indices that have been successfully written to disk. Persisted
-   * as an array (Sets don't round-trip through `JSON.stringify`). Used to
-   * make segment completion idempotent — see `markSegmentComplete`.
-   */
   completedSegmentIndices?: number[];
   bytesWritten: number;
   totalBytes: number;
-  /** Absolute directory URI holding the download. */
   localDir: string;
-  /** Local playable URI once the job completes. */
   localUri?: string;
-  /**
-   * ISO 639-1 language requested for offline captions at enqueue time.
-   * Empty/undefined means no subtitle download was requested.
-   */
   subtitleLanguage?: string;
-  /** Local subtitle files written next to the video (default language). */
   subtitles?: LocalDownloadedSubtitle[];
   headers: Record<string, string>;
   error?: string;
@@ -96,7 +81,6 @@ export interface ResolveRequest {
   type: 'movie' | 'tv';
   season?: number;
   episode?: number;
-  /** Raw show/movie title. */
   title?: string;
   resolver?: ServerResolver;
 }
@@ -114,18 +98,8 @@ export interface EnqueueOptions {
   qualityLabel: string;
   season?: number;
   episode?: number;
-  /** Human-readable label for the job (e.g. "Movie" or "S1 E3 — Pilot"). */
   title: string;
-  /**
-   * Pre-resolved stream URL. When the caller already ran the WebViewScraper
-   * (e.g. to fetch HLS variants for the quality sheet) it can pass the
-   * resulting URL here so we skip the redundant second resolve.
-   */
   streamUri?: string;
-  /**
-   * ISO 639-1 code for the offline subtitle language to bundle (typically
-   * the user's Settings default). Empty/undefined skips subtitle download.
-   */
   subtitleLanguage?: string;
   resolver?: ServerResolver;
 }
@@ -135,13 +109,21 @@ export interface EnqueueOptions {
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = 'flick.downloads';
-const SEGMENT_CONCURRENCY = 4;
+// Limit concurrency on iOS to prevent memory spikes and watchdog crashes
+const SEGMENT_CONCURRENCY = Platform.OS === 'ios' ? 2 : 4;
 
 const TAG = '[DownloadService]';
-// eslint-disable-next-line no-console
 const log = (...args: unknown[]) => console.log(TAG, ...args);
 
 const pad = (n: number, width = 5) => n.toString().padStart(width, '0');
+
+const ensureFileScheme = (uri: string): string => {
+  if (!uri) return '';
+  if (uri.startsWith('/') && !uri.startsWith('file://')) {
+    return `file://${uri}`;
+  }
+  return uri;
+};
 
 const inferKind = (url: string): 'hls' | 'file' => {
   const lower = url.split('?')[0].toLowerCase();
@@ -192,15 +174,8 @@ class DownloadServiceImpl {
   private listeners = new Set<Listener>();
   private resolver: Resolver | null = null;
   private hydrated = false;
-  /** Live DownloadTask instances per job, keyed by task id. Only used by
-   *  the single-file path (large MP4s) that still goes through the
-   *  background-downloader library. HLS segments no longer create UIDT
-   *  jobs — see `downloadOneSegment` for the rationale. */
   private taskIndex = new Map<string, Map<string, DownloadTask>>();
-  /** In-flight `expo-file-system` fetch controllers per job. `pause()` /
-   *  `cancel()` abort every entry so segment downloads stop instantly. */
   private abortControllers = new Map<string, Set<AbortController>>();
-  /** Cancellation flags per job. */
   private cancelled = new Set<string>();
 
   // -------------------------------------------------------------------------
@@ -212,15 +187,6 @@ class DownloadServiceImpl {
     this.hydrated = true;
 
     try {
-      // The background-downloader library is only used by the single-file
-      // (large MP4) path now — HLS segments run through `expo-file-system`
-      // to avoid the UIDT-mandated notification-per-job churn that Android
-      // 14+ imposes on every JobScheduler task.
-      //
-      // With `showNotificationsEnabled: false` the single leftover UIDT job
-      // posts one IMPORTANCE_MIN silent notification (invisible on the
-      // status bar; only appears at the bottom of the shade). Our notifee
-      // module owns the visible progress notification.
       setConfig({
         showNotificationsEnabled: false,
         progressInterval: 1000,
@@ -230,21 +196,17 @@ class DownloadServiceImpl {
       log('setConfig failed', e);
     }
 
-    // Notifee channel (Android). Idempotent — safe to call every hydrate.
     try {
       await ensureNotifChannel();
     } catch (e) {
       log('ensureNotifChannel failed', e);
     }
 
-    // Load persisted jobs.
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as DownloadJob[];
         for (const job of parsed) {
-          // Any job that was mid-flight when the app died gets marked paused
-          // so the user can decide whether to resume it.
           if (
             job.status === 'downloading' ||
             job.status === 'resolving' ||
@@ -252,9 +214,11 @@ class DownloadServiceImpl {
           ) {
             job.status = 'paused';
           }
-          // Backfill for jobs persisted before we tracked segment indices.
           if (!job.completedSegmentIndices) {
             job.completedSegmentIndices = [];
+          }
+          if (job.localUri) {
+            job.localUri = ensureFileScheme(job.localUri);
           }
           this.jobs.set(job.id, job);
         }
@@ -263,12 +227,9 @@ class DownloadServiceImpl {
       log('hydrate: failed to load jobs', e);
     }
 
-    // Reattach any tasks the OS kept alive across a process death.
     try {
       const existing = await getExistingDownloadTasks();
       for (const task of existing) {
-        // We don't know which job it belongs to unless we tag it via metadata;
-        // metadata support is limited here, so we simply cancel orphaned tasks.
         try {
           await task.stop();
         } catch {
@@ -286,11 +247,6 @@ class DownloadServiceImpl {
     this.resolver = resolver;
   }
 
-  /**
-   * Run the currently-registered resolver directly. Used by the DetailScreen
-   * to peek at the stream URL so we can fetch HLS variants for the quality
-   * sheet before we actually enqueue a job.
-   */
   async resolveStream(req: ResolveRequest): Promise<ResolvedStream> {
     if (!this.resolver) throw new Error('Resolver not ready');
     return this.resolver(req);
@@ -298,7 +254,6 @@ class DownloadServiceImpl {
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
-    // Emit current snapshot immediately.
     listener(this.snapshot());
     return () => {
       this.listeners.delete(listener);
@@ -306,10 +261,6 @@ class DownloadServiceImpl {
   }
 
   snapshot(): DownloadJob[] {
-    // Order by `createdAt` (set once at enqueue, never mutated) so the
-    // Downloads list stays stable while jobs progress. `updatedAt` was
-    // bumped on every progress delta, which made rows jump around as
-    // bytes landed.
     return Array.from(this.jobs.values()).sort(
       (a, b) => b.createdAt - a.createdAt,
     );
@@ -338,7 +289,7 @@ class DownloadServiceImpl {
     const job = this.jobs.get(id);
     if (!job || job.status !== 'completed' || !job.localUri) return null;
     return {
-      uri: job.localUri,
+      uri: ensureFileScheme(job.localUri),
       type: job.kind === 'hls' ? 'm3u8' : undefined,
     };
   }
@@ -356,8 +307,6 @@ class DownloadServiceImpl {
     }
 
     const id = jobIdFor(item, opts.season, opts.episode, opts.qualityHeight);
-
-    // If a job already exists for this key, return it (avoid duplicates).
     const existing = this.jobs.get(id);
     if (existing) return existing;
 
@@ -365,7 +314,7 @@ class DownloadServiceImpl {
     try {
       new Directory(localDir).create({ intermediates: true });
     } catch {
-      /* directory already exists */
+      /* directory exists */
     }
 
     const now = Date.now();
@@ -395,7 +344,6 @@ class DownloadServiceImpl {
     this.persist();
     this.emit();
 
-    // Kick off pipeline async — do not block the caller.
     void this.process(id, opts).catch((e) => {
       log('unhandled process error for', id, e);
     });
@@ -408,29 +356,26 @@ class DownloadServiceImpl {
     if (!job) return;
     if (job.status !== 'downloading' && job.status !== 'resolving') return;
     this.cancelled.add(id);
-    // Physically stop every in-flight native task (single-file MP4 case)
-    // so pause feels instant instead of "wait for the current batch to
-    // drain".
+
     const tasks = this.taskIndex.get(id);
     if (tasks) {
       for (const task of tasks.values()) {
         try {
           await task.stop();
         } catch {
-          /* task may already be finished */
+          /* noop */
         }
       }
       tasks.clear();
     }
-    // Also abort every in-flight expo-file-system segment download so HLS
-    // jobs stop within a segment's worth of bytes.
+
     const aborts = this.abortControllers.get(id);
     if (aborts) {
       for (const ctrl of aborts) {
         try {
           ctrl.abort();
         } catch {
-          /* already aborted */
+          /* noop */
         }
       }
       aborts.clear();
@@ -469,9 +414,7 @@ class DownloadServiceImpl {
     this.cancelled.add(id);
     const job = this.jobs.get(id);
     if (!job) return;
-    // Stop any in-flight native tasks and fetches before deleting the
-    // directory beneath them — otherwise the OkHttp writers would race
-    // against `dir.delete()` and log spurious ENOENT errors.
+
     const tasks = this.taskIndex.get(id);
     if (tasks) {
       for (const task of tasks.values()) {
@@ -517,7 +460,6 @@ class DownloadServiceImpl {
     const job = this.jobs.get(id);
     if (!job) return;
 
-    // 1) Resolve stream URL if we haven't yet.
     let streamUri = job.streamUri;
     if (!streamUri) {
       this.updateJob(id, { status: 'resolving' });
@@ -545,7 +487,6 @@ class DownloadServiceImpl {
 
     if (this.cancelled.has(id)) return;
 
-    // 2) Branch: HLS multi-segment, or single-file.
     const kind = this.jobs.get(id)?.kind ?? inferKind(streamUri);
     if (kind === 'file') {
       await this.downloadSingleFile(id, streamUri, opts.qualityLabel);
@@ -553,8 +494,6 @@ class DownloadServiceImpl {
       await this.downloadHls(id, streamUri, opts.qualityHeight);
     }
 
-    // 3) Soft-fail subtitle sidecar — video is already playable offline even
-    // if Wyzie is unreachable or has no track for the requested language.
     const after = this.jobs.get(id);
     if (after?.status === 'completed') {
       const lang = opts.subtitleLanguage?.trim() || after.subtitleLanguage;
@@ -564,11 +503,6 @@ class DownloadServiceImpl {
     }
   }
 
-  /**
-   * Fetch the user's preferred Wyzie language and write it next to the video
-   * as `subs/{lang}.srt`. Never fails the job — offline video still works
-   * without captions.
-   */
   private async downloadDefaultSubtitle(
     id: string,
     language: string,
@@ -577,8 +511,6 @@ class DownloadServiceImpl {
     if (!job) return;
 
     try {
-      // Prefer WebVTT so offline native sidecars work on iOS (VTT-only) and
-      // Android; our cue parser also accepts VTT for App captions mode.
       const results = await WyzieService.searchSubtitles({
         tmdbId: job.item.id,
         season: job.season,
@@ -611,7 +543,7 @@ class DownloadServiceImpl {
         id: track.id,
         language: track.language || language,
         display: track.display,
-        localUri: dest.uri,
+        localUri: ensureFileScheme(dest.uri),
         isHearingImpaired: track.isHearingImpaired,
       };
       this.updateJob(id, { subtitles: [entry] });
@@ -659,7 +591,7 @@ class DownloadServiceImpl {
         this.updateJob(id, {
           status: 'completed',
           completedSegments: 1,
-          localUri: dest,
+          localUri: ensureFileScheme(dest),
         });
         void completeHandler(id);
         resolve();
@@ -671,9 +603,6 @@ class DownloadServiceImpl {
         reject(new Error(error));
       });
 
-      // Kick the task off. `createDownloadTask` alone leaves the task in the
-      // PENDING state — nothing is dispatched to the native downloader until
-      // `.start()` is called. Skipping this was why progress stayed at 0.
       task.start();
     }).catch((e) => log('single-file download failed', e));
   }
@@ -686,7 +615,6 @@ class DownloadServiceImpl {
     const job = this.jobs.get(id);
     if (!job) return;
 
-    // 1) Fetch master playlist and pick variant.
     let variantUri = masterUri;
     let variants: Variant[] = [];
     try {
@@ -701,10 +629,6 @@ class DownloadServiceImpl {
     if (this.cancelled.has(id)) return;
     this.updateJob(id, { variantUri });
 
-    // 2) Fetch media playlist. `fetchMediaPlaylist` returns the raw text
-    // alongside the parsed data so step 6 can rewrite the playlist without
-    // a second (potentially-hanging) network round trip — which is what was
-    // leaving jobs stuck at 100%.
     const media = await fetchMediaPlaylist(variantUri, job.headers);
     if (!media.segments.length) {
       this.updateJob(id, {
@@ -714,7 +638,6 @@ class DownloadServiceImpl {
       return;
     }
 
-    // 3) Build the URL map and prepare the segments folder.
     const segmentsDirUri = `${job.localDir}/segments`;
     try {
       new Directory(segmentsDirUri).create({ intermediates: true });
@@ -734,9 +657,6 @@ class DownloadServiceImpl {
       urlMap.set(seg.uri, `segments/${pad(idx)}.${extForUrl(seg.uri, 'ts')}`);
     });
 
-    // Reset progress counters — `markSegmentComplete` is idempotent and
-    // will re-tally as segments (already on disk or freshly downloaded)
-    // flow through it.
     this.updateJob(id, {
       status: 'downloading',
       totalSegments: media.segments.length,
@@ -746,9 +666,6 @@ class DownloadServiceImpl {
       totalBytes: 0,
     });
 
-    // 3b) HEAD-probe every segment (and init/key sidecars) to learn the true
-    //     total download size. Runs in parallel with the sidecar downloads
-    //     below so it doesn't delay actual bytes hitting disk.
     const probeUris = [
       ...(media.mapInit ? [media.mapInit] : []),
       ...(media.key ? [media.key.uri] : []),
@@ -761,10 +678,9 @@ class DownloadServiceImpl {
         }
       })
       .catch(() => {
-        /* leave totalBytes at 0 — UI will just show downloaded bytes */
+        /* UI will display downloaded bytes */
       });
 
-    // 4) Download every sidecar file (init + key) first.
     if (media.mapInit) {
       await this.downloadSidecar(id, media.mapInit, `${job.localDir}/${urlMap.get(media.mapInit)!}`);
       if (this.cancelled.has(id)) return;
@@ -774,7 +690,6 @@ class DownloadServiceImpl {
       if (this.cancelled.has(id)) return;
     }
 
-    // 5) Segments — concurrent with a small pool.
     const queue = media.segments.map((seg, idx) => ({ seg, idx }));
     let cursor = 0;
 
@@ -807,9 +722,6 @@ class DownloadServiceImpl {
       return;
     }
 
-    // 6) Rewrite playlist to local relative paths and save as local.m3u8.
-    // Reuses the raw text captured in step 2 — the network is *not* touched
-    // here, so a stale/hung CDN cannot leave the job stuck at 100%.
     try {
       const rewritten = rewriteMediaPlaylist(media.rawText, variantUri, urlMap);
       const localPlaylist = new File(job.localDir, 'local.m3u8');
@@ -818,7 +730,7 @@ class DownloadServiceImpl {
       localPlaylist.write(rewritten);
       this.updateJob(id, {
         status: 'completed',
-        localUri: localPlaylist.uri,
+        localUri: ensureFileScheme(localPlaylist.uri),
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -829,19 +741,6 @@ class DownloadServiceImpl {
     }
   }
 
-  /**
-   * Download a small HLS sidecar (init.mp4 or key.bin) via `expo-file-system`.
-   *
-   * Deliberately avoids `createDownloadTask` from the background-downloader
-   * library: on Android 14+ every UIDT job posts a mandatory notification,
-   * and even at IMPORTANCE_MIN the churn from 4 concurrent segment jobs
-   * looks like spam in the notification shade.  A direct `File.downloadFileAsync`
-   * uses OkHttp underneath with zero notifications.
-   *
-   * Never rejects — segment-level errors are handled at the pipeline level
-   * via `completedSegments < totalSegments`. This mirrors the previous
-   * best-effort behaviour of the UIDT variant.
-   */
   private async downloadSidecar(
     id: string,
     url: string,
@@ -850,7 +749,6 @@ class DownloadServiceImpl {
     const job = this.jobs.get(id);
     if (!job) return;
     const destFile = new File(destUri);
-    // Skip if already present on disk from a previous run.
     try {
       if (destFile.exists) return;
     } catch {
@@ -866,8 +764,6 @@ class DownloadServiceImpl {
         signal: controller.signal,
       });
     } catch (e) {
-      // Any failure (abort, network, non-2xx) leaves a partial or missing
-      // file behind — delete it so a future resume re-fetches cleanly.
       try {
         if (destFile.exists) destFile.delete();
       } catch {
@@ -879,15 +775,6 @@ class DownloadServiceImpl {
     }
   }
 
-  /**
-   * Download one HLS segment via `expo-file-system`.
-   *
-   * See `downloadSidecar` for why we don't use the background-downloader
-   * library here.  In short: HLS jobs have hundreds of segments and every
-   * UIDT task on Android 14+ posts its own notification; the "silent"
-   * channel is not grouped when `showNotificationsEnabled: false`, so the
-   * shade fills with per-segment IMPORTANCE_MIN entries as segments cycle.
-   */
   private async downloadOneSegment(
     id: string,
     idx: number,
@@ -898,16 +785,13 @@ class DownloadServiceImpl {
     if (!job) return;
 
     const destFile = new File(destUri);
-    // Skip segments that already exist on disk (e.g. from a previous pass
-    // that was paused mid-way). This keeps resume-after-pause O(remaining)
-    // instead of re-downloading the whole thing.
     try {
       if (destFile.exists) {
         this.markSegmentComplete(id, idx);
         return;
       }
     } catch {
-      /* fall through and download */
+      /* fall through */
     }
 
     const controller = new AbortController();
@@ -931,15 +815,11 @@ class DownloadServiceImpl {
       });
       this.markSegmentComplete(id, idx);
     } catch (e) {
-      // Abort or network error — remove the partial file so a future
-      // resume doesn't mistake garbage bytes for a completed segment.
       try {
         if (destFile.exists) destFile.delete();
       } catch {
         /* noop */
       }
-      // Roll back the byte counter for whatever we already reported so
-      // totalBytes/bytesWritten stays honest across a retry.
       if (last > 0) {
         const current = this.jobs.get(id);
         if (current) {
@@ -948,19 +828,12 @@ class DownloadServiceImpl {
           });
         }
       }
-      // Don't rethrow — the pipeline tally decides success/failure.
       log('segment', idx, 'error', e);
     } finally {
       this.untrackAbort(id, controller);
     }
   }
 
-  /**
-   * Idempotently record segment `idx` as complete for `jobId`.  Prevents the
-   * "stuck at 99% then 101%" bug that used to happen when pause raced with
-   * the segment runner picking up the same index twice — every path that
-   * finalizes a segment (found-on-disk or task.done) funnels through here.
-   */
   private markSegmentComplete(jobId: string, idx: number): void {
     const current = this.jobs.get(jobId);
     if (!current) return;
@@ -972,10 +845,6 @@ class DownloadServiceImpl {
       completedSegments: nextIndices.length,
     });
   }
-
-  // -------------------------------------------------------------------------
-  // Task tracking
-  // -------------------------------------------------------------------------
 
   private trackTask(jobId: string, task: DownloadTask): void {
     let map = this.taskIndex.get(jobId);
@@ -1013,10 +882,7 @@ class DownloadServiceImpl {
     return referer.endsWith('/') ? referer.slice(0, -1) : referer;
   }
 
-  // -------------------------------------------------------------------------
-  // Reactivity helpers
-  // -------------------------------------------------------------------------
-
+  private lastNotifPublish = 0;
   private updateJob(id: string, patch: Partial<DownloadJob>): void {
     const current = this.jobs.get(id);
     if (!current) return;
@@ -1024,14 +890,14 @@ class DownloadServiceImpl {
     this.jobs.set(id, next);
     this.persist();
     this.emit();
-    // Publish a notification off the same source-of-truth as the UI. This
-    // is the *only* place we notify from — segment progress and terminal
-    // transitions both flow through here, so we don't have to sprinkle
-    // notification calls across the download pipeline.
-    //
-    // `publishJobNotification` has its own 500 ms throttle per job, so
-    // calling it from every progress tick is safe.
-    void publishJobNotification(next);
+
+    // Debounce progress notifications to avoid choking the iOS notification subsystem
+    const now = Date.now();
+    const isTerminal = next.status === 'completed' || next.status === 'failed';
+    if (isTerminal || now - this.lastNotifPublish > 1000) {
+      this.lastNotifPublish = now;
+      void publishJobNotification(next);
+    }
   }
 
   private emit(): void {
@@ -1055,7 +921,6 @@ class DownloadServiceImpl {
   }
 }
 
-// Pick the variant whose height is <= target, or the lowest available.
 const pickClosest = (variants: Variant[], targetHeight: number): Variant | null => {
   if (!variants.length) return null;
   const sorted = [...variants].sort((a, b) => b.height - a.height);
