@@ -15,9 +15,9 @@ const CHANNEL_NAME = 'Downloads';
 
 const notifId = (jobId: string): string => `flick-download-${jobId}`;
 
+// 1 second throttle per job prevents iOS UserNotifications daemon flooding
 const MIN_PUBLISH_INTERVAL_MS = 1000;
 const lastPublishAt = new Map<string, number>();
-const iosMilestones = new Map<string, Set<number>>();
 
 let channelReady: Promise<void> | null = null;
 
@@ -68,21 +68,29 @@ const computePct = (job: DownloadJob): number => {
   return 0;
 };
 
+// Generates a visual progress meter for iOS lock screen cards
+const buildProgressBar = (pct: number): string => {
+  const totalBlocks = 10;
+  const filledBlocks = Math.round((pct / 100) * totalBlocks);
+  const emptyBlocks = totalBlocks - filledBlocks;
+  return `[${'■'.repeat(filledBlocks)}${'□'.repeat(emptyBlocks)}] ${pct}%`;
+};
+
 const bodyFor = (job: DownloadJob, pct: number): string => {
   switch (job.status) {
     case 'resolving':
-      return 'Preparing…';
+      return 'Preparing stream…';
     case 'queued':
-      return 'Queued';
+      return 'Waiting in queue…';
     case 'paused':
       return `Paused — ${pct}%`;
     case 'failed':
-      return `Failed: ${job.error ?? 'unknown error'}`;
+      return `Failed: ${job.error ?? 'Download error'}`;
     case 'completed':
       return 'Download complete! Ready to watch offline.';
     case 'downloading':
     default:
-      return `${pct}%`;
+      return Platform.OS === 'ios' ? buildProgressBar(pct) : `${pct}%`;
   }
 };
 
@@ -98,40 +106,20 @@ export const publishJobNotification = async (
   const terminal = isTerminalStatus(job);
   const now = Date.now();
 
-  // On iOS: only post notifications at Start (0%), 50%, and Finish (100% or Failed)
-  if (Platform.OS === 'ios') {
-    if (!iosMilestones.has(job.id)) {
-      iosMilestones.set(job.id, new Set());
-    }
-    const milestones = iosMilestones.get(job.id)!;
-
-    let shouldPublishIOS = false;
-    if (job.status === 'downloading' && !milestones.has(0)) {
-      milestones.add(0);
-      shouldPublishIOS = true;
-    } else if (pct >= 50 && !milestones.has(50)) {
-      milestones.add(50);
-      shouldPublishIOS = true;
-    } else if (terminal && !milestones.has(100)) {
-      milestones.add(100);
-      shouldPublishIOS = true;
-    }
-
-    if (!shouldPublishIOS) return;
+  const last = lastPublishAt.get(job.id) ?? 0;
+  if (!terminal && now - last < MIN_PUBLISH_INTERVAL_MS) {
+    return;
   }
-
-  if (!terminal) {
-    const last = lastPublishAt.get(job.id) ?? 0;
-    if (now - last < MIN_PUBLISH_INTERVAL_MS) return;
-    lastPublishAt.set(job.id, now);
-  } else {
-    lastPublishAt.set(job.id, now);
-  }
+  lastPublishAt.set(job.id, now);
 
   const isActive =
     job.status === 'downloading' ||
     job.status === 'resolving' ||
     job.status === 'queued';
+
+  const showProgress =
+    job.status === 'downloading' || job.status === 'paused' || job.status === 'resolving';
+  const indeterminate = job.status === 'resolving' || pct === 0;
 
   try {
     await notifee.displayNotification({
@@ -139,7 +127,13 @@ export const publishJobNotification = async (
       title: `${job.title} — ${job.qualityLabel}`,
       body: bodyFor(job, pct),
       ios: {
-        sound: terminal ? 'default' : undefined,
+        threadId: notifId(job.id),
+        interruptionLevel: 'timeSensitive',
+        foregroundPresentationOptions: {
+          banner: true,
+          list: true,
+        },
+        sound: terminal && job.status === 'completed' ? 'default' : undefined,
       },
       android: {
         channelId: CHANNEL_ID,
@@ -147,11 +141,13 @@ export const publishJobNotification = async (
         ongoing: isActive,
         onlyAlertOnce: true,
         showTimestamp: false,
-        progress: {
-          max: 100,
-          current: pct,
-          indeterminate: job.status === 'resolving' || pct === 0,
-        },
+        progress: showProgress
+          ? {
+              max: 100,
+              current: pct,
+              indeterminate,
+            }
+          : undefined,
       },
     });
   } catch (e) {
@@ -161,8 +157,9 @@ export const publishJobNotification = async (
 
 export const dismissJobNotification = async (jobId: string): Promise<void> => {
   lastPublishAt.delete(jobId);
-  iosMilestones.delete(jobId);
   try {
     await notifee.cancelNotification(notifId(jobId));
-  } catch {}
+  } catch {
+    /* noop */
+  }
 };
