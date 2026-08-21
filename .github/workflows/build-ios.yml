@@ -5,11 +5,9 @@ jobs:
   build-ios:
     runs-on: macos-latest
     steps:
-      - name: Checkout 2.3.2 Release
+      # Checks out whatever branch you trigger the action from (v2.3.2-beta)
+      - name: Checkout Current Branch
         uses: actions/checkout@v4
-        with:
-          repository: 'sheeshcake/Flickv4'
-          ref: '2.3.2'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -19,10 +17,8 @@ jobs:
 
       - name: Configure Xcode Node Environment & TMDB Keys
         run: |
-          # 1. Point Xcode's build script directly to the active Node binary
           echo "export NODE_BINARY=$(which node)" > ios/.xcode.env.local
 
-          # 2. Write the .env file for Expo bundler
           cat << 'EOF' > .env
           EXPO_PUBLIC_TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
           EXPO_PUBLIC_TMDB_BASE_URL=https://api.themoviedb.org/3
@@ -33,19 +29,18 @@ jobs:
           EXPO_PUBLIC_SAMPLE_VIDEO_URL=https://media.w3.org/2010/05/sintel/trailer.mp4
           EXPO_PUBLIC_WATCH_PARTY_URL=
           TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
-          APP_VERSION=2.3.1
-          ANDROID_VERSION_CODE=20301
+          APP_VERSION=2.3.2
+          ANDROID_VERSION_CODE=20302
           EOF
 
-          # 3. Safely inject the TMDB key directly into src/config/env.ts using Node.js
           node -e '
             const fs = require("fs");
             const file = "src/config/env.ts";
             if (fs.existsSync(file)) {
               let content = fs.readFileSync(file, "utf8");
-              content = content.replace(/process\.env\.EXPO_PUBLIC_TMDB_API_KEY(\s*\|\|\s*["'"'"'"].*?["'"'"'"])?/g, "\"10116fa302c8fe0c2cbc38be17aa65a5\"");
-              content = content.replace(/process\.env\.EXPO_PUBLIC_TMDB_BASE_URL(\s*\|\|\s*["'"'"'"].*?["'"'"'"])?/g, "\"https://api.themoviedb.org/3\"");
-              content = content.replace(/process\.env\.EXPO_PUBLIC_TMDB_IMAGE_BASE_URL(\s*\|\|\s*["'"'"'"].*?["'"'"'"])?/g, "\"https://image.tmdb.org/t/p/w500\"");
+              content = content.replace(/process\.env\.EXPO_PUBLIC_TMDB_API_KEY(\s*\|\|\s*["\x27"].*?["\x27"])?/g, "\"10116fa302c8fe0c2cbc38be17aa65a5\"");
+              content = content.replace(/process\.env\.EXPO_PUBLIC_TMDB_BASE_URL(\s*\|\|\s*["\x27"].*?["\x27"])?/g, "\"https://api.themoviedb.org/3\"");
+              content = content.replace(/process\.env\.EXPO_PUBLIC_TMDB_IMAGE_BASE_URL(\s*\|\|\s*["\x27"].*?["\x27"])?/g, "\"https://image.tmdb.org/t/p/w500\"");
               fs.writeFileSync(file, content, "utf8");
             }
           '
@@ -84,12 +79,13 @@ jobs:
       - name: Package IPA
         run: |
           cd ios
+          rm -rf Payload Flickv4.ipa
           mkdir -p Payload
           cp -r build/Flick.xcarchive/Products/Applications/*.app Payload/
-          zip -r Flickv4-2.3.1.ipa Payload
+          zip -r Flickv4.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Flickv4-2.3.2
-          path: ios/Flickv4-2.3.2.ipa
+          name: Flickv4-IPA
+          path: ios/Flickv4.ipa
