@@ -3,8 +3,8 @@
         "id": "rive",
         "name": "Rive",
         "url": "https://www.rivestream.app",
-        "movie_url_pattern": "{url}/detail?type=movie&id={tmdbId}",
-        "tv_url_pattern": "{url}/detail?type=tv&id={tmdbId}",
+        "movie_url_pattern": "{url}/watch?type=movie&id={tmdbId}",
+        "tv_url_pattern": "{url}/watch?type=tv&id={tmdbId}",
         "movie_alias": null,
         "tv_alias": null,
         "scraper_timeout_seconds": 45
