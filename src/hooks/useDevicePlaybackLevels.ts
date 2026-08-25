@@ -36,6 +36,10 @@ export const useDevicePlaybackLevels = () => {
   const userOverrodeRef = useRef(false);
 
   useEffect(() => {
+    if (Platform.OS === ('windows' as typeof Platform.OS)) {
+      setUseSystemVolume(false);
+      return;
+    }
     let cancelled = false;
     let sub: { remove: () => void } | undefined;
     void (async () => {
@@ -78,6 +82,12 @@ export const useDevicePlaybackLevels = () => {
     };
 
     void seed();
+
+    if (Platform.OS === ('windows' as typeof Platform.OS)) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
       brightnessSub = Brightness.addBrightnessListener(({ brightness: next }) => {

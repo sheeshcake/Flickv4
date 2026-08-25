@@ -44,6 +44,18 @@ yarn-error.*
 # /ios
 # /android
 
+# Windows (RNW) build output — keep windows/ source
+windows/*/bin/
+windows/*/obj/
+windows/*/Bundle/
+windows/AppPackages/
+windows/AppxPackages/
+*.msix
+*.appx
+*.appxupload
+*.pri
+*.pdb
+
 # party companion Vite output
 party-server/public/
 streamflix-main/*

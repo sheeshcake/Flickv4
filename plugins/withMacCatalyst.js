@@ -2,35 +2,11 @@
 /**
  * withMacCatalyst — Expo config plugin that flips the required Xcode build
  * settings so the generated iOS project can also be built as a Mac Catalyst
- * app (i.e. the same binary runs natively on macOS as a first-class Cocoa
- * app, reusing every Expo module we already depend on).
- *
- * What it does — on every app-target build configuration in
- * `ios/Flick.xcodeproj` (Debug / Release / Preview / etc):
- *
- *   1. `SUPPORTS_MACCATALYST = YES`
- *      Turns on the Mac Catalyst destination in Xcode's scheme.
- *
- *   2. `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO`
- *      Disables the "Designed for iPad" mode (which would ship the raw iOS
- *      app to macOS via a compatibility shim). We want a proper Catalyst
- *      build with native macOS chrome, so this is explicitly opted out.
- *
- *   3. `DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = YES`
- *      Auto-derives a Catalyst-specific bundle id (`maccatalyst.<iOS id>`),
- *      which keeps our iOS + Catalyst provisioning profiles independent
- *      without any extra manual configuration.
- *
- * Pods and test-target configurations are deliberately skipped because
- * CocoaPods' generated settings can't take `SUPPORTS_MACCATALYST` and
- * changing them there produces spurious Xcode warnings.
- *
- * After making changes here you MUST run:
- *   npx expo prebuild --clean
- * Then open `ios/Flick.xcworkspace` in Xcode, pick "My Mac (Mac Catalyst)"
- * as the run destination, and Cmd+R.
+ * app, and keeps `:mac_catalyst_enabled => true` in the Podfile after prebuild.
  */
-const { withXcodeProject } = require('@expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
+const { withXcodeProject, withDangerousMod } = require('@expo/config-plugins');
 
 const CATALYST_SETTINGS = {
   SUPPORTS_MACCATALYST: 'YES',
@@ -38,32 +14,70 @@ const CATALYST_SETTINGS = {
   DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: 'YES',
 };
 
-/**
- * @type {import('@expo/config-plugins').ConfigPlugin}
- */
-const withMacCatalyst = (config) =>
+const CATALYST_POST_INSTALL = `
+    catalyst_skip = %w[
+      react-native-webrtc
+      JitsiWebRTC
+      ReactNativeStaticServer
+      ReactNativeFs
+      react-native-background-downloader
+    ]
+    catalyst_skip.each do |name|
+      installer.pods_project.targets.each do |target|
+        next unless target.name == name
+        target.build_configurations.each do |config|
+          config.build_settings['SUPPORTED_PLATFORMS'] = 'iphoneos iphonesimulator'
+          config.build_settings['SUPPORTS_MACCATALYST'] = 'NO'
+        end
+      end
+    end
+
+    Dir.glob(File.join(__dir__, 'Pods/Target Support Files/Pods-Flick/Pods-Flick.*.xcconfig')).each do |file|
+      text = File.read(file)
+      %w[
+        ReactNativeFs
+        ReactNativeStaticServer
+        react-native-background-downloader
+        react-native-webrtc
+      ].each do |lib|
+        text.gsub!(/ -l"#{Regexp.escape(lib)}"/, '')
+        text.gsub!(/ "\\$\\{PODS_CONFIGURATION_BUILD_DIR\\}\\/#{Regexp.escape(lib)}"/, '')
+      end
+      text.gsub!(/ -framework "WebRTC"/, '')
+      File.write(file, text)
+    end
+
+    frameworks_sh = File.join(__dir__, 'Pods/Target Support Files/Pods-Flick/Pods-Flick-frameworks.sh')
+    if File.exist?(frameworks_sh)
+      sh = File.read(frameworks_sh)
+      sh.gsub!(
+        '  install_framework "\${PODS_XCFRAMEWORKS_BUILD_DIR}/JitsiWebRTC/WebRTC.framework"',
+        '  if [ "\${EFFECTIVE_PLATFORM_NAME}" != "-maccatalyst" ]; then install_framework "\${PODS_XCFRAMEWORKS_BUILD_DIR}/JitsiWebRTC/WebRTC.framework"; fi',
+      )
+      File.write(frameworks_sh, sh)
+    end
+
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+        config.build_settings['SWIFT_APPROACHABLE_CONCURRENCY'] = 'NO'
+        config.build_settings['SWIFT_DEFAULT_ACTOR_ISOLATION'] = 'nonisolated'
+      end
+    end
+`;
+
+const withMacCatalystXcode = (config) =>
   withXcodeProject(config, (cfg) => {
     const xcodeProject = cfg.modResults;
-    // App target is the one whose product name matches the iOS app name.
-    // We fall back to modifying every non-Pods build configuration, which
-    // is what most Catalyst plugins do — Pods filters get skipped so
-    // CocoaPods doesn't fight us on the next `pod install`.
     const configurations = xcodeProject.pbxXCBuildConfigurationSection();
     for (const key in configurations) {
       const conf = configurations[key];
       if (!conf || typeof conf !== 'object') continue;
       if (!conf.buildSettings) continue;
       const productName = conf.buildSettings.PRODUCT_NAME;
-      // Skip Pods configurations — Xcode emits "unrecognized" warnings and
-      // Cocoapods can strip our writes back to defaults on re-run.
-      if (
-        typeof productName === 'string' &&
-        productName.includes('Pods-')
-      ) {
+      if (typeof productName === 'string' && productName.includes('Pods-')) {
         continue;
       }
-      // Skip anything that isn't an app target (bundle/framework configs
-      // don't need Catalyst flags either).
       if (conf.buildSettings.WRAPPER_EXTENSION === '"bundle"') {
         continue;
       }
@@ -73,5 +87,27 @@ const withMacCatalyst = (config) =>
     }
     return cfg;
   });
+
+const withMacCatalystPodfile = (config) =>
+  withDangerousMod(config, [
+    'ios',
+    async (cfg) => {
+      const podfilePath = path.join(cfg.modRequest.platformProjectRoot, 'Podfile');
+      if (!fs.existsSync(podfilePath)) return cfg;
+      let contents = fs.readFileSync(podfilePath, 'utf8');
+      contents = contents.replace(
+        /:mac_catalyst_enabled\s*=>\s*false/,
+        ':mac_catalyst_enabled => true',
+      );
+      if (!contents.includes('SWIFT_STRICT_CONCURRENCY')) {
+        contents = contents.replace(/(\n  end\nend\s*)$/, `\n${CATALYST_POST_INSTALL}$1`);
+      }
+      fs.writeFileSync(podfilePath, contents);
+      return cfg;
+    },
+  ]);
+
+const withMacCatalyst = (config) =>
+  withMacCatalystPodfile(withMacCatalystXcode(config));
 
 module.exports = withMacCatalyst;

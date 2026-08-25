@@ -19,12 +19,16 @@ export const isMacCatalyst: boolean = (() => {
   return p.constants?.interfaceIdiom === 'mac';
 })();
 
+/** True on react-native-windows (desktop WinUI / UWP shell). */
+export const isWindowsDesktop = Platform.OS === ('windows' as typeof Platform.OS);
+
 /**
- * Layout-level shorthand for "use the ten-foot / desktop shell". True on
- * Android TV / tvOS and on Mac Catalyst so macOS reuses the TV navigator,
- * grid, and spacing without any per-screen branching.
+ * Layout-level shorthand for "use the ten-foot TV shell". True only on real
+ * Android TV / tvOS devices. Mac Catalyst and Windows fall through to the
+ * tablet layout (classified by window size in `getDeviceKind`), so they use
+ * the tab navigator, tablet grid columns, and tablet spacing.
  */
-export const isTVLayout = isTV || isMacCatalyst;
+export const isTVLayout = isTV;
 
 /**
  * Canonical TV D-pad focus ring: a 2px primary-colored border, used by every

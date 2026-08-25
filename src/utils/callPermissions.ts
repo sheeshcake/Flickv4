@@ -1,5 +1,6 @@
 import { Alert, Linking, PermissionsAndroid, Platform } from 'react-native';
 import { permissions } from 'react-native-webrtc';
+import { isMacCatalyst } from '@/src/utils/tv';
 
 const NAMES = ['camera', 'microphone'] as const;
 
@@ -58,6 +59,8 @@ const promptSettings = (): Promise<boolean> =>
  */
 export const ensureCallPermissions = async (): Promise<boolean> => {
   if (Platform.OS === 'web') return true;
+  // WebRTC (and its permission bridge) is not linked on Mac Catalyst.
+  if (isMacCatalyst) return false;
 
   const cameraOk = await requestOne('camera');
   const micOk = await requestOne('microphone');

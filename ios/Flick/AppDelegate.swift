@@ -72,7 +72,9 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
     handleEventsForBackgroundURLSession identifier: String,
     completionHandler: @escaping () -> Void
   ) {
+    #if !targetEnvironment(macCatalyst)
     RNBackgroundDownloader.setCompletionHandlerWithIdentifier(identifier, completionHandler: completionHandler)
+    #endif
   }
 
 }

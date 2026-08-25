@@ -14,7 +14,7 @@ import type {
   ServerMessage,
 } from '@/src/party/protocol';
 import { ensureCallPermissions } from '@/src/utils/callPermissions';
-import { isTV } from '@/src/utils/tv';
+import { isMacCatalyst, isTV } from '@/src/utils/tv';
 
 const RTC_CONFIG = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -86,7 +86,11 @@ export const usePartyRtc = ({
   send,
   subscribe,
 }: UsePartyRtcArgs): PartyRtcApi => {
-  const available = enabled && !isTV && Platform.OS !== 'web';
+  // react-native-webrtc is stripped from the Mac Catalyst build, so calling any
+  // of its native methods (getUserMedia / RTCPeerConnection) would throw. Report
+  // the call feature as unavailable there; all native usage is gated on this.
+  const available =
+    enabled && !isTV && !isMacCatalyst && Platform.OS !== 'web';
   const [joined, setJoined] = useState(false);
   const [muted, setMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
