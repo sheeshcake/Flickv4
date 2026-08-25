@@ -14,7 +14,11 @@
       "bundleIdentifier": "com.wfrdee.flick",
       "infoPlist": {
         "NSCameraUsageDescription": "Flick uses the camera so you can join a watch-party video call.",
-        "NSMicrophoneUsageDescription": "Flick uses the microphone so you can join a watch-party video call."
+        "NSMicrophoneUsageDescription": "Flick uses the microphone so you can join a watch-party video call.",
+        "NSDocumentsFolderUsageDescription": "Flick uses Documents to store and open downloaded videos.",
+        "NSDownloadsFolderUsageDescription": "Flick uses Downloads so you can save and open local files.",
+        "NSDesktopFolderUsageDescription": "Flick uses Desktop so you can open local video files.",
+        "LSSupportsOpeningDocumentsInPlace": true
       }
     },
     "android": {

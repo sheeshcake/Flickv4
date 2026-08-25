@@ -1761,12 +1761,39 @@ const findApkAsset = (assets) => {
   return preferred ?? list.find((a) => typeof a?.name === 'string' && a.name.endsWith('.apk')) ?? null;
 };
 
+const findIpaAsset = (assets) => {
+  const list = Array.isArray(assets) ? assets : [];
+  const preferred = list.find(
+    (a) =>
+      typeof a?.name === 'string' &&
+      a.name.endsWith('.ipa') &&
+      (a.name.startsWith('Flick-') || a.name.startsWith('Flickv4-')),
+  );
+  return preferred ?? list.find((a) => typeof a?.name === 'string' && a.name.endsWith('.ipa')) ?? null;
+};
+
+const findDmgAsset = (assets) => {
+  const list = Array.isArray(assets) ? assets : [];
+  const dmg = list.filter(
+    (a) => typeof a?.name === 'string' && a.name.toLowerCase().endsWith('.dmg'),
+  );
+  const preferred = dmg.find(
+    (a) =>
+      a.name.startsWith('Flick-') ||
+      a.name.startsWith('Flickv4-') ||
+      /macos|mac|catalyst/i.test(a.name),
+  );
+  return preferred ?? dmg[0] ?? null;
+};
+
 const serveApp = async (_req, res) => {
   const fallback = {
     ok: true,
     version: null,
     appVersion: APP_VERSION,
     androidApk: null,
+    iosIpa: null,
+    macosDmg: null,
     releaseUrl: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
   };
   if (appReleaseCache && Date.now() - appReleaseCache.at < APP_RELEASE_CACHE_MS) {
@@ -1801,11 +1828,15 @@ const serveApp = async (_req, res) => {
     }
     const data = await upstream.json();
     const apk = findApkAsset(data.assets);
+    const ipa = findIpaAsset(data.assets);
+    const dmg = findDmgAsset(data.assets);
     const payload = {
       ok: true,
       version: String(data.tag_name || '').replace(/^v/, '') || null,
       appVersion: APP_VERSION,
       androidApk: apk?.browser_download_url || null,
+      iosIpa: ipa?.browser_download_url || null,
+      macosDmg: dmg?.browser_download_url || null,
       releaseUrl: data.html_url || fallback.releaseUrl,
     };
     appReleaseCache = { at: Date.now(), payload };

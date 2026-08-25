@@ -60,7 +60,7 @@ target 'Flick' do
     react_native_post_install(
       installer,
       config[:reactNativePath],
-      :mac_catalyst_enabled => false,
+      :mac_catalyst_enabled => true,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
 
@@ -77,6 +77,139 @@ target 'Flick' do
         end
         config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs
       end
+    end
+
+    # Mac Catalyst: JitsiWebRTC has no ios-macabi slice. Compile a stub
+    # module and do not link WebRTC.framework on macosx.
+    webrtc_stub = File.expand_path('../macos/stubs/RNWebRTCCatalystStub.m', __dir__)
+    installer.pods_project.targets.each do |target|
+      if target.name == 'react-native-webrtc'
+        already = target.source_build_phase.files.any? do |bf|
+          ref = bf.file_ref
+          ref && ref.path && File.basename(ref.path) == 'RNWebRTCCatalystStub.m'
+        end
+        unless already
+          file_ref = installer.pods_project.new_file(webrtc_stub)
+          target.source_build_phase.add_file_reference(file_ref)
+        end
+        target.build_configurations.each do |config|
+          config.build_settings['EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]'] =
+            '$(inherited) *.m *.mm'
+          config.build_settings['INCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]'] =
+            'RNWebRTCCatalystStub.m'
+        end
+      end
+
+      if target.name == 'JitsiWebRTC'
+        target.shell_script_build_phases.each do |phase|
+          next unless phase.name.to_s.include?('XCFrameworks')
+          next if phase.shell_script.include?('Skipping JitsiWebRTC on Mac Catalyst')
+          phase.shell_script =
+            %(if [ "${PLATFORM_NAME}" = "macosx" ]; then echo "Skipping JitsiWebRTC on Mac Catalyst"; exit 0; fi\n) +
+            phase.shell_script
+        end
+      end
+
+      if target.name == 'ReactNativeStaticServer'
+        stub = File.expand_path('../macos/stubs/RNStaticServerCatalystStub.mm', __dir__)
+        already = target.source_build_phase.files.any? do |bf|
+          ref = bf.file_ref
+          ref && ref.path && File.basename(ref.path) == 'RNStaticServerCatalystStub.mm'
+        end
+        unless already
+          file_ref = installer.pods_project.new_file(stub)
+          target.source_build_phase.add_file_reference(file_ref)
+        end
+        target.build_configurations.each do |config|
+          config.build_settings['EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]'] =
+            '$(inherited) *.m *.mm'
+          config.build_settings['INCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]'] =
+            'RNStaticServerCatalystStub.mm'
+        end
+        target.shell_script_build_phases.each do |phase|
+          next unless phase.name.to_s.include?('Build native dependencies')
+          next if phase.shell_script.include?('Skipping ReactNativeStaticServer cmake on Mac Catalyst')
+          phase.shell_script = <<~'SH' + phase.shell_script
+            if [ "${PLATFORM_NAME}" = "macosx" ]; then
+              echo "Skipping ReactNativeStaticServer cmake on Mac Catalyst"
+              mkdir -p "${BUILT_PRODUCTS_DIR}" "${TARGET_TEMP_DIR}"
+              STUB_C="${TARGET_TEMP_DIR}/rnss_catalyst_stub.c"
+              STUB_O="${TARGET_TEMP_DIR}/rnss_catalyst_stub.o"
+              printf 'void rnss_catalyst_stub(void) {}\n' > "${STUB_C}"
+              clang -c "${STUB_C}" -o "${STUB_O}"
+              for lib in liblighttpd.a libmod_dirlisting.a libmod_h2.a libpcre2-8.a; do
+                xcrun ar rcs "${BUILT_PRODUCTS_DIR}/${lib}" "${STUB_O}"
+              done
+              exit 0
+            fi
+          SH
+        end
+      end
+    end
+
+    Dir.glob(File.join(installer.sandbox.root, 'Target Support Files/Pods-Flick/*.xcconfig')).each do |xcconfig|
+      contents = File.read(xcconfig)
+      next if contents.include?('FLICK_STRIPPED_WEBRTC_FOR_CATALYST')
+      unless contents.sub!(/^(OTHER_LDFLAGS = .*) -framework "WebRTC"(.*)$/, '\1\2')
+        next
+      end
+      contents << <<~XC
+        FLICK_STRIPPED_WEBRTC_FOR_CATALYST = 1
+        OTHER_LDFLAGS[sdk=iphoneos*] = $(inherited) -framework "WebRTC"
+        OTHER_LDFLAGS[sdk=iphonesimulator*] = $(inherited) -framework "WebRTC"
+      XC
+      File.write(xcconfig, contents)
+    end
+
+    # JitsiWebRTC is not copied on macosx, so skip embedding WebRTC.framework
+    # (otherwise frameworks.sh hits `source: unbound variable` with set -u).
+    frameworks_sh = File.join(installer.sandbox.root, 'Target Support Files/Pods-Flick/Pods-Flick-frameworks.sh')
+    if File.exist?(frameworks_sh)
+      contents = File.read(frameworks_sh)
+      unless contents.include?('FLICK_SKIP_WEBRTC_EMBED_ON_CATALYST')
+        contents.gsub!(
+          %r{install_framework "\$\{PODS_XCFRAMEWORKS_BUILD_DIR\}/JitsiWebRTC/WebRTC\.framework"},
+          <<~'SH'.strip,
+            # FLICK_SKIP_WEBRTC_EMBED_ON_CATALYST
+            if [ "${PLATFORM_NAME}" != "macosx" ]; then
+              install_framework "${PODS_XCFRAMEWORKS_BUILD_DIR}/JitsiWebRTC/WebRTC.framework"
+            fi
+          SH
+        )
+      end
+      unless contents.include?('Vendored framework not found')
+        contents.sub!(
+          <<~'OLD',
+            install_framework()
+            {
+              if [ -r "${BUILT_PRODUCTS_DIR}/$1" ]; then
+                local source="${BUILT_PRODUCTS_DIR}/$1"
+              elif [ -r "${BUILT_PRODUCTS_DIR}/$(basename "$1")" ]; then
+                local source="${BUILT_PRODUCTS_DIR}/$(basename "$1")"
+              elif [ -r "$1" ]; then
+                local source="$1"
+              fi
+          OLD
+          <<~'NEW',
+            install_framework()
+            {
+              local source=""
+              if [ -r "${BUILT_PRODUCTS_DIR}/$1" ]; then
+                source="${BUILT_PRODUCTS_DIR}/$1"
+              elif [ -r "${BUILT_PRODUCTS_DIR}/$(basename "$1")" ]; then
+                source="${BUILT_PRODUCTS_DIR}/$(basename "$1")"
+              elif [ -r "$1" ]; then
+                source="$1"
+              fi
+
+              if [ -z "${source}" ]; then
+                echo "warning: [CP] Vendored framework not found: $1 — skipping"
+                return
+              fi
+          NEW
+        )
+      end
+      File.write(frameworks_sh, contents)
     end
   end
 end
