@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AppHeader } from '@/components/AppHeader';
 import { PartySessionBar } from '@/components/PartySessionBar';
 import { PartyProvider, useParty } from '@/hooks/useParty';
+import { WEB_PLAYER_ENABLED } from '@/lib/flags';
 import { DetailPage } from '@/pages/DetailPage';
 import { HomePage } from '@/pages/HomePage';
 import { JoinPage } from '@/pages/JoinPage';
@@ -13,7 +14,8 @@ const Shell = () => {
   const location = useLocation();
   const { role } = useParty();
   const watching =
-    location.pathname.startsWith('/p/') || location.pathname.startsWith('/watch/');
+    WEB_PLAYER_ENABLED &&
+    (location.pathname.startsWith('/p/') || location.pathname.startsWith('/watch/'));
   return (
     <div className={role === 'host' && !watching ? 'pb-16' : undefined}>
       {watching ? null : <AppHeader />}

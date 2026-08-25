@@ -5,6 +5,7 @@ import { GetAppDialog } from '@/components/GetAppDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { WEB_PLAYER_ENABLED } from '@/lib/flags';
 import { posterUrl, type PublicRoomSummary } from '@/lib/party';
 import { cn } from '@/lib/utils';
 import logo from '@/assets/logo.png';
@@ -70,8 +71,9 @@ export const JoinGate = ({ initialCode, error, onJoin }: JoinGateProps) => {
       <img src={logo} alt="Flick" className="mx-auto mb-4 h-14 w-auto" />
       <h1 className="mb-2 text-center text-3xl font-bold">Flick Watch Party</h1>
       <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
-        Browse titles and host a party, or join with a code. Video plays in this
-        browser when Streamflix (or the host’s stream) allows it.
+        {WEB_PLAYER_ENABLED
+          ? 'Browse titles and host a party, or join with a code. Video plays in this browser when Streamflix (or the host’s stream) allows it.'
+          : 'Browse titles on the web, or download the app to watch. Web playback is temporarily unavailable — join a party from the iOS or Android app.'}
       </p>
       <div className="mb-6 flex flex-col gap-2">
         <Button asChild variant="outline" className="w-full">

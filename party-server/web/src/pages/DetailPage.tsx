@@ -5,6 +5,7 @@ import { HostLobby } from '@/components/HostLobby';
 import { PosterCard } from '@/components/PosterCard';
 import { Button } from '@/components/ui/button';
 import { useParty } from '@/hooks/useParty';
+import { WEB_PLAYER_ENABLED } from '@/lib/flags';
 import { partyContentFromTitle, watchPath } from '@/lib/party';
 import {
   comingSoonLabel,
@@ -217,21 +218,23 @@ export const DetailPage = () => {
               <Play className="size-5 fill-current" />
               {busy ? 'Starting…' : 'Play'}
             </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              onClick={() => {
-                if (!tvReady || !lobbyContent) return;
-                if (role === 'host' && room) {
-                  send({ type: 'content', content: lobbyContent });
-                }
-                setLobbyOpen(true);
-              }}
-              disabled={busy || !tvReady}
-            >
-              <Users className="size-5" />
-              Watch party
-            </Button>
+            {WEB_PLAYER_ENABLED ? (
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => {
+                  if (!tvReady || !lobbyContent) return;
+                  if (role === 'host' && room) {
+                    send({ type: 'content', content: lobbyContent });
+                  }
+                  setLobbyOpen(true);
+                }}
+                disabled={busy || !tvReady}
+              >
+                <Users className="size-5" />
+                Watch party
+              </Button>
+            ) : null}
           </div>
         )}
         <p className="mb-4 text-sm leading-relaxed">{details.overview}</p>

@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { GetAppLanding } from '@/components/GetAppDialog';
 import { WatchPlayer } from '@/components/WatchPlayer';
 import { Button } from '@/components/ui/button';
+import { WEB_PLAYER_ENABLED } from '@/lib/flags';
 import { partyContentFromTitle, type PartyContent } from '@/lib/party';
 import { tmdb } from '@/lib/tmdb';
 
 export const WatchSoloPage = () => {
+  if (!WEB_PLAYER_ENABLED) return <GetAppLanding />;
+  return <WatchSoloPlayer />;
+};
+
+const WatchSoloPlayer = () => {
   const { id, season, episode } = useParams();
   const isTv = season != null && episode != null;
   const mediaType = isTv ? 'tv' : 'movie';
