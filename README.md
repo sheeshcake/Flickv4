@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/Expo-57-000020?style=flat-square&logo=expo" alt="Expo" />
     <img src="https://img.shields.io/badge/React%20Native-0.86-61DAFB?style=flat-square&logo=react" alt="React Native" />
     <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
-    <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android%20%7C%20TV-lightgrey?style=flat-square" alt="Platform" />
+    <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android%20%7C%20Mac%20%7C%20TV-lightgrey?style=flat-square" alt="Platform" />
     <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License" />
   </p>
 </div>
@@ -102,7 +102,7 @@ Official GitHub builds already point at the public party server. If you compile 
 
 ## Installation
 
-Grab the latest **APK** (Android) or **IPA** (iOS) from [GitHub Releases](https://github.com/sheeshcake/Flickv4/releases). Files are named `Flick-<version>.apk` and `Flick-<version>.ipa`.
+Grab the latest **APK** (Android), **IPA** (iOS), or **DMG** (Mac) from [GitHub Releases](https://github.com/sheeshcake/Flickv4/releases). Files are named `Flick-<version>.apk`, `Flick-<version>.ipa`, and `Flick-<version>.dmg`.
 
 ### Android
 
@@ -149,6 +149,17 @@ Apple’s free developer signing expires after **7 days**. Before Flick (or Side
 3. In SideStore → **My Apps**, tap the day counter next to **Flick** (and SideStore if it is low).
 
 A free Apple Account can keep **3 apps** installed at once, including SideStore, and can register at most **10 App IDs per week**. If install fails, SideStore’s [common issues](https://docs.sidestore.io/docs/troubleshooting/common-issues) and [error codes](https://docs.sidestore.io/docs/troubleshooting/error-codes) are the first place to look.
+
+### macOS (DMG)
+
+Flick for Mac is a **Mac Catalyst** build. It is not on the Mac App Store.
+
+1. Download `Flick-<version>.dmg` from the latest release.
+2. Open the DMG and drag **Flick** into **Applications**.
+3. Eject the disk image.
+4. First launch: in Applications, Control-click Flick → **Open**. If macOS still blocks it: **System Settings → Privacy & Security → Open Anyway**.
+
+Requires **macOS 13.4** or later. To update, download the newer DMG and replace Flick in Applications.
 
 ---
 

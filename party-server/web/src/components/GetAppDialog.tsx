@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Apple,
   Download,
+  Laptop,
   Monitor,
   Smartphone,
   Tv,
@@ -15,6 +16,7 @@ interface AppRelease {
   androidApk: string | null;
   appVersion: string | null;
   iosIpa: string | null;
+  macosDmg: string | null;
   releaseUrl: string;
   version: string | null;
 }
@@ -23,7 +25,7 @@ const FALLBACK_RELEASE =
   'https://github.com/sheeshcake/Flickv4/releases/latest';
 
 type PlatformKind = 'download' | 'web' | 'unavailable';
-type DownloadAsset = 'apk' | 'ipa';
+type DownloadAsset = 'apk' | 'ipa' | 'dmg';
 
 const platforms: {
   id: string;
@@ -62,18 +64,17 @@ const platforms: {
     name: 'Windows',
     detail: WEB_PLAYER_ENABLED
       ? 'Use the web app in your browser'
-      : 'Web playback is temporarily unavailable — install iOS or Android',
+      : 'Web playback is temporarily unavailable — install iOS, Android, or Mac',
     kind: WEB_PLAYER_ENABLED ? 'web' : 'unavailable',
     icon: Monitor,
   },
   {
     id: 'mac',
     name: 'Mac',
-    detail: WEB_PLAYER_ENABLED
-      ? 'Use the web app in your browser'
-      : 'Web playback is temporarily unavailable — install iOS or Android',
-    kind: WEB_PLAYER_ENABLED ? 'web' : 'unavailable',
-    icon: Apple,
+    detail: 'Download the DMG (Mac Catalyst)',
+    kind: 'download',
+    asset: 'dmg',
+    icon: Laptop,
   },
 ];
 
@@ -81,6 +82,7 @@ const fallbackRelease = (): AppRelease => ({
   androidApk: null,
   appVersion: null,
   iosIpa: null,
+  macosDmg: null,
   releaseUrl: FALLBACK_RELEASE,
   version: null,
 });
@@ -99,6 +101,7 @@ const useAppRelease = (enabled = true) => {
             androidApk: data.androidApk ?? null,
             appVersion: data.appVersion ?? null,
             iosIpa: data.iosIpa ?? null,
+            macosDmg: data.macosDmg ?? null,
             releaseUrl: data.releaseUrl || FALLBACK_RELEASE,
             version: data.version ?? null,
           });
@@ -249,16 +252,53 @@ const IosInstallSteps = () => (
   </section>
 );
 
+const MacInstallSteps = () => (
+  <section className="mt-5 space-y-4 border-t border-border pt-4 text-sm">
+    <div>
+      <h3 className="font-semibold">How to install on Mac</h3>
+      <p className="mt-1 text-muted-foreground">
+        Flick for Mac is a Mac Catalyst app, not on the Mac App Store. Open the
+        DMG and drag Flick into Applications. Gatekeeper may block the first
+        launch because the build is ad-hoc signed.
+      </p>
+    </div>
+    <div>
+      <p className="font-medium">Install</p>
+      <ol className="mt-2 list-decimal space-y-2 pl-5 text-muted-foreground">
+        <li>Download the Flick DMG (Safari will save it to Downloads).</li>
+        <li>Open the DMG, then drag <span className="text-foreground">Flick</span> to Applications.</li>
+        <li>Eject the disk image from the Finder sidebar.</li>
+        <li>
+          First launch: in Applications, Control-click Flick → Open → Open.
+          If macOS still blocks it: System Settings → Privacy &amp; Security →
+          Open Anyway.
+        </li>
+      </ol>
+      <p className="mt-2 text-muted-foreground">
+        Requires macOS 13.4 or later (Apple silicon or Intel). To update,
+        download the newer DMG and replace Flick in Applications.
+      </p>
+    </div>
+  </section>
+);
+
 const GetAppPanel = ({ release }: { release: AppRelease | null }) => {
   const apkHref = release?.androidApk || release?.releaseUrl || FALLBACK_RELEASE;
   const ipaHref = release?.iosIpa || release?.releaseUrl || FALLBACK_RELEASE;
+  const dmgHref = release?.macosDmg || release?.releaseUrl || FALLBACK_RELEASE;
+
+  const hrefFor = (asset?: DownloadAsset) => {
+    if (asset === 'ipa') return ipaHref;
+    if (asset === 'dmg') return dmgHref;
+    return apkHref;
+  };
 
   return (
     <>
       <ul className="space-y-2">
         {platforms.map((platform) => {
           const Icon = platform.icon;
-          const href = platform.asset === 'ipa' ? ipaHref : apkHref;
+          const href = hrefFor(platform.asset);
           return (
             <li key={platform.id}>
               <div className="flex items-center gap-3 rounded-xl border border-border bg-background/40 p-3">
@@ -293,6 +333,7 @@ const GetAppPanel = ({ release }: { release: AppRelease | null }) => {
         })}
       </ul>
       <IosInstallSteps />
+      <MacInstallSteps />
     </>
   );
 };
@@ -345,9 +386,9 @@ export const GetAppLanding = () => {
       <h1 className="text-3xl font-bold">Web playback is temporarily unavailable</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         {release?.version
-          ? `Download Flick ${release.version} for iOS or Android to keep watching.`
-          : 'Download Flick for iOS or Android to keep watching.'}{' '}
-        iOS uses SideStore to install the IPA.
+          ? `Download Flick ${release.version} for iOS, Android, or Mac to keep watching.`
+          : 'Download Flick for iOS, Android, or Mac to keep watching.'}{' '}
+        iOS uses SideStore to install the IPA. Mac uses the DMG.
       </p>
       <div className="mt-6">
         <GetAppPanel release={release} />

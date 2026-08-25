@@ -73,7 +73,7 @@ export const JoinGate = ({ initialCode, error, onJoin }: JoinGateProps) => {
       <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
         {WEB_PLAYER_ENABLED
           ? 'Browse titles and host a party, or join with a code. Video plays in this browser when Streamflix (or the host’s stream) allows it.'
-          : 'Browse titles on the web, or download the app to watch. Web playback is temporarily unavailable — join a party from the iOS or Android app.'}
+          : 'Browse titles on the web, or download the app to watch. Web playback is temporarily unavailable — join a party from the iOS, Android, or Mac app.'}
       </p>
       <div className="mb-6 flex flex-col gap-2">
         <Button asChild variant="outline" className="w-full">
