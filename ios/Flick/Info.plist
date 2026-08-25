@@ -38,6 +38,8 @@
 	<string>12.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
@@ -47,6 +49,12 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Flick uses the camera so you can join a watch-party video call.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Flick uses Desktop so you can open local video files.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Flick uses Documents to store and open downloaded videos.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Flick uses Downloads so you can save and open local files.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Flick uses the microphone so you can join a watch-party video call.</string>
 	<key>RCTNewArchEnabled</key>

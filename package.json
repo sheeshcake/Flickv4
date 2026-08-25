@@ -67,6 +67,8 @@
     "android:apk": "expo run:android --variant release",
     "ios:ipa": "bash scripts/build-ios-ipa.sh",
     "ios": "expo run:ios",
+    "macos": "bash macos/build.sh",
+    "macos:dmg": "bash macos/package-dmg.sh",
     "web": "expo start --web",
     "postinstall": "patch-package"
   },
