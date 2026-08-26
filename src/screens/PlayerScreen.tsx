@@ -35,6 +35,12 @@ import {
   type StreamflixSubtitle,
 } from '@/src/services/StreamflixService';
 import {
+  FLIXQUEST_SERVER_PREFIX,
+  FlixQuestService,
+  friendlyScraperError,
+  isFlixQuestServer,
+} from '@/src/services/FlixQuestService';
+import {
   getReleaseDate,
   getTitle,
   isMovie,
@@ -188,7 +194,7 @@ export const PlayerScreen = ({
       if (role !== 'host') return;
       // Only the scraped media URL — never the embed/page link.
       // Streamflix Vidrock URLs are sometimes extensionless (type from API).
-      if (isStreamflixServer(activeServer)) {
+      if (isStreamflixServer(activeServer) || isFlixQuestServer(activeServer)) {
         if (!/^https?:\/\//i.test(url)) return;
       } else if (!isPartyStreamUri(url)) {
         return;
@@ -399,7 +405,8 @@ export const PlayerScreen = ({
   }, [tryNextServer, effectiveResumeFrom]);
 
   const usingStreamflix = isStreamflixServer(activeServer);
-  const usingRestResolver = usingStreamflix;
+  const usingFlixquest = isFlixQuestServer(activeServer);
+  const usingRestResolver = usingStreamflix || usingFlixquest;
   const [streamflixSources, setStreamflixSources] = useState<StreamflixSource[]>(
     [],
   );
@@ -462,21 +469,29 @@ export const PlayerScreen = ({
   useEffect(() => {
     if (playingDownloaded) return;
     if (resolvedRef.current || source || noSource || waitingForHost) return;
-    if (!usingStreamflix) return;
+    if (!usingRestResolver) return;
     let cancelled = false;
     const run = async () => {
       try {
-        // eslint-disable-next-line no-console
-        console.log('[Streamflix]', 'player list', type, item.id, season, episode);
-        const listed = await StreamflixService.listSources({
-          tmdbId: item.id,
-          mediaType: type,
-          season,
-          episode,
-          title: getTitle(item),
-          year,
-          imdbId,
-        });
+        const listed = usingFlixquest
+          ? await FlixQuestService.listSources({
+              providerId:
+                activeServer.scraperProviderId ||
+                activeServer.id.replace(FLIXQUEST_SERVER_PREFIX, ''),
+              tmdbId: item.id,
+              mediaType: type,
+              season,
+              episode,
+            })
+          : await StreamflixService.listSources({
+              tmdbId: item.id,
+              mediaType: type,
+              season,
+              episode,
+              title: getTitle(item),
+              year,
+              imdbId,
+            });
         if (cancelled || resolvedRef.current) return;
         setStreamflixSources(listed);
         if (!listed.length) {
@@ -492,7 +507,9 @@ export const PlayerScreen = ({
         for (const candidate of order) {
           if (cancelled || resolvedRef.current) return;
           setTryingStreamflixSource({ id: candidate.id, name: candidate.name });
-          const resolved = await StreamflixService.resolveSource(candidate);
+          const resolved = usingFlixquest
+            ? candidate
+            : await StreamflixService.resolveSource(candidate);
           if (cancelled || resolvedRef.current) return;
           if (resolved?.uri) {
             setTryingStreamflixSource(null);
@@ -505,9 +522,9 @@ export const PlayerScreen = ({
       } catch (error) {
         // eslint-disable-next-line no-console
         console.log(
-          '[Streamflix]',
+          usingFlixquest ? '[FlixQuest]' : '[Streamflix]',
           'player: error',
-          error instanceof Error ? error.message : error,
+          friendlyScraperError(error),
         );
         if (!cancelled && !resolvedRef.current) onScrapeError();
       }
@@ -521,7 +538,8 @@ export const PlayerScreen = ({
     source,
     noSource,
     waitingForHost,
-    usingStreamflix,
+    usingRestResolver,
+    usingFlixquest,
     activeServer,
     item,
     type,
@@ -553,7 +571,7 @@ export const PlayerScreen = ({
   // error handler. Also fails over, preserving how far playback got.
   const handlePlaybackFailed = useCallback(
     (resumeFromSeconds: number) => {
-      if (usingStreamflix && activeStreamflixSourceId) {
+      if (usingRestResolver && activeStreamflixSourceId) {
         markTriedStreamflix(activeStreamflixSourceId);
         const next = streamflixSources.find(
           (s) => !triedStreamflixIdsRef.current.has(s.id),
@@ -568,7 +586,7 @@ export const PlayerScreen = ({
       tryNextServer(resumeFromSeconds);
     },
     [
-      usingStreamflix,
+      usingRestResolver,
       activeStreamflixSourceId,
       streamflixSources,
       handleSelectStreamflixSource,
@@ -776,10 +794,10 @@ export const PlayerScreen = ({
           type === 'tv' && role !== 'guest' ? handleSelectEpisode : undefined
         }
         onSelectServer={playingDownloaded ? undefined : handleSelectServer}
-        streamflixSources={usingStreamflix ? streamflixSources : []}
+        streamflixSources={usingRestResolver ? streamflixSources : []}
         activeStreamflixSourceId={activeStreamflixSourceId}
         onSelectStreamflixSource={
-          playingDownloaded || !usingStreamflix
+          playingDownloaded || !usingRestResolver
             ? undefined
             : handleSelectStreamflixSource
         }
@@ -910,11 +928,11 @@ export const PlayerScreen = ({
           onSelectServer={(id) =>
             handleSelectServer(id, effectiveResumeFrom ?? 0)
           }
-          streamflixSources={usingStreamflix ? streamflixSources : []}
+          streamflixSources={usingRestResolver ? streamflixSources : []}
           tryingStreamflixSourceId={tryingStreamflixSource?.id ?? null}
           triedStreamflixIds={triedStreamflixIds}
           onSelectStreamflixSource={
-            usingStreamflix
+            usingRestResolver
               ? (id) =>
                   handleSelectStreamflixSource(id, effectiveResumeFrom ?? 0)
               : undefined

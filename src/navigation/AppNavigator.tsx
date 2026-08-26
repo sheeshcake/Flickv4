@@ -8,6 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SplashScreen } from '@/src/screens/SplashScreen';
 import { DetailScreen } from '@/src/screens/DetailScreen';
 import { PlayerScreen } from '@/src/screens/PlayerScreen';
+import { LivePlayerScreen } from '@/src/screens/LivePlayerScreen';
 import { ViewMoreScreen } from '@/src/screens/ViewMoreScreen';
 import { SubtitleSettingsScreen } from '@/src/screens/SubtitleSettingsScreen';
 import { ServerSettingsScreen } from '@/src/screens/ServerSettingsScreen';
@@ -114,6 +115,11 @@ export const AppNavigator = () => {
         <Stack.Screen
           name="Player"
           component={PlayerScreen}
+          options={{ animation: 'fade', orientation: playerOrientation }}
+        />
+        <Stack.Screen
+          name="LivePlayer"
+          component={LivePlayerScreen}
           options={{ animation: 'fade', orientation: playerOrientation }}
         />
       </Stack.Navigator>

@@ -10,6 +10,12 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type ServerResolver } from '@/src/services/playbackHeaders';
 import { STREAMFLIX_SERVER_ID } from '@/src/services/StreamflixService';
+import { FLIXQUEST_CONFIG } from '@/src/config/env';
+import {
+  FlixQuestService,
+  flixQuestServerId,
+  isFlixQuestServer,
+} from '@/src/services/FlixQuestService';
 
 const STORAGE_KEY = 'flick.servers';
 
@@ -62,6 +68,11 @@ export interface PlaybackServer {
    * Debug video player toggle, which only controls WebView visibility.
    */
   scraperTimeoutSeconds?: number;
+  /**
+   * FlixQuest scraper provider id (`cinejoy`, `showbox`, …) when
+   * `resolver` is `flixquest`. Used as `?provider=` on stream-movie/tv.
+   */
+  scraperProviderId?: string;
 }
 
 export interface AddServerOptions {
@@ -149,6 +160,7 @@ const mapRemoteServer = (s: RemoteServerJson): PlaybackServer => {
       ? { scraperTimeoutSeconds }
       : {}),
     ...(s.resolver === 'streamflix' ? { resolver: 'streamflix' as const } : {}),
+    ...(s.resolver === 'flixquest' ? { resolver: 'flixquest' as const } : {}),
   };
 };
 
@@ -163,15 +175,27 @@ export const STREAMFLIX_SERVER: PlaybackServer = {
 const isLegacyMoviebox = (server: { id?: string; resolver?: string }) =>
   server.id === 'moviebox' || server.resolver === 'moviebox';
 
-const withLocalResolvers = (list: PlaybackServer[]): PlaybackServer[] => [
-  STREAMFLIX_SERVER,
-  ...list.filter(
+const withLocalResolvers = (
+  list: PlaybackServer[],
+  flixQuestServers: PlaybackServer[],
+): PlaybackServer[] => {
+  const webview = list.filter(
     (s) =>
       s.id !== STREAMFLIX_SERVER.id &&
       !isLegacyMoviebox(s) &&
-      s.resolver !== 'streamflix',
-  ),
-];
+      s.resolver !== 'streamflix' &&
+      !isFlixQuestServer(s),
+  );
+  const takenNames = new Set([
+    STREAMFLIX_SERVER.name,
+    ...webview.map((s) => s.name),
+  ]);
+  const namedFq = flixQuestServers.map((s) => ({
+    ...s,
+    name: takenNames.has(s.name) ? `${s.name} API` : s.name,
+  }));
+  return [STREAMFLIX_SERVER, ...namedFq, ...webview];
+};
 
 /**
  * Last-resort fallback for `activeServer` — only ever surfaces on a
@@ -233,6 +257,9 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
   // of a bundled file, so they resolve on their own async timeline (cache,
   // then network) separate from the custom-servers/activeId storage below.
   const [builtInServers, setBuiltInServers] = useState<PlaybackServer[]>([]);
+  const [flixQuestServers, setFlixQuestServers] = useState<PlaybackServer[]>(
+    [],
+  );
   const [builtInAttempted, setBuiltInAttempted] = useState(false);
 
   const [customServers, setCustomServers] = useState<PlaybackServer[]>([]);
@@ -280,8 +307,29 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       /* keep cache / empty */
     } finally {
       clearTimeout(timeout);
-      setBuiltInAttempted(true);
     }
+
+    if (FLIXQUEST_CONFIG.enabled) {
+      try {
+        const providers = await FlixQuestService.listProviders();
+        setFlixQuestServers(
+          providers.map((p) => ({
+            id: flixQuestServerId(p.id),
+            name: (p.alias || p.name).trim() || p.id,
+            url: FLIXQUEST_CONFIG.url,
+            builtIn: true,
+            resolver: 'flixquest' as const,
+            scraperProviderId: p.id,
+          })),
+        );
+      } catch {
+        /* keep previous FlixQuest list */
+      }
+    } else {
+      setFlixQuestServers([]);
+    }
+
+    setBuiltInAttempted(true);
   }, []);
 
   useEffect(() => {
@@ -426,8 +474,8 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const servers = useMemo(
-    () => [...withLocalResolvers(builtInServers), ...customServers],
-    [builtInServers, customServers],
+    () => [...withLocalResolvers(builtInServers, flixQuestServers), ...customServers],
+    [builtInServers, flixQuestServers, customServers],
   );
 
   const activeServer = useMemo(

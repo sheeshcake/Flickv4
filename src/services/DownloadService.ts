@@ -258,10 +258,12 @@ const buildHeaders = (
 ): Record<string, string> =>
   resolver === 'streamflix'
     ? { ...STREAMFLIX_PLAYBACK_HEADERS }
-    : {
-        Referer: `${serverUrl}/`,
-        Origin: originOf(serverUrl),
-      };
+    : resolver === 'flixquest'
+      ? {}
+      : {
+          Referer: `${serverUrl}/`,
+          Origin: originOf(serverUrl),
+        };
 
 // ---------------------------------------------------------------------------
 // Service

@@ -10,6 +10,10 @@ import {
   type ResolvedStream,
 } from '@/src/services/DownloadService';
 import { StreamflixService } from '@/src/services/StreamflixService';
+import {
+  FLIXQUEST_SERVER_PREFIX,
+  FlixQuestService,
+} from '@/src/services/FlixQuestService';
 
 /**
  * Off-screen harness that lets `DownloadService` resolve a stream URL by
@@ -41,6 +45,21 @@ export const DownloadResolverHost = () => {
           episode: req.episode,
         }).then((resolved) => {
           if (!resolved) throw new Error('Streamflix: no stream found');
+          return { videoUrl: resolved.uri, isWebM: false };
+        });
+      }
+      if (req.server.resolver === 'flixquest') {
+        return FlixQuestService.resolve({
+          providerId:
+            req.server.scraperProviderId ||
+            req.server.id.replace(FLIXQUEST_SERVER_PREFIX, ''),
+          tmdbId: req.tmdbId,
+          mediaType: req.type,
+          season: req.season,
+          episode: req.episode,
+          full: true,
+        }).then((resolved) => {
+          if (!resolved) throw new Error('FlixQuest: no stream found');
           return { videoUrl: resolved.uri, isWebM: false };
         });
       }

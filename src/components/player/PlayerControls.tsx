@@ -44,6 +44,8 @@ interface PlayerControlsProps {
   onScrubEnd: (value: number) => void;
   /** When provided, shows an Episodes button (TV only). */
   onOpenEpisodes?: () => void;
+  /** Live TV: hide seek, scrub, and duration (no DVR). */
+  isLive?: boolean;
   /** When provided, shows the consolidated Settings button (quality,
    * aspect, speed, subtitles — see `PlayerSettingsDrawer`). */
   onOpenSettings?: () => void;
@@ -104,6 +106,7 @@ export const PlayerControls = ({
   onScrub,
   onScrubEnd,
   onOpenEpisodes,
+  isLive,
   onOpenSettings,
   settingsActive,
   onEnterPip,
@@ -221,13 +224,17 @@ export const PlayerControls = ({
         pointerEvents="box-none"
       >
         <HStack space="4xl" className="items-center">
-          <ControlButton icon={RotateCcw} onPress={() => onSeekBy(-10)} />
+          {isLive ? null : (
+            <ControlButton icon={RotateCcw} onPress={() => onSeekBy(-10)} />
+          )}
           <ControlButton
             icon={playing ? Pause : Play}
             onPress={onTogglePlay}
             hasTVPreferredFocus
           />
-          <ControlButton icon={RotateCw} onPress={() => onSeekBy(10)} />
+          {isLive ? null : (
+            <ControlButton icon={RotateCw} onPress={() => onSeekBy(10)} />
+          )}
         </HStack>
       </Center>
 
@@ -249,6 +256,7 @@ export const PlayerControls = ({
         />
       </Box>
 
+      {isLive ? null : (
       <VStack space="sm" className="px-10 pb-1">
         {onSelectReaction ? (
           <Box className="items-center">
@@ -270,6 +278,7 @@ export const PlayerControls = ({
           </Text>
         </HStack>
       </VStack>
+      )}
     </Box>
   );
 };

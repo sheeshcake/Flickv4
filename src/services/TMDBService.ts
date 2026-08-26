@@ -214,6 +214,10 @@ class TMDBServiceImpl {
     return this.request<{ genres: Genre[] }>('/genre/movie/list');
   }
 
+  getTVGenres() {
+    return this.request<{ genres: Genre[] }>('/genre/tv/list');
+  }
+
   getMovieReleaseDates(id: number) {
     return this.request<ReleaseDatesResponse>(`/movie/${id}/release_dates`);
   }

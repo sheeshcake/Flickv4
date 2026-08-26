@@ -10,9 +10,11 @@ import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 const HIDDEN_STACK_ROUTES = new Set([
   'Player',
+  'LivePlayer',
   'Splash',
   'Home',
   'Search',
+  'Live',
   'Downloads',
   'Settings',
 ]);

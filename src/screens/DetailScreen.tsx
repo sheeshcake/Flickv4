@@ -41,12 +41,16 @@ import { useServers } from '@/src/hooks/useServers';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import { DownloadService } from '@/src/services/DownloadService';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
-import { playbackHeadersFor } from '@/src/services/playbackHeaders';
+import { playbackHeadersFor, isRestResolverServer } from '@/src/services/playbackHeaders';
 import {
   StreamflixService,
-  isStreamflixServer,
   type StreamflixSource,
 } from '@/src/services/StreamflixService';
+import {
+  FLIXQUEST_SERVER_PREFIX,
+  FlixQuestService,
+  isFlixQuestServer,
+} from '@/src/services/FlixQuestService';
 import { ensureDownloadPermissions } from '@/src/utils/downloadPermissions';
 import { getComingSoon } from '@/src/utils/comingSoon';
 import type { EpisodeDownloadState } from '@/src/components/SeasonEpisodePicker';
@@ -327,22 +331,34 @@ export const DetailScreen = ({
     const server = selectedDownloadServer;
     let cancelled = false;
 
-    if (isStreamflixServer(server)) {
+    if (isRestResolverServer(server)) {
       setResolvingDownload(true);
       setDownloadError(null);
       setDownloadVariants([]);
       setDownloadStreamUrl(null);
       setDownloadStreamKind(null);
       setDownloadStreamHeaders(null);
-      void StreamflixService.listSources({
-        tmdbId: item.id,
-        mediaType: movie ? 'movie' : 'tv',
-        season: target.season,
-        episode: target.episode,
-        title: getTitle(item),
-        year: year ? String(year) : undefined,
-        imdbId,
-      })
+      const listedPromise = isFlixQuestServer(server)
+        ? FlixQuestService.listSources({
+            providerId:
+              server.scraperProviderId ||
+              server.id.replace(FLIXQUEST_SERVER_PREFIX, ''),
+            tmdbId: item.id,
+            mediaType: movie ? 'movie' : 'tv',
+            season: target.season,
+            episode: target.episode,
+            full: true,
+          })
+        : StreamflixService.listSources({
+            tmdbId: item.id,
+            mediaType: movie ? 'movie' : 'tv',
+            season: target.season,
+            episode: target.episode,
+            title: getTitle(item),
+            year: year ? String(year) : undefined,
+            imdbId,
+          });
+      void listedPromise
         .then((listed) => {
           if (cancelled) return;
           setDownloadStreamflixSources(listed);
@@ -350,7 +366,7 @@ export const DetailScreen = ({
             listed.some((s) => s.id === prev) ? prev : (listed[0]?.id ?? null),
           );
           if (!listed.length) {
-            setDownloadError('No Streamflix sources found');
+            setDownloadError('No sources found');
             setResolvingDownload(false);
           }
         })
@@ -426,7 +442,7 @@ export const DetailScreen = ({
 
   useEffect(() => {
     if (!downloadTarget) return;
-    if (!isStreamflixServer(selectedDownloadServer)) return;
+    if (!isRestResolverServer(selectedDownloadServer)) return;
     const source = downloadStreamflixSources.find(
       (s) => s.id === downloadStreamflixSourceId,
     );
@@ -438,7 +454,10 @@ export const DetailScreen = ({
     setDownloadStreamUrl(null);
     setDownloadStreamKind(null);
     setDownloadStreamHeaders(null);
-    void StreamflixService.resolveSource(source)
+    void (isFlixQuestServer(selectedDownloadServer)
+      ? Promise.resolve(source)
+      : StreamflixService.resolveSource(source)
+    )
       .then(async (resolved) => {
         if (cancelled) return;
         if (!resolved?.uri) {
@@ -810,7 +829,7 @@ export const DetailScreen = ({
         streamflixSources={downloadStreamflixSources}
         selectedStreamflixSourceId={downloadStreamflixSourceId}
         onSelectStreamflixSource={setDownloadStreamflixSourceId}
-        showStreamflixSourcePicker={isStreamflixServer(selectedDownloadServer)}
+        showStreamflixSourcePicker={isRestResolverServer(selectedDownloadServer)}
         variants={downloadVariants}
         resolving={resolvingDownload}
         resolveError={downloadError}
@@ -1194,7 +1213,7 @@ export const DetailScreen = ({
         streamflixSources={downloadStreamflixSources}
         selectedStreamflixSourceId={downloadStreamflixSourceId}
         onSelectStreamflixSource={setDownloadStreamflixSourceId}
-        showStreamflixSourcePicker={isStreamflixServer(selectedDownloadServer)}
+        showStreamflixSourcePicker={isRestResolverServer(selectedDownloadServer)}
         variants={downloadVariants}
         resolving={resolvingDownload}
         resolveError={downloadError}

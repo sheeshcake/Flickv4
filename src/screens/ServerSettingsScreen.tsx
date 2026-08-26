@@ -42,6 +42,12 @@ import {
   StreamflixService,
   isStreamflixServer,
 } from '@/src/services/StreamflixService';
+import {
+  FLIXQUEST_SERVER_PREFIX,
+  FlixQuestService,
+  isFlixQuestServer,
+} from '@/src/services/FlixQuestService';
+import { isRestResolverServer } from '@/src/services/playbackHeaders';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 // A well-known, always-available TMDB movie used purely as a probe when
@@ -138,11 +144,20 @@ export const ServerSettingsScreen = () => {
       if (testingId) return;
       setTestingId(id);
       setTestTarget(server);
-      if (isStreamflixServer(server)) {
-        void StreamflixService.resolve({
-          tmdbId: TEST_TMDB_ID,
-          mediaType: 'movie',
-        })
+      if (isStreamflixServer(server) || isFlixQuestServer(server)) {
+        const probe = isFlixQuestServer(server)
+          ? FlixQuestService.resolve({
+              providerId:
+                server.scraperProviderId ||
+                server.id.replace(FLIXQUEST_SERVER_PREFIX, ''),
+              tmdbId: TEST_TMDB_ID,
+              mediaType: 'movie',
+            })
+          : StreamflixService.resolve({
+              tmdbId: TEST_TMDB_ID,
+              mediaType: 'movie',
+            });
+        void probe
           .then((resolved) => {
             finishTest();
             toast.show({
@@ -162,7 +177,7 @@ export const ServerSettingsScreen = () => {
                   <ToastDescription>
                     {resolved
                       ? 'Resolved a test stream successfully.'
-                      : 'Streamflix: no stream found'}
+                      : 'No stream found'}
                   </ToastDescription>
                 </Toast>
               ),
@@ -177,7 +192,7 @@ export const ServerSettingsScreen = () => {
                 <Toast nativeID={toastId} action="error" variant="solid">
                   <ToastTitle>{`${server.name} test failed`}</ToastTitle>
                   <ToastDescription>
-                    {e instanceof Error ? e.message : 'Streamflix test failed'}
+                    {e instanceof Error ? e.message : 'Test failed'}
                   </ToastDescription>
                 </Toast>
               ),
@@ -271,7 +286,7 @@ export const ServerSettingsScreen = () => {
           (Testing an in-progress add/edit draft has its own copy of this in
           `ServerFormModal`.) */}
       {testTarget &&
-        !isStreamflixServer(testTarget) && (
+        !isRestResolverServer(testTarget) && (
         <Box className="absolute bottom-6 right-4 h-56 w-40 overflow-hidden rounded-lg border-2 border-primary bg-black">
           <WebViewScraper
             server={testTarget}

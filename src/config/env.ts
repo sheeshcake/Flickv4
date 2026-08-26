@@ -42,6 +42,12 @@ export const WATCH_PARTY_CONFIG = {
   enabled: Boolean(process.env.EXPO_PUBLIC_WATCH_PARTY_URL?.trim()),
 } as const;
 
+/** FlixQuest scraper API (VOD providers + DLHD live TV). Empty = feature off. */
+export const FLIXQUEST_CONFIG = {
+  url: process.env.EXPO_PUBLIC_FLIXQUEST_API_URL?.trim() || '',
+  enabled: Boolean(process.env.EXPO_PUBLIC_FLIXQUEST_API_URL?.trim()),
+} as const;
+
 export const UPDATE_CONFIG = {
   OWNER: process.env.EXPO_PUBLIC_UPDATE_REPO_OWNER || 'sheeshcake',
   REPO: process.env.EXPO_PUBLIC_UPDATE_REPO_NAME || 'Flickv4',
