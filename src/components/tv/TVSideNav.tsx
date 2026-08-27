@@ -12,13 +12,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { VStack } from '@/components/ui/vstack';
-import { Image } from '@/components/ui/image';
+import { Box } from '@/components/ui/box';
 import { Icon } from '@/components/ui/icon';
+import { FlickLogo } from '@/src/components/FlickLogo';
 import { Text } from '@/components/ui/text';
 import { HStack } from '@/components/ui/hstack';
 import { Focusable } from '@/src/components/Focusable';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
-import { FLIXQUEST_CONFIG } from '@/src/config/env';
+import { LIVE_TV_CONFIG } from '@/src/config/env';
 
 export type TVTab = 'Home' | 'Search' | 'Live' | 'Downloads' | 'Settings';
 
@@ -36,7 +37,7 @@ export interface TVSideNavHandle {
 const TABS: { key: TVTab; label: string; icon: typeof HomeIcon }[] = [
   { key: 'Home', label: 'Home', icon: HomeIcon },
   { key: 'Search', label: 'Search', icon: SearchIcon },
-  ...(FLIXQUEST_CONFIG.enabled
+  ...(LIVE_TV_CONFIG.enabled
     ? [{ key: 'Live' as const, label: 'Live', icon: LiveIcon }]
     : []),
   { key: 'Downloads', label: 'Downloads', icon: DownloadIcon },
@@ -90,12 +91,12 @@ export const TVSideNav = forwardRef<TVSideNavHandle, TVSideNavProps>(
         }`}
         style={animatedStyle}
       >
-        <Image
-          source={require('@/assets/images/logo-full.png')}
-          alt="Flick"
-          resizeMode="contain"
-          className={collapsed ? 'mb-8 h-10 w-10' : 'mb-8 h-16 w-20'}
-        />
+        <Box className={collapsed ? 'mb-8 h-10 w-10' : 'mb-8 h-16 w-20'}>
+          <FlickLogo
+            width={collapsed ? 40 : 80}
+            height={collapsed ? 40 : 64}
+          />
+        </Box>
         {TABS.map(({ key, label, icon }, index) => {
           const active = key === activeTab;
           return (

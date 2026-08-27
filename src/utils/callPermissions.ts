@@ -1,9 +1,21 @@
 import { Alert, Linking, PermissionsAndroid, Platform } from 'react-native';
 import { permissions } from 'react-native-webrtc';
+import { isMacCatalyst } from '@/src/utils/tv';
 
 const NAMES = ['camera', 'microphone'] as const;
 
+const MAC_CAMERA_SETTINGS_URL =
+  'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Camera';
+
 const openSettings = () => {
+  if (isMacCatalyst) {
+    Linking.openURL(MAC_CAMERA_SETTINGS_URL).catch(() => {
+      Linking.openSettings().catch(() => {
+        /* noop */
+      });
+    });
+    return;
+  }
   Linking.openSettings().catch(() => {
     /* noop */
   });

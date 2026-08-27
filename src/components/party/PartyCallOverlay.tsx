@@ -7,7 +7,8 @@ import { Text } from '@/components/ui/text';
 import { Icon } from '@/components/ui/icon';
 import { Focusable } from '@/src/components/Focusable';
 import type { PartyRtcRemote } from '@/src/hooks/usePartyRtc';
-import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
+import { FlickMacRtcView } from '@/src/native/FlickMacRtc';
+import { isMacCatalyst, TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 const SPEAK_HOLD_MS = 1000;
 const SPEAK_THRESHOLD = 0.04;
@@ -118,7 +119,15 @@ export const PartyCallOverlay = ({
           className="text-foreground"
         />
       </Focusable>
-      {hidden ? null : (
+      {isMacCatalyst && FlickMacRtcView ? (
+        <FlickMacRtcView
+          style={{
+            width: hidden ? 1 : 80,
+            height: hidden ? 1 : Math.min(280, 112 + remotes.length * 120),
+            opacity: hidden ? 0 : 1,
+          }}
+        />
+      ) : hidden ? null : (
         <ScrollView
           style={{ maxHeight: 280 }}
           contentContainerClassName="items-end gap-2"

@@ -91,7 +91,7 @@ export const LivePlayerScreen = ({
     if (!stream?.url) return null;
     return {
       uri: stream.url,
-      type: 'm3u8',
+      type: /\.mpd(\?|$)/i.test(stream.url) ? 'mpd' : 'm3u8',
       headers: stream.headers,
     };
   }, [stream]);

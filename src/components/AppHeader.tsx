@@ -1,7 +1,7 @@
 import { HStack } from '@/components/ui/hstack';
-import { Image } from '@/components/ui/image';
 import { Box } from '@/components/ui/box';
 import { Text } from '@/components/ui/text';
+import { FlickLogo } from '@/src/components/FlickLogo';
 import type { ReactNode } from 'react';
 import Animated, {
   Extrapolation,
@@ -33,7 +33,6 @@ interface AppHeaderProps {
 }
 
 const AnimatedBox = Animated.createAnimatedComponent(Box);
-const AnimatedImage = Animated.createAnimatedComponent(Image);
 const AnimatedText = Animated.createAnimatedComponent(Text);
 
 // Logo starts slightly oversized (1.3x) while unscrolled/over the hero, and
@@ -83,13 +82,9 @@ export const AppHeader = ({
         className="items-center space-between pt-3 pb-1"
         style={{ paddingHorizontal }}
       >
-        <AnimatedImage
-          source={require('@/assets/images/logo-full.png')}
-          alt="Flick"
-          resizeMode="contain"
-          className="h-12 w-20"
-          style={logoStyle}
-        />
+        <Animated.View style={[{ width: 64, height: 32 }, logoStyle]}>
+          <FlickLogo width={64} height={32} />
+        </Animated.View>
         <HStack space="sm" className="items-center">
           <AnimatedText
             size="xs"

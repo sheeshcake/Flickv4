@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { FLIXQUEST_CONFIG } from '@/src/config/env';
+import { FLIXQUEST_CONFIG, LIVE_TV_M3U_CONFIG } from '@/src/config/env';
 
 const TAG = '[LiveTV]';
 // eslint-disable-next-line no-console
@@ -28,6 +28,8 @@ export interface LiveChannel {
   letter?: string;
   watchUrl?: string;
   playerUrl?: string;
+  /** Direct HLS/DASH URL for M3U playlist channels (`m3u:` ids). */
+  streamUrl?: string;
   categories: string[];
   eventTitles: string[];
   nowPlaying?: string;
@@ -131,6 +133,7 @@ const parseChannel = (raw: unknown): LiveChannel | null => {
     letter: typeof json.letter === 'string' ? json.letter : undefined,
     watchUrl: typeof json.watchUrl === 'string' ? json.watchUrl : undefined,
     playerUrl: typeof json.playerUrl === 'string' ? json.playerUrl : undefined,
+    streamUrl: typeof json.streamUrl === 'string' ? json.streamUrl : undefined,
     categories: strList(json.categories),
     eventTitles: strList(json.eventTitles),
     nowPlaying: typeof json.nowPlaying === 'string' ? json.nowPlaying : undefined,
@@ -425,6 +428,109 @@ const mergeCatalog = (
   };
 };
 
+const M3U_CATEGORY = 'PH';
+const M3U_ID_PREFIX = 'm3u:';
+const EXTINF_RE = /^#E(?:XT|CT)INF:-?\d+(?:\s+[^,]*)?,\s*(.+?)\s*$/i;
+
+const slugify = (name: string): string => {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || 'channel';
+};
+
+const parseM3uPlaylist = (text: string): LiveChannel[] => {
+  const lines = text.split(/\r?\n/);
+  const channels: LiveChannel[] = [];
+  const usedIds = new Set<string>();
+  let pendingName: string | null = null;
+
+  const uniqueId = (name: string): string => {
+    const base = `${M3U_ID_PREFIX}${slugify(name)}`;
+    let id = base;
+    let n = 2;
+    while (usedIds.has(id)) {
+      id = `${base}-${n}`;
+      n += 1;
+    }
+    usedIds.add(id);
+    return id;
+  };
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const inf = line.match(EXTINF_RE);
+    if (inf) {
+      pendingName = inf[1].trim();
+      continue;
+    }
+    if (line.startsWith('#')) continue;
+    if (!pendingName) continue;
+    try {
+      const href = new URL(line).href;
+      if (href.startsWith('http://') || href.startsWith('https://')) {
+        const letter = pendingName.match(/[A-Za-z0-9]/)?.[0]?.toUpperCase();
+        channels.push({
+          id: uniqueId(pendingName),
+          name: pendingName,
+          letter,
+          streamUrl: href,
+          categories: [M3U_CATEGORY],
+          eventTitles: [],
+        });
+      }
+    } catch {
+      /* skip invalid URLs */
+    }
+    pendingName = null;
+  }
+  return channels;
+};
+
+const fetchM3uChannels = async (): Promise<LiveChannel[]> => {
+  if (!LIVE_TV_M3U_CONFIG.enabled || !LIVE_TV_M3U_CONFIG.url) return [];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    log('GET', LIVE_TV_M3U_CONFIG.url);
+    const res = await fetch(LIVE_TV_M3U_CONFIG.url, {
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`Live TV playlist request failed (${res.status}).`);
+    }
+    const text = await res.text();
+    return parseM3uPlaylist(text);
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const emptyEpg = (): LiveEpg => ({ timezone: '', days: [] });
+
+const mergeM3uIntoCatalog = (
+  catalog: LiveCatalog,
+  m3uChannels: LiveChannel[],
+): LiveCatalog => {
+  if (!m3uChannels.length) return catalog;
+  const categories = [...new Set([...catalog.categories, M3U_CATEGORY])].sort(
+    (a, b) => a.localeCompare(b),
+  );
+  return {
+    ...catalog,
+    channels: [...catalog.channels, ...m3uChannels],
+    categories,
+  };
+};
+
+let lastCatalog: LiveChannel[] | null = null;
+
+const rememberCatalog = (catalog: LiveCatalog): void => {
+  lastCatalog = catalog.channels;
+};
+
 const readCachedCatalog = async (): Promise<LiveCatalog | null> => {
   try {
     const raw = await AsyncStorage.getItem(CATALOG_CACHE_KEY);
@@ -443,35 +549,94 @@ const getCatalog = async (opts?: {
 }): Promise<LiveCatalog> => {
   if (!opts?.refresh) {
     const cached = await readCachedCatalog();
-    if (cached && Date.now() - cached.fetchedAt <= CATALOG_TTL_MS) {
+    if (
+      cached &&
+      Date.now() - cached.fetchedAt <= CATALOG_TTL_MS &&
+      cached.channels.some((c) => c.id.startsWith(M3U_ID_PREFIX))
+    ) {
+      rememberCatalog(cached);
       return cached;
     }
   }
-  try {
-    const [channelsBody, epgBody] = await Promise.all([
-      getJson('/dlhd/channels', opts?.refresh ? { refresh: 'true' } : undefined),
-      getJson('/dlhd/epg', opts?.refresh ? { refresh: 'true' } : undefined),
-    ]);
-    const channels = (Array.isArray(channelsBody.channels)
-      ? channelsBody.channels
-      : []
-    )
-      .map(parseChannel)
-      .filter((c): c is LiveChannel => c != null);
-    const epg = parseEpg(epgBody);
-    const catalog = mergeCatalog(channels, epg);
-    AsyncStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(catalog)).catch(
-      () => {},
-    );
-    return catalog;
-  } catch (error) {
+
+  let flixCatalog: LiveCatalog | null = null;
+  let flixError: unknown = null;
+  let m3uChannels: LiveChannel[] = [];
+  let m3uError: unknown = null;
+
+  const flixTask = FLIXQUEST_CONFIG.enabled
+    ? (async () => {
+        const [channelsBody, epgBody] = await Promise.all([
+          getJson(
+            '/dlhd/channels',
+            opts?.refresh ? { refresh: 'true' } : undefined,
+          ),
+          getJson('/dlhd/epg', opts?.refresh ? { refresh: 'true' } : undefined),
+        ]);
+        const channels = (
+          Array.isArray(channelsBody.channels) ? channelsBody.channels : []
+        )
+          .map(parseChannel)
+          .filter((c): c is LiveChannel => c != null);
+        flixCatalog = mergeCatalog(channels, parseEpg(epgBody));
+      })().catch((error: unknown) => {
+        flixError = error;
+      })
+    : Promise.resolve();
+
+  const m3uTask = fetchM3uChannels()
+    .then((channels) => {
+      m3uChannels = channels;
+    })
+    .catch((error: unknown) => {
+      m3uError = error;
+    });
+
+  await Promise.all([flixTask, m3uTask]);
+
+  if (!flixCatalog && !m3uChannels.length) {
     const cached = await readCachedCatalog();
-    if (cached?.channels.length) return cached;
-    throw error;
+    if (cached?.channels.length) {
+      rememberCatalog(cached);
+      return cached;
+    }
+    throw flixError ?? m3uError ?? new Error('Live TV is not configured');
+  }
+
+  const catalog = mergeM3uIntoCatalog(
+    flixCatalog ?? mergeCatalog([], emptyEpg()),
+    m3uChannels,
+  );
+  rememberCatalog(catalog);
+  AsyncStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(catalog)).catch(
+    () => {},
+  );
+  return catalog;
+};
+
+const findM3uStreamUrl = async (channelId: string): Promise<string | null> => {
+  const fromMemory = lastCatalog?.find((c) => c.id === channelId)?.streamUrl;
+  if (fromMemory) return fromMemory;
+  const cached = await readCachedCatalog();
+  const fromCache = cached?.channels.find((c) => c.id === channelId)?.streamUrl;
+  if (fromCache) return fromCache;
+  try {
+    const fresh = await fetchM3uChannels();
+    lastCatalog = [...(lastCatalog ?? []), ...fresh];
+    return fresh.find((c) => c.id === channelId)?.streamUrl ?? null;
+  } catch {
+    return null;
   }
 };
 
 const getStream = async (channelId: string): Promise<LiveStream> => {
+  if (channelId.startsWith(M3U_ID_PREFIX)) {
+    const url = await findM3uStreamUrl(channelId);
+    if (!url) {
+      throw new Error('The channel returned no playable stream.');
+    }
+    return { url, headers: {}, embedUrl: '' };
+  }
   const body = await getJson(
     `/dlhd/channels/${encodeURIComponent(channelId)}/stream`,
   );

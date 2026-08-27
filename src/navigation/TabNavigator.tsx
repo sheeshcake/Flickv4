@@ -15,7 +15,7 @@ import { SearchScreen } from '@/src/screens/SearchScreen';
 import { SettingsScreen } from '@/src/screens/SettingsScreen';
 import { DownloadsScreen } from '@/src/screens/DownloadsScreen';
 import { LiveTvScreen } from '@/src/screens/LiveTvScreen';
-import { FLIXQUEST_CONFIG } from '@/src/config/env';
+import { LIVE_TV_CONFIG } from '@/src/config/env';
 
 export type MainTabParamList = {
   Home: undefined;
@@ -63,7 +63,7 @@ export const TabNavigator = () => {
           ),
         }}
       />
-      {FLIXQUEST_CONFIG.enabled ? (
+      {LIVE_TV_CONFIG.enabled ? (
         <Tab.Screen
           name="Live"
           component={LiveTvScreen}
