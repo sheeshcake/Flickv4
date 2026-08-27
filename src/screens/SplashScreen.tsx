@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Box } from '@/components/ui/box';
-import { Image } from '@/components/ui/image';
 import { Text } from '@/components/ui/text';
 import { VStack } from '@/components/ui/vstack';
 import { UpdateModal } from '@/src/components/UpdateModal';
+import {
+  FlickSwoopLogo,
+  TOTAL_MS,
+  WORD_REVEAL_MS,
+  splashLogoSize,
+} from '@/src/components/splash/FlickSwoopLogo';
 import loadingMessages from '@/src/constants/loadingMessages.json';
 import { useServers } from '@/src/hooks/useServers';
 import { useHomeData } from '@/src/hooks/useHomeData';
@@ -25,10 +26,11 @@ import {
   setSkippedVersion,
 } from '@/src/utils/updateCheckStorage';
 
-const MESSAGES = loadingMessages as string[];
-const MESSAGE_INTERVAL = 2000;
-
-const pickMessage = () => MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
+const MESSAGES: string[] = Array.isArray(loadingMessages)
+  ? loadingMessages
+  : Object.values(loadingMessages as Record<string, string>);
+const MESSAGE_INTERVAL = 1000;
+const LAND_MS = 200;
 
 /** Soft-fail update check so a network blip never blocks entering Main. */
 const checkUpdatesSafe = async (): Promise<UpdateInfo | null> => {
@@ -39,20 +41,26 @@ const checkUpdatesSafe = async (): Promise<UpdateInfo | null> => {
   }
 };
 
-const AnimatedBox = Animated.createAnimatedComponent(Box);
-
 export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => {
-  const scale = useSharedValue(0.85);
-  const opacity = useSharedValue(0);
-  const [message, setMessage] = useState(pickMessage);
-  const initialMessage = useMemo(() => message, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const { width: windowWidth } = useWindowDimensions();
+  const { width: logoWidth, height: logoHeight } = splashLogoSize(windowWidth);
+  const [messageIndex, setMessageIndex] = useState(() =>
+    Math.floor(Math.random() * Math.max(MESSAGES.length, 1)),
+  );
+  const [showCopy, setShowCopy] = useState(false);
   const { refreshBuiltInServers } = useServers();
   const { prefetch } = useHomeData();
   const { loaded: regionLoaded } = useCatalogRegion();
 
   const [updaterOpen, setUpdaterOpen] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const drawDoneRef = useRef(false);
+  const bootDoneRef = useRef(false);
+  const didStartExitRef = useRef(false);
   const didNavigateRef = useRef(false);
+  const landTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bootFnsRef = useRef({ refreshBuiltInServers, prefetch });
+  bootFnsRef.current = { refreshBuiltInServers, prefetch };
 
   const goMain = useCallback(() => {
     if (didNavigateRef.current) return;
@@ -60,10 +68,31 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
     navigation.replace('Main');
   }, [navigation]);
 
+  const maybeExit = useCallback(() => {
+    if (didStartExitRef.current) return;
+    if (!drawDoneRef.current || !bootDoneRef.current) return;
+    didStartExitRef.current = true;
+    landTimerRef.current = setTimeout(goMain, LAND_MS);
+  }, [goMain]);
+  const maybeExitRef = useRef(maybeExit);
+  maybeExitRef.current = maybeExit;
+
+  const markDrawDone = useCallback(() => {
+    drawDoneRef.current = true;
+    setShowCopy(true);
+    maybeExitRef.current();
+  }, []);
+  const markDrawDoneRef = useRef(markDrawDone);
+  markDrawDoneRef.current = markDrawDone;
+  const onIdentDrawEnd = useCallback(() => {
+    markDrawDoneRef.current();
+  }, []);
+
   const finishBoot = useCallback(async () => {
     await saveLastUpdateCheck();
-    goMain();
-  }, [goMain]);
+    bootDoneRef.current = true;
+    maybeExitRef.current();
+  }, []);
 
   const handleCloseUpdater = useCallback(() => {
     setUpdaterOpen(false);
@@ -79,24 +108,33 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
   }, [updateInfo, finishBoot]);
 
   useEffect(() => {
-    opacity.value = withTiming(1, { duration: 500 });
-    scale.value = withTiming(1, { duration: 700 });
+    const reveal = setTimeout(() => setShowCopy(true), WORD_REVEAL_MS);
+    const fallback = setTimeout(() => markDrawDoneRef.current(), TOTAL_MS + 80);
+    return () => {
+      clearTimeout(reveal);
+      clearTimeout(fallback);
+    };
+  }, []);
 
-    setMessage(initialMessage);
-    const rotator = setInterval(() => setMessage(pickMessage()), MESSAGE_INTERVAL);
+  useEffect(() => {
+    if (!showCopy || MESSAGES.length < 2) return;
+    const id = setInterval(() => {
+      setMessageIndex((i) => (i + 1) % MESSAGES.length);
+    }, MESSAGE_INTERVAL);
+    return () => clearInterval(id);
+  }, [showCopy]);
 
-    if (!regionLoaded) {
-      return () => {
-        clearInterval(rotator);
-      };
-    }
+  useEffect(() => {
+    if (!regionLoaded) return;
 
     let cancelled = false;
     void (async () => {
+      const { refreshBuiltInServers: refreshServers, prefetch: prefetchHome } =
+        bootFnsRef.current;
       const [, info] = await Promise.all([
-        refreshBuiltInServers(),
+        refreshServers(),
         checkUpdatesSafe(),
-        prefetch(),
+        prefetchHome(),
       ]);
       if (cancelled) return;
 
@@ -104,7 +142,6 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
         const skipped = await isSkippedVersion(info.latestVersion);
         if (cancelled) return;
         if (!skipped) {
-          // Newer than a previously skipped tag — clear the old skip.
           await clearSkippedVersion();
           if (cancelled) return;
           setUpdateInfo(info);
@@ -114,48 +151,53 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
       }
 
       await saveLastUpdateCheck();
-      if (!cancelled) goMain();
+      if (!cancelled) {
+        bootDoneRef.current = true;
+        maybeExitRef.current();
+      }
     })();
 
     return () => {
       cancelled = true;
-      clearInterval(rotator);
     };
-  }, [
-    navigation,
-    opacity,
-    scale,
-    initialMessage,
-    refreshBuiltInServers,
-    prefetch,
-    regionLoaded,
-    goMain,
-  ]);
+  }, [regionLoaded]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ scale: scale.value }],
-  }));
+  useEffect(
+    () => () => {
+      if (landTimerRef.current) clearTimeout(landTimerRef.current);
+    },
+    [],
+  );
+
+  const message = MESSAGES[messageIndex] ?? MESSAGES[0] ?? '';
 
   return (
-    <Box className="flex-1 items-center justify-center bg-background px-8">
-      <AnimatedBox style={animatedStyle}>
-        <VStack space="xl" className="items-center">
-          <Image
-            source={require('@/assets/images/logo-full.png')}
-            alt="Flick"
-            resizeMode="contain"
-            className="h-30 w-30"
-          />
-          <Text
-            size="sm"
-            className="min-h-10 text-center text-muted-foreground"
-          >
+    <Box className="flex-1 bg-background">
+      <Box
+        className="absolute inset-0 items-center justify-center overflow-visible"
+        pointerEvents="none"
+      >
+        <FlickSwoopLogo onDrawEnd={onIdentDrawEnd} />
+      </Box>
+
+      <VStack
+        space="xl"
+        className="flex-1 items-center justify-center"
+        pointerEvents="none"
+      >
+        <Box style={{ width: logoWidth, height: logoHeight + 20 }} />
+        <ActivityIndicator
+          size="large"
+          color="#E50914"
+          className="mt-20"
+          style={{ opacity: showCopy ? 1 : 0 }}
+        />
+        <Box className="min-h-10 px-8" style={{ opacity: showCopy ? 1 : 0 }}>
+          <Text key={messageIndex} size="xs" className="text-center text-muted-foreground">
             {message}
           </Text>
-        </VStack>
-      </AnimatedBox>
-
+        </Box>
+      </VStack>
       <UpdateModal
         visible={updaterOpen}
         onClose={handleCloseUpdater}

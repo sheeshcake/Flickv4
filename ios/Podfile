@@ -80,23 +80,32 @@ target 'Flick' do
     end
 
     # Mac Catalyst: JitsiWebRTC has no ios-macabi slice. Compile a stub
-    # module and do not link WebRTC.framework on macosx.
+    # module (AVFoundation capture + TCC permissions) and do not link
+    # WebRTC.framework on macosx.
     webrtc_stub = File.expand_path('../macos/stubs/RNWebRTCCatalystStub.m', __dir__)
+    webrtc_mac_rtc = File.expand_path('../macos/stubs/FlickMacRtc.m', __dir__)
     installer.pods_project.targets.each do |target|
       if target.name == 'react-native-webrtc'
-        already = target.source_build_phase.files.any? do |bf|
-          ref = bf.file_ref
-          ref && ref.path && File.basename(ref.path) == 'RNWebRTCCatalystStub.m'
-        end
-        unless already
-          file_ref = installer.pods_project.new_file(webrtc_stub)
-          target.source_build_phase.add_file_reference(file_ref)
+        [webrtc_stub, webrtc_mac_rtc].each do |path|
+          already = target.source_build_phase.files.any? do |bf|
+            ref = bf.file_ref
+            ref && ref.path && File.basename(ref.path) == File.basename(path)
+          end
+          unless already
+            file_ref = installer.pods_project.new_file(path)
+            target.source_build_phase.add_file_reference(file_ref)
+          end
         end
         target.build_configurations.each do |config|
           config.build_settings['EXCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]'] =
             '$(inherited) *.m *.mm'
           config.build_settings['INCLUDED_SOURCE_FILE_NAMES[sdk=macosx*]'] =
-            'RNWebRTCCatalystStub.m'
+            'RNWebRTCCatalystStub.m FlickMacRtc.m'
+          flags = config.build_settings['OTHER_LDFLAGS'] || ['$(inherited)']
+          flags = [flags] unless flags.is_a?(Array)
+          config.build_settings['OTHER_LDFLAGS'] = flags
+          config.build_settings['OTHER_LDFLAGS[sdk=macosx*]'] =
+            '$(inherited) -framework WebKit'
         end
       end
 

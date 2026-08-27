@@ -14,11 +14,14 @@ import type {
   ServerMessage,
 } from '@/src/party/protocol';
 import { ensureCallPermissions } from '@/src/utils/callPermissions';
-import { isTV } from '@/src/utils/tv';
+import { isMacCatalyst, isTV } from '@/src/utils/tv';
+import { FlickMacRtc, macRtcAvailable, macRtcEmitter } from '@/src/native/FlickMacRtc';
 
 const RTC_CONFIG = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
+
+const MAC_LOCAL_STREAM = 'mac-local';
 
 export interface PartyRtcRemote {
   id: string;
@@ -99,6 +102,8 @@ export const usePartyRtc = ({
   const roomRef = useRef(room);
   const localRef = useRef<MediaStream | null>(null);
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
+  const macPeersRef = useRef(new Set<string>());
+  const macRemoteReadyRef = useRef(new Set<string>());
   const pendingIceRef = useRef(new Map<string, PartyRtcSignalPayload[]>());
   const remoteStreamsRef = useRef(new Map<string, MediaStream>());
   const livePeerIdsRef = useRef(new Set<string>());
@@ -118,6 +123,13 @@ export const usePartyRtc = ({
   }, []);
 
   const teardownPc = useCallback((id: string) => {
+    if (macRtcAvailable) {
+      macPeersRef.current.delete(id);
+      macRemoteReadyRef.current.delete(id);
+      void FlickMacRtc?.closePeer(id).catch(() => {});
+      pendingIceRef.current.delete(id);
+      return;
+    }
     const pc = peersRef.current.get(id);
     if (pc) {
       peersRef.current.delete(id);
@@ -138,7 +150,11 @@ export const usePartyRtc = ({
   );
 
   const closeAllPeers = useCallback(() => {
-    for (const id of [...peersRef.current.keys()]) closePeer(id);
+    if (macRtcAvailable) {
+      for (const id of [...macPeersRef.current]) closePeer(id);
+    } else {
+      for (const id of [...peersRef.current.keys()]) closePeer(id);
+    }
     livePeerIdsRef.current = new Set();
     iceRestartedRef.current.clear();
     recoveringRef.current.clear();
@@ -146,8 +162,12 @@ export const usePartyRtc = ({
   }, [closePeer]);
 
   const stopLocal = useCallback(() => {
-    localRef.current?.getTracks().forEach((track) => track.stop());
-    localRef.current = null;
+    if (macRtcAvailable) {
+      void FlickMacRtc?.leave().catch(() => {});
+    } else {
+      localRef.current?.getTracks().forEach((track) => track.stop());
+      localRef.current = null;
+    }
     setLocalStreamURL(null);
   }, []);
 
@@ -160,12 +180,22 @@ export const usePartyRtc = ({
     });
   }, []);
 
-  const flushIce = useCallback(async (id: string, pc: RTCPeerConnection) => {
+  const flushIce = useCallback(async (id: string, pc?: RTCPeerConnection) => {
     const queued = pendingIceRef.current.get(id) ?? [];
     pendingIceRef.current.delete(id);
     for (const payload of queued) {
       if (!payload.candidate) continue;
       try {
+        if (macRtcAvailable) {
+          await FlickMacRtc?.addIce(
+            id,
+            payload.candidate,
+            payload.sdpMid ?? null,
+            payload.sdpMLineIndex ?? null,
+          );
+          continue;
+        }
+        if (!pc) continue;
         await pc.addIceCandidate(
           new RTCIceCandidate({
             candidate: payload.candidate,
@@ -181,6 +211,10 @@ export const usePartyRtc = ({
 
   const attachPeer = useCallback(
     (peerId: string) => {
+      if (macRtcAvailable) {
+        macPeersRef.current.add(peerId);
+        return null;
+      }
       let pc = peersRef.current.get(peerId);
       if (pc) return pc;
       pc = new RTCPeerConnection(RTC_CONFIG);
@@ -264,7 +298,20 @@ export const usePartyRtc = ({
 
   const offerTo = useCallback(
     async (peerId: string, iceRestart = false) => {
+      if (macRtcAvailable) {
+        attachPeer(peerId);
+        const offer = await FlickMacRtc?.createOffer(peerId, iceRestart);
+        const sdp = offer?.sdp;
+        if (!sdp) return false;
+        send({
+          type: 'rtc-signal',
+          to: peerId,
+          payload: { type: 'offer', sdp },
+        });
+        return true;
+      }
       const pc = attachPeer(peerId);
+      if (!pc) return false;
       const offer = await pc.createOffer(
         iceRestart ? { iceRestart: true } : {},
       );
@@ -303,6 +350,19 @@ export const usePartyRtc = ({
 
       const restart = async () => {
         try {
+          if (macRtcAvailable) {
+            const existing = macPeersRef.current.has(peerId);
+            if (existing && shouldOffer(self, peerId)) {
+              try {
+                if (await offerTo(peerId, true)) return;
+              } catch {
+                // Recreate below.
+              }
+            }
+            teardownPc(peerId);
+            if (shouldOffer(self, peerId)) await offerTo(peerId);
+            return;
+          }
           const existing = peersRef.current.get(peerId);
           if (existing && shouldOffer(self, peerId)) {
             try {
@@ -331,11 +391,14 @@ export const usePartyRtc = ({
       if (!self || !joinedRef.current) return;
       const live = new Set(ids.filter((id) => id !== self));
       livePeerIdsRef.current = live;
-      for (const id of [...peersRef.current.keys()]) {
+      const attached = new Set(
+        macRtcAvailable ? macPeersRef.current : peersRef.current.keys(),
+      );
+      for (const id of [...attached]) {
         if (!live.has(id)) closePeer(id);
       }
       for (const id of live) {
-        if (peersRef.current.has(id)) continue;
+        if (attached.has(id)) continue;
         if (shouldOffer(self, id)) void offerTo(id).catch(() => {});
       }
     },
@@ -347,8 +410,10 @@ export const usePartyRtc = ({
       if (!joinedRef.current) return;
       try {
         if (payload.type === 'ice') {
-          const pc = peersRef.current.get(from);
-          if (!pc || !pc.remoteDescription) {
+          const ready = macRtcAvailable
+            ? macRemoteReadyRef.current.has(from)
+            : Boolean(peersRef.current.get(from)?.remoteDescription);
+          if (!ready) {
             const queued = pendingIceRef.current.get(from) ?? [];
             queued.push(payload);
             pendingIceRef.current.set(from, queued);
@@ -356,20 +421,47 @@ export const usePartyRtc = ({
           }
           if (!payload.candidate) return;
           try {
-            await pc.addIceCandidate(
-              new RTCIceCandidate({
-                candidate: payload.candidate,
-                sdpMid: payload.sdpMid ?? undefined,
-                sdpMLineIndex: payload.sdpMLineIndex ?? undefined,
-              }),
-            );
+            if (macRtcAvailable) {
+              await FlickMacRtc?.addIce(
+                from,
+                payload.candidate,
+                payload.sdpMid ?? null,
+                payload.sdpMLineIndex ?? null,
+              );
+            } else {
+              const pc = peersRef.current.get(from);
+              if (!pc) return;
+              await pc.addIceCandidate(
+                new RTCIceCandidate({
+                  candidate: payload.candidate,
+                  sdpMid: payload.sdpMid ?? undefined,
+                  sdpMLineIndex: payload.sdpMLineIndex ?? undefined,
+                }),
+              );
+            }
           } catch {
             // ignore stale ICE
           }
           return;
         }
         if (payload.type === 'offer' && payload.sdp) {
+          if (macRtcAvailable) {
+            attachPeer(from);
+            await FlickMacRtc?.setRemote(from, 'offer', payload.sdp);
+            macRemoteReadyRef.current.add(from);
+            await flushIce(from);
+            const answer = await FlickMacRtc?.createAnswer(from);
+            const sdp = answer?.sdp;
+            if (!sdp) return;
+            send({
+              type: 'rtc-signal',
+              to: from,
+              payload: { type: 'answer', sdp },
+            });
+            return;
+          }
           const pc = attachPeer(from);
+          if (!pc) return;
           await pc.setRemoteDescription(
             new RTCSessionDescription({ type: 'offer', sdp: payload.sdp }),
           );
@@ -386,6 +478,12 @@ export const usePartyRtc = ({
           return;
         }
         if (payload.type === 'answer' && payload.sdp) {
+          if (macRtcAvailable) {
+            await FlickMacRtc?.setRemote(from, 'answer', payload.sdp);
+            macRemoteReadyRef.current.add(from);
+            await flushIce(from);
+            return;
+          }
           const pc = peersRef.current.get(from);
           if (!pc) return;
           await pc.setRemoteDescription(
@@ -425,6 +523,14 @@ export const usePartyRtc = ({
         setError('Allow camera and microphone to join the call.');
         return;
       }
+      if (macRtcAvailable) {
+        await FlickMacRtc?.join();
+        setLocalStreamURL(MAC_LOCAL_STREAM);
+        joinedRef.current = true;
+        setJoined(true);
+        send({ type: 'rtc-join' });
+        return;
+      }
       const stream = (await mediaDevices.getUserMedia({
         audio: true,
         video: {
@@ -450,9 +556,13 @@ export const usePartyRtc = ({
     setMuted((prev) => {
       const next = !prev;
       mutedRef.current = next;
-      localRef.current?.getAudioTracks().forEach((track) => {
-        track.enabled = !next;
-      });
+      if (macRtcAvailable) {
+        void FlickMacRtc?.setMuted(next).catch(() => {});
+      } else {
+        localRef.current?.getAudioTracks().forEach((track) => {
+          track.enabled = !next;
+        });
+      }
       return next;
     });
   }, []);
@@ -461,9 +571,13 @@ export const usePartyRtc = ({
     setCamOff((prev) => {
       const next = !prev;
       camOffRef.current = next;
-      localRef.current?.getVideoTracks().forEach((track) => {
-        track.enabled = !next;
-      });
+      if (macRtcAvailable) {
+        void FlickMacRtc?.setCamOff(next).catch(() => {});
+      } else {
+        localRef.current?.getVideoTracks().forEach((track) => {
+          track.enabled = !next;
+        });
+      }
       return next;
     });
   }, []);
@@ -481,7 +595,79 @@ export const usePartyRtc = ({
   }, [handleSignal, subscribe, syncPeers]);
 
   useEffect(() => {
-    if (!joined) return;
+    if (!macRtcAvailable || !macRtcEmitter) return;
+    const ice = macRtcEmitter.addListener(
+      'macRtcIce',
+      (body: {
+        peerId?: string;
+        candidate?: string;
+        sdpMid?: string | null;
+        sdpMLineIndex?: number | null;
+      }) => {
+        if (!joinedRef.current || !body.peerId || !body.candidate) return;
+        send({
+          type: 'rtc-signal',
+          to: body.peerId,
+          payload: {
+            type: 'ice',
+            candidate: body.candidate,
+            sdpMid: body.sdpMid ?? null,
+            sdpMLineIndex: body.sdpMLineIndex ?? null,
+          },
+        });
+      },
+    );
+    const track = macRtcEmitter.addListener(
+      'macRtcTrack',
+      (body: { peerId?: string }) => {
+        const peerId = body.peerId;
+        if (!peerId) return;
+        const name =
+          roomRef.current?.members.find((m) => m.id === peerId)?.displayName ??
+          'Guest';
+        void FlickMacRtc?.setPeerName(peerId, name).catch(() => {});
+        setRemotes((prev) => {
+          if (prev.some((r) => r.id === peerId)) return prev;
+          return [
+            ...prev,
+            {
+              id: peerId,
+              name,
+              streamURL: `mac:${peerId}`,
+              renderKey: `mac:${peerId}`,
+            },
+          ];
+        });
+      },
+    );
+    const state = macRtcEmitter.addListener(
+      'macRtcState',
+      (body: { peerId?: string; state?: string }) => {
+        const peerId = body.peerId;
+        if (!peerId) return;
+        if (body.state === 'connected') {
+          iceRestartedRef.current.delete(peerId);
+          recoveringRef.current.delete(peerId);
+          return;
+        }
+        if (body.state === 'closed') {
+          closePeer(peerId);
+          return;
+        }
+        if (body.state === 'failed') {
+          recoverPeerRef.current(peerId);
+        }
+      },
+    );
+    return () => {
+      ice.remove();
+      track.remove();
+      state.remove();
+    };
+  }, [closePeer, send]);
+
+  useEffect(() => {
+    if (!joined || macRtcAvailable) return;
     const timer = setInterval(() => {
       void (async () => {
         const levels: Record<string, number> = {};
@@ -516,7 +702,7 @@ export const usePartyRtc = ({
 
   useEffect(() => {
     if (room && memberId) return;
-    if (joinedRef.current || localRef.current || peersRef.current.size) {
+    if (joinedRef.current || localRef.current || peersRef.current.size || macPeersRef.current.size) {
       joinedRef.current = false;
       setJoined(false);
       setMuted(false);

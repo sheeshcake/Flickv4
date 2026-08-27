@@ -20,6 +20,7 @@ import { HeroCarousel } from '@/src/components/HeroCarousel';
 import { ContentRow } from '@/src/components/ContentRow';
 import { CatalogRow } from '@/src/components/CatalogRow';
 import { BrowseChips } from '@/src/components/BrowseChips';
+import { GenreGrid } from '@/src/components/GenreGrid';
 import { HomeScreenTV } from '@/src/components/tv/HomeScreenTV';
 import type { TVSideNavHandle } from '@/src/components/tv/TVSideNav';
 import { useHomeData } from '@/src/hooks/useHomeData';
@@ -176,6 +177,9 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
         onViewMore={(row) =>
           navigation.navigate('ViewMore', { title: row.title, query: row.query })
         }
+        onSelectGenre={(title, query) =>
+          navigation.navigate('ViewMore', { title, query })
+        }
         sidebarRef={sidebarRef}
       />
     );
@@ -216,6 +220,13 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
               navigation.navigate('ViewMore', { title, query })
             }
             onRegionPress={() => navigation.navigate('RegionSettings')}
+          />
+
+          <GenreGrid
+            deviceKind={deviceKind}
+            onSelect={(title, query) =>
+              navigation.navigate('ViewMore', { title, query })
+            }
           />
 
           {continueItems.length > 0 && (

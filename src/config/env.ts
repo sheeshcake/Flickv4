@@ -42,6 +42,26 @@ export const WATCH_PARTY_CONFIG = {
   enabled: Boolean(process.env.EXPO_PUBLIC_WATCH_PARTY_URL?.trim()),
 } as const;
 
+/** FlixQuest scraper API (VOD providers + DLHD live TV). Empty = feature off. */
+export const FLIXQUEST_CONFIG = {
+  url: process.env.EXPO_PUBLIC_FLIXQUEST_API_URL?.trim() || '',
+  enabled: Boolean(process.env.EXPO_PUBLIC_FLIXQUEST_API_URL?.trim()),
+} as const;
+
+/** Remote M3U playlist merged into Live TV as the PH category. */
+const DEFAULT_LIVE_TV_M3U_URL =
+  'https://raw.githubusercontent.com/Harleythetech/IPHTV/main/ph.m3u';
+
+export const LIVE_TV_M3U_CONFIG = {
+  url: process.env.EXPO_PUBLIC_LIVE_TV_M3U_URL?.trim() || DEFAULT_LIVE_TV_M3U_URL,
+  enabled: true,
+} as const;
+
+/** Live tab is shown when FlixQuest DLHD and/or the PH M3U playlist is on. */
+export const LIVE_TV_CONFIG = {
+  enabled: FLIXQUEST_CONFIG.enabled || LIVE_TV_M3U_CONFIG.enabled,
+} as const;
+
 export const UPDATE_CONFIG = {
   OWNER: process.env.EXPO_PUBLIC_UPDATE_REPO_OWNER || 'sheeshcake',
   REPO: process.env.EXPO_PUBLIC_UPDATE_REPO_NAME || 'Flickv4',

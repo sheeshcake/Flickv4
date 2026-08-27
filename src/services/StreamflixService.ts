@@ -61,7 +61,7 @@ export interface StreamflixSource {
   uri: string;
   headers: Record<string, string>;
   subtitles: StreamflixSubtitle[];
-  extractor: 'vidrock' | 'videasy' | 'vidzee';
+  extractor: 'vidrock' | 'videasy' | 'vidzee' | 'flixquest';
   extractUrl?: string;
 }
 

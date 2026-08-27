@@ -6,6 +6,7 @@ import { PartySessionBar } from '@/src/components/party/PartySessionBar';
 import {
   Download as DownloadIcon,
   Home as HomeIcon,
+  Radio as LiveIcon,
   Search as SearchIcon,
   Settings as SettingsIcon,
 } from 'lucide-react-native';
@@ -13,10 +14,13 @@ import { HomeScreen } from '@/src/screens/HomeScreen';
 import { SearchScreen } from '@/src/screens/SearchScreen';
 import { SettingsScreen } from '@/src/screens/SettingsScreen';
 import { DownloadsScreen } from '@/src/screens/DownloadsScreen';
+import { LiveTvScreen } from '@/src/screens/LiveTvScreen';
+import { LIVE_TV_CONFIG } from '@/src/config/env';
 
 export type MainTabParamList = {
   Home: undefined;
   Search: undefined;
+  Live: undefined;
   Downloads: undefined;
   Settings: undefined;
 };
@@ -59,6 +63,17 @@ export const TabNavigator = () => {
           ),
         }}
       />
+      {LIVE_TV_CONFIG.enabled ? (
+        <Tab.Screen
+          name="Live"
+          component={LiveTvScreen}
+          options={{
+            tabBarIcon: ({ color, size }) => (
+              <LiveIcon color={color} size={size} />
+            ),
+          }}
+        />
+      ) : null}
       <Tab.Screen
         name="Downloads"
         component={DownloadsScreen}

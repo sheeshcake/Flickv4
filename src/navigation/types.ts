@@ -1,5 +1,9 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { CategoryQuery } from '@/src/services/categories';
+import type {
+  LiveChannel,
+  LiveStream,
+} from '@/src/services/DaddyLiveService';
 import type { MediaItem } from '@/src/types';
 
 export type RootStackParamList = {
@@ -17,6 +21,11 @@ export type RootStackParamList = {
   Credits: undefined;
   FinishedMovies: undefined;
   JoinParty: { code?: string };
+  LivePlayer: {
+    channel: LiveChannel;
+    channels: LiveChannel[];
+    stream?: LiveStream;
+  };
   Player: {
     item: MediaItem;
     title: string;
