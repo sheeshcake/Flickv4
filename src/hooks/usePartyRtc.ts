@@ -43,6 +43,12 @@ export interface PartyRtcApi {
   leaveCall: () => void;
   toggleMute: () => void;
   toggleCam: () => void;
+  /**
+   * Re-announce RTC membership after a control-socket reconnect. The local
+   * capture is kept; stale peers are dropped and re-negotiated. No-op when not
+   * currently in the call.
+   */
+  rejoinCall: () => void;
 }
 
 const emptyRtc: PartyRtcApi = {
@@ -57,6 +63,7 @@ const emptyRtc: PartyRtcApi = {
   leaveCall: () => {},
   toggleMute: () => {},
   toggleCam: () => {},
+  rejoinCall: () => {},
 };
 
 type Listener = (msg: ServerMessage) => void;
@@ -112,6 +119,15 @@ export const usePartyRtc = ({
   const recoverPeerRef = useRef<(peerId: string) => void>(() => {});
   const mutedRef = useRef(false);
   const camOffRef = useRef(false);
+  // Per-peer generation counter. Bumped whenever a peer's native connection is
+  // torn down so any async signaling op that resumes after an `await` can
+  // detect it now refers to a dead/replaced connection and bail out instead of
+  // calling into a closed native RTCPeerConnection (which hard-crashes
+  // libwebrtc on iOS/Android). See RC-1.
+  const peerGenRef = useRef(new Map<string, number>());
+  // Per-peer promise chain so offer/answer/ice for the same peer never
+  // interleave across await boundaries.
+  const signalTailRef = useRef(new Map<string, Promise<void>>());
 
   memberIdRef.current = memberId;
   roomRef.current = room;
@@ -122,7 +138,37 @@ export const usePartyRtc = ({
     setRemotes((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
+  const genFor = useCallback(
+    (id: string) => peerGenRef.current.get(id) ?? 0,
+    [],
+  );
+
+  const bumpGen = useCallback((id: string) => {
+    const next = (peerGenRef.current.get(id) ?? 0) + 1;
+    peerGenRef.current.set(id, next);
+    return next;
+  }, []);
+
+  // A non-mac peer is safe to keep operating on only while it is still the
+  // registered connection for `id`, its generation is unchanged, and it has
+  // not been closed underneath us.
+  const pcLive = useCallback(
+    (id: string, pc: RTCPeerConnection, gen: number) =>
+      peersRef.current.get(id) === pc &&
+      (peerGenRef.current.get(id) ?? 0) === gen &&
+      pc.signalingState !== 'closed',
+    [],
+  );
+
+  const macLive = useCallback(
+    (id: string, gen: number) =>
+      macPeersRef.current.has(id) && (peerGenRef.current.get(id) ?? 0) === gen,
+    [],
+  );
+
   const teardownPc = useCallback((id: string) => {
+    // Invalidate any in-flight async signaling for this peer.
+    bumpGen(id);
     if (macRtcAvailable) {
       macPeersRef.current.delete(id);
       macRemoteReadyRef.current.delete(id);
@@ -141,10 +187,16 @@ export const usePartyRtc = ({
 
   const closePeer = useCallback(
     (id: string) => {
-      teardownPc(id);
+      // RC-5: remove the tile from render state BEFORE closing the native
+      // peer/stream, so RTCView never references a released MediaStream.
+      dropRemote(id);
       iceRestartedRef.current.delete(id);
       recoveringRef.current.delete(id);
-      dropRemote(id);
+      teardownPc(id);
+      // The peer is permanently gone — drop its generation entry so the map
+      // does not grow unbounded across member churn / reconnects. Done AFTER
+      // teardownPc so the generation bump still invalidates in-flight ops.
+      peerGenRef.current.delete(id);
     },
     [dropRemote, teardownPc],
   );
@@ -159,6 +211,7 @@ export const usePartyRtc = ({
     iceRestartedRef.current.clear();
     recoveringRef.current.clear();
     remoteStreamsRef.current.clear();
+    peerGenRef.current.clear();
   }, [closePeer]);
 
   const stopLocal = useCallback(() => {
@@ -180,34 +233,44 @@ export const usePartyRtc = ({
     });
   }, []);
 
-  const flushIce = useCallback(async (id: string, pc?: RTCPeerConnection) => {
-    const queued = pendingIceRef.current.get(id) ?? [];
-    pendingIceRef.current.delete(id);
-    for (const payload of queued) {
-      if (!payload.candidate) continue;
-      try {
+  const flushIce = useCallback(
+    async (id: string, pc?: RTCPeerConnection) => {
+      const queued = pendingIceRef.current.get(id) ?? [];
+      pendingIceRef.current.delete(id);
+      const gen = genFor(id);
+      for (const payload of queued) {
+        if (!payload.candidate) continue;
+        // Re-check liveness before every await — a concurrent teardown may
+        // have closed this peer between candidates.
         if (macRtcAvailable) {
-          await FlickMacRtc?.addIce(
-            id,
-            payload.candidate,
-            payload.sdpMid ?? null,
-            payload.sdpMLineIndex ?? null,
-          );
-          continue;
+          if (!macLive(id, gen)) return;
+        } else if (!pc || !pcLive(id, pc, gen)) {
+          return;
         }
-        if (!pc) continue;
-        await pc.addIceCandidate(
-          new RTCIceCandidate({
-            candidate: payload.candidate,
-            sdpMid: payload.sdpMid ?? undefined,
-            sdpMLineIndex: payload.sdpMLineIndex ?? undefined,
-          }),
-        );
-      } catch {
-        // stale candidate
+        try {
+          if (macRtcAvailable) {
+            await FlickMacRtc?.addIce(
+              id,
+              payload.candidate,
+              payload.sdpMid ?? null,
+              payload.sdpMLineIndex ?? null,
+            );
+            continue;
+          }
+          await pc!.addIceCandidate(
+            new RTCIceCandidate({
+              candidate: payload.candidate,
+              sdpMid: payload.sdpMid ?? undefined,
+              sdpMLineIndex: payload.sdpMLineIndex ?? undefined,
+            }),
+          );
+        } catch {
+          // stale candidate
+        }
       }
-    }
-  }, []);
+    },
+    [genFor, macLive, pcLive],
+  );
 
   const attachPeer = useCallback(
     (peerId: string) => {
@@ -300,7 +363,9 @@ export const usePartyRtc = ({
     async (peerId: string, iceRestart = false) => {
       if (macRtcAvailable) {
         attachPeer(peerId);
+        const gen = genFor(peerId);
         const offer = await FlickMacRtc?.createOffer(peerId, iceRestart);
+        if (!macLive(peerId, gen)) return false;
         const sdp = offer?.sdp;
         if (!sdp) return false;
         send({
@@ -312,10 +377,13 @@ export const usePartyRtc = ({
       }
       const pc = attachPeer(peerId);
       if (!pc) return false;
+      const gen = genFor(peerId);
       const offer = await pc.createOffer(
         iceRestart ? { iceRestart: true } : {},
       );
+      if (!pcLive(peerId, pc, gen)) return false;
       await pc.setLocalDescription(offer);
+      if (!pcLive(peerId, pc, gen)) return false;
       const sdp = pc.localDescription?.sdp;
       if (!sdp) return false;
       send({
@@ -325,7 +393,7 @@ export const usePartyRtc = ({
       });
       return true;
     },
-    [attachPeer, send],
+    [attachPeer, genFor, macLive, pcLive, send],
   );
 
   const recoverPeer = useCallback(
@@ -430,7 +498,7 @@ export const usePartyRtc = ({
               );
             } else {
               const pc = peersRef.current.get(from);
-              if (!pc) return;
+              if (!pc || pc.signalingState === 'closed') return;
               await pc.addIceCandidate(
                 new RTCIceCandidate({
                   candidate: payload.candidate,
@@ -447,10 +515,14 @@ export const usePartyRtc = ({
         if (payload.type === 'offer' && payload.sdp) {
           if (macRtcAvailable) {
             attachPeer(from);
+            const gen = genFor(from);
             await FlickMacRtc?.setRemote(from, 'offer', payload.sdp);
+            if (!macLive(from, gen)) return;
             macRemoteReadyRef.current.add(from);
             await flushIce(from);
+            if (!macLive(from, gen)) return;
             const answer = await FlickMacRtc?.createAnswer(from);
+            if (!macLive(from, gen)) return;
             const sdp = answer?.sdp;
             if (!sdp) return;
             send({
@@ -462,12 +534,17 @@ export const usePartyRtc = ({
           }
           const pc = attachPeer(from);
           if (!pc) return;
+          const gen = genFor(from);
           await pc.setRemoteDescription(
             new RTCSessionDescription({ type: 'offer', sdp: payload.sdp }),
           );
+          if (!pcLive(from, pc, gen)) return;
           await flushIce(from, pc);
+          if (!pcLive(from, pc, gen)) return;
           const answer = await pc.createAnswer();
+          if (!pcLive(from, pc, gen)) return;
           await pc.setLocalDescription(answer);
+          if (!pcLive(from, pc, gen)) return;
           const sdp = pc.localDescription?.sdp;
           if (!sdp) return;
           send({
@@ -479,23 +556,31 @@ export const usePartyRtc = ({
         }
         if (payload.type === 'answer' && payload.sdp) {
           if (macRtcAvailable) {
+            const gen = genFor(from);
             await FlickMacRtc?.setRemote(from, 'answer', payload.sdp);
+            if (!macLive(from, gen)) return;
             macRemoteReadyRef.current.add(from);
             await flushIce(from);
             return;
           }
           const pc = peersRef.current.get(from);
           if (!pc) return;
+          // Only a peer that actually has a local offer outstanding can accept
+          // an answer. Dropping unexpected answers avoids an InvalidState throw
+          // that would otherwise spin the recovery loop.
+          if (pc.signalingState !== 'have-local-offer') return;
+          const gen = genFor(from);
           await pc.setRemoteDescription(
             new RTCSessionDescription({ type: 'answer', sdp: payload.sdp }),
           );
+          if (!pcLive(from, pc, gen)) return;
           await flushIce(from, pc);
         }
       } catch {
         recoverPeerRef.current(from);
       }
     },
-    [attachPeer, flushIce, send],
+    [attachPeer, flushIce, genFor, macLive, pcLive, send],
   );
 
   const leaveCall = useCallback(() => {
@@ -513,6 +598,16 @@ export const usePartyRtc = ({
     stopLocal();
     send({ type: 'rtc-leave' });
   }, [closeAllPeers, send, stopLocal]);
+
+  // Finding 1: after the control socket reconnects the server has forgotten
+  // our RTC membership (the old socket's close dropped us) and, for guests, we
+  // now carry a new member id. Drop the stale peer graph and re-announce so
+  // syncPeers re-offers on the fresh identity. Local capture is preserved.
+  const rejoinCall = useCallback(() => {
+    if (!joinedRef.current) return;
+    closeAllPeers();
+    send({ type: 'rtc-join' });
+  }, [closeAllPeers, send]);
 
   const joinCall = useCallback(async () => {
     if (!available || !memberIdRef.current || joinedRef.current) return;
@@ -589,7 +684,20 @@ export const usePartyRtc = ({
         return;
       }
       if (msg.type === 'rtc-signal') {
-        void handleSignal(msg.from, msg.payload).catch(() => {});
+        // Serialize signaling per peer so offer/answer/ice for the same peer
+        // are applied strictly in order and never interleave across awaits.
+        const from = msg.from;
+        const payload = msg.payload;
+        const prev = signalTailRef.current.get(from) ?? Promise.resolve();
+        const next = prev
+          .then(() => handleSignal(from, payload))
+          .catch(() => {});
+        signalTailRef.current.set(from, next);
+        void next.finally(() => {
+          if (signalTailRef.current.get(from) === next) {
+            signalTailRef.current.delete(from);
+          }
+        });
       }
     });
   }, [handleSignal, subscribe, syncPeers]);
@@ -696,7 +804,9 @@ export const usePartyRtc = ({
           })),
         );
       })();
-    }, 250);
+      // RC-4: 1s is responsive enough for the speaker-highlight while cutting
+      // the getStats() work (and per-tick re-render) by 4x versus 250ms.
+    }, 1000);
     return () => clearInterval(timer);
   }, [joined]);
 
@@ -726,5 +836,6 @@ export const usePartyRtc = ({
     leaveCall,
     toggleMute,
     toggleCam,
+    rejoinCall,
   };
 };

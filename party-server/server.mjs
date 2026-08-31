@@ -2012,6 +2012,14 @@ wss.on('connection', (ws) => {
   /** @type {string | null} */
   let memberId = null;
 
+  // Protocol-level keepalive (RC-3): terminate half-open sockets promptly
+  // instead of waiting for the 60s idle sweep. RN/browser clients answer
+  // ping frames automatically.
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
   ws.on('message', (raw) => {
     let msg;
     try {
@@ -2070,6 +2078,13 @@ wss.on('connection', (ws) => {
  * @param {(id: string) => void} setMemberId
  */
 const handleMessage = (ws, msg, getMemberId, setMemberId) => {
+  // App-level keepalive (RC-3): answer client pings regardless of room state
+  // so intermediaries don't idle the socket and the client can detect death.
+  if (msg.type === 'ping') {
+    send(ws, { type: 'pong' });
+    return;
+  }
+
   const displayName = String(msg.displayName || 'Flick user').slice(0, 32);
   const kind = msg.kind === 'companion' ? 'companion' : 'player';
 
@@ -2414,6 +2429,24 @@ setInterval(() => {
     }
   }
 }, 60_000).unref();
+
+// Ping every connected socket; drop any that missed the previous round-trip.
+const keepaliveTimer = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) {
+      ws.terminate();
+      continue;
+    }
+    ws.isAlive = false;
+    try {
+      ws.ping();
+    } catch {
+      // socket already dying
+    }
+  }
+}, 30_000);
+keepaliveTimer.unref?.();
+wss.on('close', () => clearInterval(keepaliveTimer));
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`[flick-party] listening on :${PORT}`);
