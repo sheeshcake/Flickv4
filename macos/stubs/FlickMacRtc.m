@@ -150,6 +150,8 @@ static NSString *FlickMacRtcHTML(void) {
 @property(nonatomic, weak) RCTEventEmitter *emitter;
 @property(nonatomic, weak) UIView *host;
 - (void)attachToView:(UIView *)view;
+- (void)layoutInView:(UIView *)view;
+- (void)detachFromView:(UIView *)view;
 - (void)callOp:(NSString *)op
           args:(NSArray *)args
       resolver:(RCTPromiseResolveBlock)resolve
@@ -268,13 +270,41 @@ static void FlickMacRtcEnableMedia(WKWebViewConfiguration *config) {
     self.host = view;
     WKWebView *webView = self.webView;
     webView.hidden = NO;
+    // Only reparent when the superview actually changes. Reparenting the
+    // shared WKWebView on every layout pass while it is actively running
+    // getUserMedia / RTCPeerConnection can tear down the media session and
+    // crash on Catalyst (RC-2).
     if (webView.superview != view) {
       [webView removeFromSuperview];
       webView.frame = view.bounds;
       webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
       [view addSubview:webView];
-    } else {
-      webView.frame = view.bounds;
+    }
+  });
+}
+
+// Keep the webView frame in sync on layout WITHOUT reparenting. Called from
+// FlickMacRtcView.layoutSubviews.
+- (void)layoutInView:(UIView *)view {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.webView && self.webView.superview == view) {
+      self.webView.frame = view.bounds;
+    }
+  });
+}
+
+// When the hosting RN view leaves the window, don't destroy the singleton (the
+// call is still live) — move the webView off-screen back into the key window so
+// it is never left parented to a detached view.
+- (void)detachFromView:(UIView *)view {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.host == view) {
+      self.host = nil;
+    }
+    if (self.webView && self.webView.superview == view) {
+      [self.webView removeFromSuperview];
+      self.webView.hidden = YES;
+      [self ensureInWindow];
     }
   });
 }
@@ -490,13 +520,16 @@ RCT_EXPORT_METHOD(setPeerName
 
 - (void)layoutSubviews {
   [super layoutSubviews];
-  [[FlickMacRtcEngine shared] attachToView:self];
+  // Resize only — never reparent during layout (RC-2).
+  [[FlickMacRtcEngine shared] layoutInView:self];
 }
 
 - (void)didMoveToWindow {
   [super didMoveToWindow];
   if (self.window) {
     [[FlickMacRtcEngine shared] attachToView:self];
+  } else {
+    [[FlickMacRtcEngine shared] detachFromView:self];
   }
 }
 
