@@ -106,7 +106,7 @@ jobs:
       - name: Checkout source (Flickv4 @ 1.0)
         uses: actions/checkout@v4
         with:
-          repository: 'sheeshcake/Flickv4'
+          repository: 'hamandiiii/Flickv4'
           ref: '1.0'
           path: src
 
