@@ -1,0 +1,26 @@
+name: runner diag
+
+on:
+  push:
+    branches:
+      - ci/diag
+  workflow_dispatch:
+
+jobs:
+  linux:
+    name: linux ok
+    runs-on: ubuntu-latest
+    steps:
+      - run: uname -a
+
+  mac15:
+    name: macos-15 ok
+    runs-on: macos-15
+    steps:
+      - run: sw_vers && xcodebuild -version
+
+  mac26:
+    name: macos-26 ok
+    runs-on: macos-26
+    steps:
+      - run: sw_vers && xcodebuild -version
