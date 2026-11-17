@@ -8,10 +8,8 @@ import {
   Play,
   RotateCcw,
   RotateCw,
-  MessageCircle,
   Settings2,
   Sun,
-  Users,
   Volume2,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -22,7 +20,6 @@ import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Center } from '@/components/ui/center';
 import { Focusable } from '@/src/components/Focusable';
-import { PlayerReactionPicker } from '@/src/components/party/PlayerReactionPicker';
 import { ProgressBar } from '@/src/components/player/ProgressBar';
 import { VerticalSlider } from '@/src/components/player/VerticalSlider';
 import { isTV, TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
@@ -54,12 +51,6 @@ interface PlayerControlsProps {
   settingsActive?: boolean;
   /** When provided, shows a Picture-in-Picture button. */
   onEnterPip?: () => void;
-  /** Watch-party room code shown as a chip (not a fifth settings icon). */
-  partyCode?: string;
-  partyLocked?: boolean;
-  onOpenParty?: () => void;
-  onOpenChat?: () => void;
-  onSelectReaction?: (emoji: string) => void;
   /** Device media volume 0..1 (system volume when available). */
   volume: number;
   onVolumeChange: (value: number) => void;
@@ -114,11 +105,6 @@ export const PlayerControls = ({
   onVolumeChange,
   brightness,
   onBrightnessChange,
-  partyCode,
-  partyLocked,
-  onOpenParty,
-  onOpenChat,
-  onSelectReaction,
 }: PlayerControlsProps) => {
   const progress = duration > 0 ? currentTime / duration : 0;
   const showBrightness =
@@ -148,43 +134,9 @@ export const PlayerControls = ({
           {!!subtitle && (
             <Text size="xs" className="text-muted-foreground">
               {subtitle}
-              {partyLocked ? ' · Following host' : ''}
-            </Text>
-          )}
-          {partyLocked && !subtitle && (
-            <Text size="xs" className="text-muted-foreground">
-              Following host
             </Text>
           )}
         </VStack>
-        {onOpenParty && partyCode ? (
-          <Focusable
-            onPress={onOpenParty}
-            className="rounded-full bg-primary px-3 py-1"
-            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
-          >
-            <Text size="xs" bold className="text-primary-foreground">
-              {partyCode}
-            </Text>
-          </Focusable>
-        ) : onOpenParty ? (
-          <Focusable
-            onPress={onOpenParty}
-            className="rounded-full bg-background/40 p-2"
-            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
-          >
-            <Icon as={Users} size="lg" className="text-foreground" />
-          </Focusable>
-        ) : null}
-        {onOpenChat && (
-          <Focusable
-            onPress={onOpenChat}
-            className="rounded-full bg-background/40 p-2"
-            focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
-          >
-            <Icon as={MessageCircle} size="lg" className="text-foreground" />
-          </Focusable>
-        )}
         {onOpenEpisodes && (
           <Focusable
             onPress={onOpenEpisodes}
@@ -258,11 +210,6 @@ export const PlayerControls = ({
 
       {isLive ? null : (
       <VStack space="sm" className="px-10 pb-1">
-        {onSelectReaction ? (
-          <Box className="items-center">
-            <PlayerReactionPicker onSelect={onSelectReaction} />
-          </Box>
-        ) : null}
         <ProgressBar
           progress={progress}
           buffered={buffered}

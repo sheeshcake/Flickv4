@@ -17,9 +17,7 @@ import { VideoAspectProvider } from '@/src/hooks/useVideoAspect';
 import { PlayerDebugSettingsProvider } from '@/src/hooks/usePlayerDebugSettings';
 import { PlaybackSettingsProvider } from '@/src/hooks/usePlaybackSettings';
 import { DownloadsProvider } from '@/src/hooks/useDownloads';
-import { WatchPartyProvider } from '@/src/hooks/useWatchParty';
 import { DownloadResolverHost } from '@/src/components/DownloadResolverHost';
-import { UpdateChecker } from '@/src/components/UpdateChecker';
 import { lockPortrait } from '@/src/utils/orientation';
 import { bootstrapDownloadPermissions } from '@/src/utils/downloadPermissions';
 import '@/global.css';
@@ -50,12 +48,9 @@ export default function App() {
                             <FinishedMoviesProvider>
                               <ContinueWatchingProvider>
                                 <DownloadsProvider>
-                                  <WatchPartyProvider>
-                                    <StatusBar style="light" />
-                                    <AppNavigator />
-                                    <DownloadResolverHost />
-                                    <UpdateChecker />
-                                  </WatchPartyProvider>
+                                  <StatusBar style="light" />
+                                  <AppNavigator />
+                                  <DownloadResolverHost />
                                 </DownloadsProvider>
                               </ContinueWatchingProvider>
                             </FinishedMoviesProvider>

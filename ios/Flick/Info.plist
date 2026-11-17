@@ -47,16 +47,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSCameraUsageDescription</key>
-	<string>CoFFe House uses the camera so you can join a watch-party video call.</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>CoFFe House uses Desktop so you can open local video files.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
 	<string>CoFFe House uses Documents to store and open downloaded videos.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>CoFFe House uses Downloads so you can save and open local files.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>CoFFe House uses the microphone so you can join a watch-party video call.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UIBackgroundModes</key>

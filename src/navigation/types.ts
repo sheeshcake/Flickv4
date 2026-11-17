@@ -20,7 +20,6 @@ export type RootStackParamList = {
   Disclaimer: undefined;
   Credits: undefined;
   FinishedMovies: undefined;
-  JoinParty: { code?: string };
   LivePlayer: {
     channel: LiveChannel;
     channels: LiveChannel[];

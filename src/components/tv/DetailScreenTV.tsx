@@ -15,7 +15,6 @@ import {
   Play,
   Plus,
   Share2,
-  Users,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { Center } from '@/components/ui/center';
@@ -64,7 +63,6 @@ interface DetailScreenTVProps {
   onBack: () => void;
   onPlay: (opts?: { season?: number; episode?: number; label?: string }) => void;
   onShare: () => void;
-  onStartParty?: () => void;
   isInList: (item: MediaItem) => boolean;
   onToggleList: (item: MediaItem) => void;
   movieJob?: DownloadJob;
@@ -113,7 +111,6 @@ export const DetailScreenTV = ({
   onBack,
   onPlay,
   onShare,
-  onStartParty,
   isInList,
   onToggleList,
   movieJob,
@@ -288,9 +285,6 @@ export const DetailScreenTV = ({
               onPress={() => onToggleList(item)}
             />
             <ActionIcon icon={Share2} label="Share" onPress={onShare} />
-            {onStartParty && (
-              <ActionIcon icon={Users} label="Watch party" onPress={onStartParty} />
-            )}
           </HStack>
 
           <VStack space="sm" style={{ maxWidth: 720 }}>

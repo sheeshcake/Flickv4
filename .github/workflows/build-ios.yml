@@ -38,7 +38,6 @@ jobs:
           EXPO_PUBLIC_WYZIE_BASE_URL=https://sub.wyzie.io
           EXPO_PUBLIC_WYZIE_API_KEY=
           EXPO_PUBLIC_SAMPLE_VIDEO_URL=https://media.w3.org/2010/05/sintel/trailer.mp4
-          EXPO_PUBLIC_WATCH_PARTY_URL=
           TMDB_API_KEY=10116fa302c8fe0c2cbc38be17aa65a5
           APP_VERSION=1.0
           ANDROID_VERSION_CODE=20301

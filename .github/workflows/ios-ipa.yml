@@ -1,0 +1,210 @@
+# Unsigned iOS IPA build (works without an Apple Developer account).
+#
+# Produces: CoFFeHouse-<version>.ipa  → Payload/Flick.app (arm64, unsigned)
+# Install it later with SideStore / AltStore / Sideloadly (they re-sign locally).
+#
+# Runs on a public-repo macOS runner, so it costs no Actions minutes.
+# Secrets (optional, override the fallbacks):
+#   EXPO_PUBLIC_TMDB_API_KEY, EXPO_PUBLIC_WYZIE_API_KEY
+
+name: iOS IPA (unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'APP_VERSION / CFBundleShortVersionString (e.g. 1.0)'
+        required: false
+        default: '1.0'
+      build_number:
+        description: 'CFBundleVersion (integer, must increase per install)'
+        required: false
+        default: '20306'
+      xcode_version:
+        description: 'Xcode version (26.4+ required: Swift 6.3 accepts expo-modules-core 57)'
+        required: false
+        default: '26.6'
+  push:
+    branches:
+      - coffee-1.0
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      APP_VERSION: ${{ github.event.inputs.app_version || '1.0' }}
+      BUILD_NUMBER: ${{ github.event.inputs.build_number || '20306' }}
+      XCODE_VERSION: ${{ github.event.inputs.xcode_version || '26.6' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install JS dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Write .env and Xcode node path
+        env:
+          TMDB_KEY: ${{ secrets.EXPO_PUBLIC_TMDB_API_KEY || '10116fa302c8fe0c2cbc38be17aa65a5' }}
+          WYZIE_KEY: ${{ secrets.EXPO_PUBLIC_WYZIE_API_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          {
+            echo "EXPO_PUBLIC_TMDB_API_KEY=${TMDB_KEY}"
+            echo "EXPO_PUBLIC_TMDB_BASE_URL=https://api.themoviedb.org/3"
+            echo "EXPO_PUBLIC_TMDB_IMAGE_BASE_URL=https://image.tmdb.org/t/p/w500"
+            echo "EXPO_PUBLIC_WYZIE_BASE_URL=https://sub.wyzie.io"
+            echo "EXPO_PUBLIC_WYZIE_API_KEY=${WYZIE_KEY}"
+            echo "EXPO_PUBLIC_SAMPLE_VIDEO_URL=https://media.w3.org/2010/05/sintel/trailer.mp4"
+            echo "APP_VERSION=${APP_VERSION}"
+            echo "ANDROID_VERSION_CODE=${BUILD_NUMBER}"
+            echo "TMDB_API_KEY=${TMDB_KEY}"
+          } > .env
+          echo "export NODE_BINARY=$(which node)" > ios/.xcode.env.local
+          node -v
+          cat .env | sed 's/=.*/=<set>/'
+
+      - name: Install CocoaPods
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+          gem install cocoapods --no-document || sudo gem install cocoapods --no-document
+          pod --version
+          cd ios
+          pod install --repo-update
+
+      - name: Set iOS version
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" ios/Flick/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" ios/Flick/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" ios/Flick/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" ios/Flick/Info.plist
+
+      - name: Build unsigned Release app
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace ios/Flick.xcworkspace \
+            -scheme Flick \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ios/build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="${APP_VERSION}" \
+            CURRENT_PROJECT_VERSION="${BUILD_NUMBER}" \
+            SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+
+      # expo-modules-jsi ships ExpoModulesJSI as a *dynamic* xcframework but its
+      # podspec declares `static_framework = true`, so CocoaPods links against it
+      # without adding an embed phase. The binary then has
+      # `@rpath/ExpoModulesJSI.framework/ExpoModulesJSI` and crashes at launch
+      # (dyld: Library not loaded). Copy every linked-but-missing framework from
+      # XCFrameworkIntermediates into Flick.app/Frameworks before packaging.
+      - name: Embed missing dynamic frameworks
+        run: |
+          set -euo pipefail
+          APP="ios/build/DerivedData/Build/Products/Release-iphoneos/Flick.app"
+          test -d "$APP"
+          EXE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
+          BIN="$APP/$EXE"
+          XCI="ios/build/DerivedData/Build/Products/Release-iphoneos/XCFrameworkIntermediates"
+          mkdir -p "$APP/Frameworks"
+
+          echo "== frameworks already inside the app =="
+          ls -1 "$APP/Frameworks" || true
+
+          echo "== dynamic dependencies of $EXE =="
+          otool -L "$BIN" | awk 'NR>1 {print $1}' | sort -u > /tmp/rpath_deps.txt
+          cat /tmp/rpath_deps.txt
+
+          missing=0
+          while read -r dep; do
+            [ -n "$dep" ] || continue
+            case "$dep" in
+              @rpath/*.framework/*|@loader_path/*.framework/*|@executable_path/*.framework/*) ;;
+              *) continue ;;
+            esac
+            name="$(printf '%s' "$dep" | sed -E 's|^@[a-z_]+/([^/]+)\.framework/.*$|\1|')"
+            if [ -d "$APP/Frameworks/${name}.framework" ]; then
+              echo "ok (already embedded): ${name}.framework"
+              continue
+            fi
+            src="$(find "$XCI" -maxdepth 3 -type d -name "${name}.framework" -print -quit)"
+            if [ -z "$src" ]; then
+              echo "ERROR: ${name}.framework is linked but missing from XCFrameworkIntermediates" >&2
+              missing=$((missing + 1))
+              continue
+            fi
+            echo "embedding ${name}.framework  <-  $src"
+            cp -R "$src" "$APP/Frameworks/"
+          done < /tmp/rpath_deps.txt
+
+          if [ "$missing" -ne 0 ]; then
+            echo "ERROR: ${missing} linked framework(s) could not be embedded" >&2
+            exit 1
+          fi
+
+          echo "== final Frameworks =="
+          ls -1 "$APP/Frameworks"
+          test -f "$APP/Frameworks/ExpoModulesJSI.framework/ExpoModulesJSI"
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP="ios/build/DerivedData/Build/Products/Release-iphoneos/Flick.app"
+          test -d "$APP"
+          rm -rf ios/build/Payload
+          mkdir -p ios/build/Payload
+          cp -R "$APP" ios/build/Payload/
+          ( cd ios/build && zip -qry "CoFFeHouse-${APP_VERSION}.ipa" Payload )
+          ls -lh "ios/build/CoFFeHouse-${APP_VERSION}.ipa"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP/Info.plist"
+          file "$APP/Flick" || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoFFeHouse-${{ env.APP_VERSION }}-ios
+          path: ios/build/CoFFeHouse-${{ env.APP_VERSION }}.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish to release (ios-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view ios-latest >/dev/null 2>&1 || \
+            gh release create ios-latest \
+              --target "$GITHUB_SHA" \
+              --title "iOS unsigned builds" \
+              --notes "Automated unsigned IPA builds. Install with SideStore/AltStore/Sideloadly."
+          gh release upload ios-latest "ios/build/CoFFeHouse-${APP_VERSION}.ipa" --clobber

@@ -13,8 +13,6 @@
       "icon": "./assets/applogo/ic_launcher.jpeg",
       "bundleIdentifier": "com.wfrdee.flick",
       "infoPlist": {
-        "NSCameraUsageDescription": "CoFFe House uses the camera so you can join a watch-party video call.",
-        "NSMicrophoneUsageDescription": "CoFFe House uses the microphone so you can join a watch-party video call.",
         "NSDocumentsFolderUsageDescription": "CoFFe House uses Documents to store and open downloaded videos.",
         "NSDownloadsFolderUsageDescription": "CoFFe House uses Downloads so you can save and open local files.",
         "NSDesktopFolderUsageDescription": "CoFFe House uses Desktop so you can open local video files.",
@@ -33,10 +31,7 @@
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.ACCESS_WIFI_STATE",
-        "android.permission.REQUEST_INSTALL_PACKAGES",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
       "predictiveBackGestureEnabled": true,
       "package": "com.flickv4",
@@ -63,14 +58,7 @@
       "expo-screen-orientation",
       "./plugins/withLeanbackTv",
       "./plugins/withNotifeeAndroidMaven",
-      "./plugins/withMacCatalyst",
-      [
-        "@config-plugins/react-native-webrtc",
-        {
-          "cameraPermission": "CoFFe House uses the camera so you can join a watch-party video call.",
-          "microphonePermission": "CoFFe House uses the microphone so you can join a watch-party video call."
-        }
-      ]
+      "./plugins/withMacCatalyst"
     ]
   }
 }

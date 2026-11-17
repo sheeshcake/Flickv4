@@ -11,7 +11,7 @@ import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
 import { ScrollView } from '@/components/ui/scroll-view';
 import { Focusable } from '@/src/components/Focusable';
-import { updateService } from '@/src/services/UpdateService';
+import { getAppVersion } from '@/src/utils/appVersion';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
 interface Credit {
@@ -93,7 +93,7 @@ export const CreditsScreen = () => {
       <ScrollView className="flex-1 px-4">
         <VStack space="lg" className="pb-10">
           <Text size="sm" className="text-muted-foreground">
-            Flick v{updateService.getCurrentVersion()} is built on the work of
+            CoFFe House v{getAppVersion()} is built on the work of
             these projects and services.
           </Text>
 

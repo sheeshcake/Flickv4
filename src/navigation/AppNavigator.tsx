@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   NavigationContainer,
   DarkTheme,
@@ -21,9 +20,6 @@ import { CreditsScreen } from '@/src/screens/CreditsScreen';
 import { FinishedMoviesScreen } from '@/src/screens/FinishedMoviesScreen';
 import { TabNavigator } from './TabNavigator';
 import { TVNavigator } from './TVNavigator';
-import { JoinPartyScreen } from '@/src/screens/JoinPartyScreen';
-import { PartyLinkHandler } from '@/src/components/party/PartyLinkHandler';
-import { PartySessionBar } from '@/src/components/party/PartySessionBar';
 import { isTVLayout } from '@/src/utils/tv';
 import { isTablet } from '@/src/utils/responsive';
 import type { RootStackParamList } from './types';
@@ -52,21 +48,8 @@ const navTheme = {
 };
 
 export const AppNavigator = () => {
-  const [routeName, setRouteName] = useState<string | undefined>();
-  const syncRoute = () => {
-    if (!navigationRef.isReady()) return;
-    setRouteName(navigationRef.getCurrentRoute()?.name);
-  };
-
   return (
-    <NavigationContainer
-      ref={navigationRef}
-      theme={navTheme}
-      onReady={syncRoute}
-      onStateChange={syncRoute}
-    >
-      <PartyLinkHandler />
-      <PartySessionBar routeName={routeName} />
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <Stack.Navigator
         initialRouteName="Splash"
         screenOptions={{
@@ -111,7 +94,6 @@ export const AppNavigator = () => {
         <Stack.Screen name="Disclaimer" component={DisclaimerScreen} />
         <Stack.Screen name="Credits" component={CreditsScreen} />
         <Stack.Screen name="FinishedMovies" component={FinishedMoviesScreen} />
-        <Stack.Screen name="JoinParty" component={JoinPartyScreen} />
         <Stack.Screen
           name="Player"
           component={PlayerScreen}

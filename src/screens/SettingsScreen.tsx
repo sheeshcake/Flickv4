@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,7 +6,6 @@ import {
   ChevronRight,
   Captions,
   CheckCircle2,
-  Download,
   Gauge,
   Info,
   Globe,
@@ -15,8 +13,6 @@ import {
   MonitorPlay,
   Ratio,
   Server as ServerIcon,
-  User,
-  Users,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { VStack } from '@/components/ui/vstack';
@@ -24,7 +20,6 @@ import { HStack } from '@/components/ui/hstack';
 import { Heading } from '@/components/ui/heading';
 import { Icon } from '@/components/ui/icon';
 import { Text } from '@/components/ui/text';
-import { Input, InputField } from '@/components/ui/input';
 import { ScrollView } from '@/components/ui/scroll-view';
 import { Focusable } from '@/src/components/Focusable';
 import { useServers } from '@/src/hooks/useServers';
@@ -39,13 +34,9 @@ import {
 } from '@/src/hooks/useVideoAspect';
 import { getLanguageLabel } from '@/src/constants/languages';
 import { getRegionName, useCatalogRegion } from '@/src/hooks/useCatalogRegion';
-import { UpdateModal } from '@/src/components/UpdateModal';
-import { updateService } from '@/src/services/UpdateService';
 import { useFinishedMovies } from '@/src/hooks/useFinishedMovies';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
-import { useWatchParty } from '@/src/hooks/useWatchParty';
-import { PARTY_DISPLAY_NAME_MAX } from '@/src/party/displayName';
 import { formatMemoryGb } from '@/src/utils/deviceRecommendations';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -69,13 +60,6 @@ export const SettingsScreen = () => {
   const videoAspectLabel = getAspectLabel(videoAspect);
   const { region } = useCatalogRegion();
   const regionName = getRegionName(region);
-  const [updaterOpen, setUpdaterOpen] = useState(false);
-  const { displayName, setDisplayName } = useWatchParty();
-  const [nameDraft, setNameDraft] = useState(displayName);
-
-  useEffect(() => {
-    setNameDraft(displayName);
-  }, [displayName]);
 
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -88,33 +72,6 @@ export const SettingsScreen = () => {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
       >
         <VStack space="sm" className="px-4">
-          <MenuRow
-            icon={Users}
-            label="Join watch party"
-            value="Live rooms or a code"
-            onPress={() => navigation.navigate('JoinParty', {})}
-          />
-          <HStack className="items-center rounded-lg bg-card px-4 py-4">
-            <Icon as={User} className="text-foreground" />
-            <VStack className="ml-3 flex-1">
-              <Text className="text-foreground">Watch party name</Text>
-              <Input className="mt-2">
-                <InputField
-                  value={nameDraft}
-                  onChangeText={setNameDraft}
-                  placeholder="Shown in chat and reactions"
-                  maxLength={PARTY_DISPLAY_NAME_MAX}
-                  autoCorrect={false}
-                  onBlur={() => {
-                    void setDisplayName(nameDraft).then(setNameDraft);
-                  }}
-                  onSubmitEditing={() => {
-                    void setDisplayName(nameDraft).then(setNameDraft);
-                  }}
-                />
-              </Input>
-            </VStack>
-          </HStack>
           <MenuRow
             icon={ServerIcon}
             label="Playback server"
@@ -158,12 +115,6 @@ export const SettingsScreen = () => {
             onPress={() => navigation.navigate('FinishedMovies')}
           />
           <MenuRow
-            icon={Download}
-            label="Check for updates"
-            value={`Current version: v${updateService.getCurrentVersion()}`}
-            onPress={() => setUpdaterOpen(true)}
-          />
-          <MenuRow
             icon={Info}
             label="Disclaimer"
             value="About content sources & third-party servers"
@@ -184,11 +135,6 @@ export const SettingsScreen = () => {
           />
         </VStack>
       </ScrollView>
-
-      <UpdateModal
-        visible={updaterOpen}
-        onClose={() => setUpdaterOpen(false)}
-      />
     </Box>
   );
 };

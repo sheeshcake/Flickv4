@@ -3,7 +3,6 @@ import { ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Box } from '@/components/ui/box';
 import { Text } from '@/components/ui/text';
 import { VStack } from '@/components/ui/vstack';
-import { UpdateModal } from '@/src/components/UpdateModal';
 import {
   FlickSwoopLogo,
   TOTAL_MS,
@@ -15,31 +14,12 @@ import { useServers } from '@/src/hooks/useServers';
 import { useHomeData } from '@/src/hooks/useHomeData';
 import { useCatalogRegion } from '@/src/hooks/useCatalogRegion';
 import type { RootStackScreenProps } from '@/src/navigation/types';
-import {
-  updateService,
-  type UpdateInfo,
-} from '@/src/services/UpdateService';
-import {
-  clearSkippedVersion,
-  isSkippedVersion,
-  saveLastUpdateCheck,
-  setSkippedVersion,
-} from '@/src/utils/updateCheckStorage';
 
 const MESSAGES: string[] = Array.isArray(loadingMessages)
   ? loadingMessages
   : Object.values(loadingMessages as Record<string, string>);
 const MESSAGE_INTERVAL = 1000;
 const LAND_MS = 200;
-
-/** Soft-fail update check so a network blip never blocks entering Main. */
-const checkUpdatesSafe = async (): Promise<UpdateInfo | null> => {
-  try {
-    return await updateService.checkForUpdates();
-  } catch {
-    return null;
-  }
-};
 
 export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => {
   const { width: windowWidth } = useWindowDimensions();
@@ -52,8 +32,6 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
   const { prefetch } = useHomeData();
   const { loaded: regionLoaded } = useCatalogRegion();
 
-  const [updaterOpen, setUpdaterOpen] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const drawDoneRef = useRef(false);
   const bootDoneRef = useRef(false);
   const didStartExitRef = useRef(false);
@@ -88,25 +66,6 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
     markDrawDoneRef.current();
   }, []);
 
-  const finishBoot = useCallback(async () => {
-    await saveLastUpdateCheck();
-    bootDoneRef.current = true;
-    maybeExitRef.current();
-  }, []);
-
-  const handleCloseUpdater = useCallback(() => {
-    setUpdaterOpen(false);
-    void finishBoot();
-  }, [finishBoot]);
-
-  const handleSkipVersion = useCallback(async () => {
-    if (updateInfo?.latestVersion) {
-      await setSkippedVersion(updateInfo.latestVersion);
-    }
-    setUpdaterOpen(false);
-    void finishBoot();
-  }, [updateInfo, finishBoot]);
-
   useEffect(() => {
     const reveal = setTimeout(() => setShowCopy(true), WORD_REVEAL_MS);
     const fallback = setTimeout(() => markDrawDoneRef.current(), TOTAL_MS + 80);
@@ -131,30 +90,10 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
     void (async () => {
       const { refreshBuiltInServers: refreshServers, prefetch: prefetchHome } =
         bootFnsRef.current;
-      const [, info] = await Promise.all([
-        refreshServers(),
-        checkUpdatesSafe(),
-        prefetchHome(),
-      ]);
+      await Promise.all([refreshServers(), prefetchHome()]);
       if (cancelled) return;
-
-      if (info?.hasUpdate) {
-        const skipped = await isSkippedVersion(info.latestVersion);
-        if (cancelled) return;
-        if (!skipped) {
-          await clearSkippedVersion();
-          if (cancelled) return;
-          setUpdateInfo(info);
-          setUpdaterOpen(true);
-          return;
-        }
-      }
-
-      await saveLastUpdateCheck();
-      if (!cancelled) {
-        bootDoneRef.current = true;
-        maybeExitRef.current();
-      }
+      bootDoneRef.current = true;
+      maybeExitRef.current();
     })();
 
     return () => {
@@ -198,12 +137,6 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
           </Text>
         </Box>
       </VStack>
-      <UpdateModal
-        visible={updaterOpen}
-        onClose={handleCloseUpdater}
-        initialUpdateInfo={updateInfo}
-        onSkipVersion={handleSkipVersion}
-      />
     </Box>
   );
 };

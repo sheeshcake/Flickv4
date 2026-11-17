@@ -1,7 +1,6 @@
 import { cbc, gcm } from '@noble/ciphers/aes.js';
 import { bytesToUtf8, hexToBytes, utf8ToBytes } from '@noble/ciphers/utils.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { isPartyStreamUri, partySourceKind } from '@/src/party/protocol';
 
 const TAG = '[Streamflix]';
 // eslint-disable-next-line no-console
@@ -112,11 +111,17 @@ const decryptVidrockUrl = (payload: string): string | null => {
   }
 };
 
+const STREAM_URI_RE = /\.(m3u8|mp4|webm|mkv)(\?|#|$)/i;
+
+/** `true` when the URL points directly at a playable media file. */
+const isStreamUri = (uri: string): boolean =>
+  /^https?:\/\//i.test(uri) && STREAM_URI_RE.test(uri);
+
 const kindOf = (type: string | null | undefined, url: string): 'hls' | 'file' => {
   if (String(type).toLowerCase() === 'hls' || /\.m3u8(\?|#|$)/i.test(url)) {
     return 'hls';
   }
-  return partySourceKind(url);
+  return 'file';
 };
 
 const isEnglish = (language?: string | null, flag?: string | null): boolean => {
@@ -215,11 +220,11 @@ const listVidrock = async (
     let url = decryptVidrockUrl(packed);
     if (!url) continue;
     let kind = kindOf(data.type, url);
-    if (!isPartyStreamUri(url) && !/\.m3u8(\?|#|$)/i.test(url)) {
+    if (!isStreamUri(url) && !/\.m3u8(\?|#|$)/i.test(url)) {
       const mp4 = await pickAtlasMp4(url);
       if (mp4) {
         url = mp4;
-        kind = partySourceKind(mp4);
+        kind = /\.m3u8(\?|#|$)/i.test(mp4) ? 'hls' : 'file';
       } else if (name.toLowerCase() === 'atlas') {
         continue;
       }
