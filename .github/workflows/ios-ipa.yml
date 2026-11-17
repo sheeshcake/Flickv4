@@ -217,7 +217,7 @@ jobs:
   retry:
     name: Retry while no macOS runner is available
     needs: build
-    if: cancelled() || failure()
+    if: always()
     runs-on: ubuntu-latest
     permissions:
       actions: write
