@@ -27,8 +27,8 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>flick</string>
-				<string>com.wfrdee.flick</string>
+				<string>coffehouse</string>
+				<string>com.coffehouse.app</string>
 			</array>
 		</dict>
 	</array>
