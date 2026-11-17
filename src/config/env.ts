@@ -40,16 +40,32 @@ export const FLIXQUEST_CONFIG = {
   enabled: Boolean(process.env.EXPO_PUBLIC_FLIXQUEST_API_URL?.trim()),
 } as const;
 
-/** Remote M3U playlist merged into Live TV as the PH category. */
-const DEFAULT_LIVE_TV_M3U_URL =
-  'https://raw.githubusercontent.com/Harleythetech/IPHTV/main/ph.m3u';
+/** Free GitHub M3U playlists merged into Live TV as Movies/Series categories. */
+export interface LiveTvM3uSource {
+  url: string;
+  category: string;
+}
 
+const DEFAULT_LIVE_TV_M3U_SOURCES: LiveTvM3uSource[] = [
+  {
+    url: 'https://iptv-org.github.io/iptv/categories/movies.m3u',
+    category: 'Movies',
+  },
+  {
+    url: 'https://iptv-org.github.io/iptv/categories/series.m3u',
+    category: 'Series',
+  },
+];
+
+const envUrl = process.env.EXPO_PUBLIC_LIVE_TV_M3U_URL?.trim();
 export const LIVE_TV_M3U_CONFIG = {
-  url: process.env.EXPO_PUBLIC_LIVE_TV_M3U_URL?.trim() || DEFAULT_LIVE_TV_M3U_URL,
+  sources: envUrl
+    ? [{ url: envUrl, category: 'Movies' }]
+    : DEFAULT_LIVE_TV_M3U_SOURCES,
   enabled: true,
 } as const;
 
-/** Live tab is shown when FlixQuest DLHD and/or the PH M3U playlist is on. */
+/** Live tab is shown when FlixQuest DLHD and/or the M3U playlists are on. */
 export const LIVE_TV_CONFIG = {
   enabled: FLIXQUEST_CONFIG.enabled || LIVE_TV_M3U_CONFIG.enabled,
 } as const;

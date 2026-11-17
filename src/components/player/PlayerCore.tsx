@@ -54,7 +54,6 @@ import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
 import { useVideoQuality } from '@/src/hooks/useVideoQuality';
 import { File } from 'expo-file-system';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
-import { playbackHeadersFor } from '@/src/services/playbackHeaders';
 import type {
   StreamflixSource,
   StreamflixSubtitle,

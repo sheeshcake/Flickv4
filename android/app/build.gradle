@@ -117,7 +117,7 @@ android {
 
     namespace 'com.flickv4'
     defaultConfig {
-        applicationId 'com.flickv4'
+        applicationId 'com.coffehouse.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // From project `.env` (APP_VERSION / ANDROID_VERSION_CODE) — keep in

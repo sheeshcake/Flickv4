@@ -28,39 +28,9 @@ const CREDITS: Credit[] = [
     url: 'https://www.themoviedb.org',
   },
   {
-    name: 'Wyzie Subs',
-    description:
-      'Subtitles are sourced from the Wyzie Subs public API. Track availability and language coverage vary per title.',
-    url: 'https://sub.wyzie.ru',
-  },
-  {
-    name: 'Expo',
-    description:
-      'Built with Expo SDK 57 on top of React Native. expo-navigation-bar keeps the player immersive, expo-keep-awake holds the wake lock during playback.',
-    url: 'https://expo.dev',
-  },
-  {
-    name: 'react-native-video',
-    description:
-      "Powers all video playback, including quality switching, Picture-in-Picture, and native subtitle tracks. Maintained by TheWidlarzGroup and the react-native-video community.",
-    url: 'https://github.com/TheWidlarzGroup/react-native-video',
-  },
-  {
-    name: 'gluestack-ui v5',
-    description:
-      'UI primitives, semantic tokens, and design system baseline. Styling is driven by NativeWind v5 / Tailwind CSS v4.',
-    url: 'https://gluestack.io/ui/docs',
-  },
-  {
-    name: 'lucide-react-native',
-    description: 'Icon set used throughout the app.',
-    url: 'https://lucide.dev',
-  },
-  {
     name: 'Developer',
-    description:
-      'Sheeshcake (Wendale Dy) - Maintainer & Developer',
-    url: 'https://github.com/sheeshcake/Flickv4',
+    description: '3vyz — Maintainer & Developer',
+    url: 'https://www.instagram.com/3vyz/',
   },
 ];
 

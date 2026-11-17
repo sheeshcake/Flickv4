@@ -7,11 +7,11 @@
     "icon": "./assets/applogo/ic_launcher.jpeg",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
-    "scheme": "flick",
+    "scheme": "coffehouse",
     "ios": {
       "supportsTablet": true,
       "icon": "./assets/applogo/ic_launcher.jpeg",
-      "bundleIdentifier": "com.wfrdee.flick",
+      "bundleIdentifier": "com.coffehouse.app",
       "infoPlist": {
         "NSDocumentsFolderUsageDescription": "CoFFe House uses Documents to store and open downloaded videos.",
         "NSDownloadsFolderUsageDescription": "CoFFe House uses Downloads so you can save and open local files.",
@@ -34,7 +34,7 @@
         "android.permission.REQUEST_INSTALL_PACKAGES"
       ],
       "predictiveBackGestureEnabled": true,
-      "package": "com.flickv4",
+      "package": "com.coffehouse.app",
       "versionCode": 1
     },
     "web": {
