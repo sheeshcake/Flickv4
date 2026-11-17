@@ -237,5 +237,5 @@ jobs:
           fi
           echo "No macOS runner was available; retrying in 60s."
           sleep 60
-          gh workflow run ios-ipa.yml --ref coffee-1.0
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/workflows/ios-ipa.yml/dispatches" -f ref=coffee-1.0
           echo "re-dispatched"
