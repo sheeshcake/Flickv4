@@ -21,9 +21,9 @@ on:
         required: false
         default: '20306'
       xcode_version:
-        description: 'Xcode version (26.x required: expo-modules-core 57 needs Swift 6.3)'
+        description: 'Xcode version (26.4+ required: expo-modules-core 57 needs Swift 6.3)'
         required: false
-        default: '26.3'
+        default: '26.6'
   push:
     branches:
       - coffee-1.0
@@ -38,12 +38,12 @@ concurrency:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     env:
       APP_VERSION: ${{ github.event.inputs.app_version || '1.0' }}
       BUILD_NUMBER: ${{ github.event.inputs.build_number || '20306' }}
-      XCODE_VERSION: ${{ github.event.inputs.xcode_version || '26.3' }}
+      XCODE_VERSION: ${{ github.event.inputs.xcode_version || '26.6' }}
 
     steps:
       - name: Checkout
@@ -208,3 +208,34 @@ jobs:
               --title "iOS unsigned builds" \
               --notes "Automated unsigned IPA builds. Install with SideStore/AltStore/Sideloadly."
           gh release upload ios-latest "ios/build/CoFFeHouse-${APP_VERSION}.ipa" --clobber
+
+  # GitHub cancels macOS jobs that cannot be assigned to a runner within ~15
+  # minutes (hosted macOS pool saturation). In that case the build job ends as
+  # "cancelled" instead of failing, so re-dispatch the workflow until a runner
+  # is available. A genuine compile failure ends as "failure" and is NOT
+  # retried, so this cannot loop forever on a broken build.
+  retry:
+    name: Retry while no macOS runner is available
+    needs: build
+    if: cancelled() || failure()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Re-dispatch if the macOS job never got a runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          concl="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs" \
+            --jq '.jobs[] | select(.name == "Build unsigned IPA") | .conclusion')"
+          echo "build job conclusion: ${concl}"
+          if [ "${concl}" != "cancelled" ]; then
+            echo "Not a runner-capacity cancel -> not retrying."
+            exit 0
+          fi
+          echo "No macOS runner was available; retrying in 60s."
+          sleep 60
+          gh workflow run ios-ipa.yml --ref coffee-1.0
+          echo "re-dispatched"
