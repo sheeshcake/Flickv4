@@ -13,9 +13,21 @@ jobs:
     steps:
       - run: uname -a
 
+  maclatest:
+    name: macos-latest ok
+    runs-on: macos-latest
+    steps:
+      - run: sw_vers && xcodebuild -version
+
   mac15:
     name: macos-15 ok
     runs-on: macos-15
+    steps:
+      - run: sw_vers && xcodebuild -version
+
+  mac14:
+    name: macos-14 ok
+    runs-on: macos-14
     steps:
       - run: sw_vers && xcodebuild -version
 
