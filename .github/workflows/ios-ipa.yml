@@ -21,9 +21,9 @@ on:
         required: false
         default: '20306'
       xcode_version:
-        description: 'Xcode version'
+        description: 'Xcode version (26.4+ required: Swift 6.3 accepts expo-modules-core 57)'
         required: false
-        default: '16.4'
+        default: '26.6'
   push:
     branches:
       - coffee-1.0
@@ -33,17 +33,17 @@ permissions:
 
 concurrency:
   group: ios-ipa-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     env:
       APP_VERSION: ${{ github.event.inputs.app_version || '1.0' }}
       BUILD_NUMBER: ${{ github.event.inputs.build_number || '20306' }}
-      XCODE_VERSION: ${{ github.event.inputs.xcode_version || '16.4' }}
+      XCODE_VERSION: ${{ github.event.inputs.xcode_version || '26.6' }}
 
     steps:
       - name: Checkout
