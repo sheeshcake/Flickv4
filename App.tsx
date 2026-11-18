@@ -26,7 +26,7 @@ import '@/global.css';
 
 // Inner component so it can read the theme context provided above.
 function AppInner() {
-  const { mode } = useTheme();
+  const { mode, palette } = useTheme();
   const gluestackMode = mode === 'system' ? 'system' : mode;
   useEffect(() => {
     lockPortrait();
@@ -35,7 +35,7 @@ function AppInner() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <GluestackUIProvider mode={gluestackMode}>
+        <GluestackUIProvider mode={gluestackMode} palette={palette}>
           <ServersProvider>
             <MyListProvider>
               <CatalogRegionProvider>
