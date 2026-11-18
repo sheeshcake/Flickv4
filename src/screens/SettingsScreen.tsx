@@ -13,6 +13,7 @@ import {
   Heart,
   MonitorPlay,
   Ratio,
+  Palette,
   Server as ServerIcon,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -36,6 +37,7 @@ import {
 import { getLanguageLabel } from '@/src/constants/languages';
 import { getRegionName, useCatalogRegion } from '@/src/hooks/useCatalogRegion';
 import { useDnsSettings } from '@/src/hooks/useDnsSettings';
+import { useTheme } from '@/src/hooks/useTheme';
 import { useFinishedMovies } from '@/src/hooks/useFinishedMovies';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
@@ -64,6 +66,8 @@ export const SettingsScreen = () => {
   const regionName = getRegionName(region);
   const { preset: dnsPreset } = useDnsSettings();
   const dnsLabel = dnsPreset === 'system' ? 'System default' : dnsPreset;
+  const { mode: themeMode, palette: themePalette } = useTheme();
+  const themeLabel = `${themeMode} · ${themePalette}`;
 
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -93,6 +97,12 @@ export const SettingsScreen = () => {
             label="Speed server / DNS"
             value={dnsLabel}
             onPress={() => navigation.navigate('DnsSettings')}
+          />
+          <MenuRow
+            icon={Palette}
+            label="Theme"
+            value={themeLabel}
+            onPress={() => navigation.navigate('ThemeSettings')}
           />
           <MenuRow
             icon={MonitorPlay}

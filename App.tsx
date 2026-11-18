@@ -12,6 +12,7 @@ import { ServersProvider } from '@/src/hooks/useServers';
 import { MyListProvider } from '@/src/hooks/useMyList';
 import { CatalogRegionProvider } from '@/src/hooks/useCatalogRegion';
 import { DnsSettingsProvider } from '@/src/hooks/useDnsSettings';
+import { ThemeProvider, useTheme } from '@/src/hooks/useTheme';
 import { HomeDataProvider } from '@/src/hooks/useHomeData';
 import { VideoQualityProvider } from '@/src/hooks/useVideoQuality';
 import { VideoAspectProvider } from '@/src/hooks/useVideoAspect';
@@ -23,24 +24,22 @@ import { lockPortrait } from '@/src/utils/orientation';
 import { bootstrapDownloadPermissions } from '@/src/utils/downloadPermissions';
 import '@/global.css';
 
-export default function App() {
+// Inner component so it can read the theme context provided above.
+function AppInner() {
+  const { mode } = useTheme();
+  const gluestackMode = mode === 'system' ? 'system' : mode;
   useEffect(() => {
     lockPortrait();
-    // Ask for notification permission once, on the very first launch, so
-    // downloads can surface progress notifications without silently failing.
-    // Subsequent launches are a no-op; the actual Download button re-asks
-    // if permission was denied.
     void bootstrapDownloadPermissions();
   }, []);
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <GluestackUIProvider mode="dark">
+        <GluestackUIProvider mode={gluestackMode}>
           <ServersProvider>
             <MyListProvider>
               <CatalogRegionProvider>
-<DnsSettingsProvider>
+              <DnsSettingsProvider>
                 <HomeDataProvider>
                   <SubtitleSettingsProvider>
                     <VideoQualityProvider>
@@ -69,5 +68,13 @@ export default function App() {
         </GluestackUIProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
   );
 }
