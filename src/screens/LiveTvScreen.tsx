@@ -3,18 +3,19 @@ import { FlatList, RefreshControl, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Radio, Search as SearchIcon, Star } from 'lucide-react-native';
+import { Search as SearchIcon, Star, Tv, X } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
-import { Center } from '@/components/ui/center';
 import { HStack } from '@/components/ui/hstack';
 import { VStack } from '@/components/ui/vstack';
 import { Heading } from '@/components/ui/heading';
 import { Text } from '@/components/ui/text';
 import { Spinner } from '@/components/ui/spinner';
 import { Input, InputField, InputSlot, InputIcon } from '@/components/ui/input';
-import { Button, ButtonText } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
+import { EmptyState } from '@/src/components/EmptyState';
+import { ErrorState } from '@/src/components/ErrorState';
 import { Focusable } from '@/src/components/Focusable';
+import { SkeletonBox, SkeletonLine, SkeletonPill } from '@/src/components/Skeleton';
 import { useDeviceKind } from '@/src/hooks/useDeviceKind';
 import { getHorizontalPadding } from '@/src/utils/responsive';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
@@ -231,31 +232,52 @@ export const LiveTvScreen = () => {
 
   if (loading) {
     return (
-      <Center className="flex-1 bg-background">
-        <Spinner size="large" color="#E50914" />
-      </Center>
+      <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+        <Box style={{ paddingHorizontal: padding }} className="pb-3 pt-2">
+          <SkeletonLine width={132} height={26} />
+          <HStack space="sm" className="mt-4">
+            <SkeletonPill width={96} height={36} />
+            <SkeletonPill width={96} height={36} />
+          </HStack>
+          <SkeletonBox width="100%" height={44} radius={10} style={{ marginTop: 12 }} />
+          <HStack space="sm" className="mt-3">
+            <SkeletonPill width={64} />
+            <SkeletonPill width={96} />
+            <SkeletonPill width={80} />
+          </HStack>
+        </Box>
+        <VStack space="sm" style={{ paddingHorizontal: padding }}>
+          {Array.from({ length: 8 }).map((_, index) => (
+            <SkeletonBox key={index} width="100%" height={64} radius={12} />
+          ))}
+        </VStack>
+      </Box>
     );
   }
 
   if (error && !channels.length) {
     return (
-      <Center className="flex-1 bg-background px-8">
-        <VStack space="lg" className="items-center">
-          <Icon as={Radio} size="xl" className="text-muted-foreground" />
-          <Text className="text-center text-muted-foreground">{error}</Text>
-          <Button
-            variant="outline"
-            onPress={() => {
-              setLoading(true);
-              void load(true);
-            }}
-          >
-            <ButtonText>Try again</ButtonText>
-          </Button>
-        </VStack>
-      </Center>
+      <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+        <ErrorState
+          title="Couldn't load Live TV"
+          description={error}
+          onRetry={() => {
+            setLoading(true);
+            void load(true);
+          }}
+          retrying={loading}
+        />
+      </Box>
     );
   }
+
+  const hasActiveFilters =
+    query.trim().length > 0 || category != null || scope !== 'all';
+  const resetFilters = () => {
+    setQuery('');
+    setCategory(null);
+    setScope('all');
+  };
 
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -289,6 +311,11 @@ export const LiveTvScreen = () => {
               value={query}
               onChangeText={setQuery}
             />
+            {query.length > 0 ? (
+              <InputSlot className="pr-3" onPress={() => setQuery('')}>
+                <InputIcon as={X} className="text-muted-foreground" />
+              </InputSlot>
+            ) : null}
           </Input>
         </Box>
         {mode === 'channels' ? (
@@ -361,6 +388,30 @@ export const LiveTvScreen = () => {
         </Box>
       ) : null}
 
+      <HStack
+        className="items-center justify-between pb-2"
+        style={{ paddingHorizontal: padding }}
+      >
+        <Text size="xs" className="text-muted-foreground">
+          {mode === 'channels'
+            ? `${orderedChannels.length} ${
+                orderedChannels.length === 1 ? 'channel' : 'channels'
+              }`
+            : `${scheduleSections.reduce((n, s) => n + s.events.length, 0)} events`}
+        </Text>
+        {hasActiveFilters ? (
+          <Focusable
+            onPress={resetFilters}
+            className="rounded-full px-2 py-1"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <Text size="xs" className="text-primary">
+              Reset filters
+            </Text>
+          </Focusable>
+        ) : null}
+      </HStack>
+
       {error ? (
         <Text size="sm" className="px-4 pb-2 text-muted-foreground">
           {error}
@@ -387,9 +438,28 @@ export const LiveTvScreen = () => {
             />
           }
           ListEmptyComponent={
-            <Center className="py-16">
-              <Text className="text-muted-foreground">No channels match.</Text>
-            </Center>
+            <EmptyState
+              icon={Tv}
+              title={
+                hasActiveFilters ? 'No channels match' : 'No channels available'
+              }
+              description={
+                hasActiveFilters
+                  ? 'Try a different search term, or reset the filters to see every channel.'
+                  : 'The channel list came back empty. Check your connection and try again.'
+              }
+              actionLabel={hasActiveFilters ? 'Reset filters' : 'Try again'}
+              onAction={
+                hasActiveFilters
+                  ? resetFilters
+                  : () => {
+                      setRefreshing(true);
+                      void load(true);
+                    }
+              }
+              actionDisabled={refreshing}
+              compact
+            />
           }
         />
       ) : (
@@ -411,9 +481,14 @@ export const LiveTvScreen = () => {
             />
           }
           ListEmptyComponent={
-            <Center className="py-16">
-              <Text className="text-muted-foreground">No events match.</Text>
-            </Center>
+            <EmptyState
+              icon={Tv}
+              title="No events match"
+              description="Nothing in the schedule matches your filters. Reset them to see the full guide."
+              actionLabel="Reset filters"
+              onAction={resetFilters}
+              compact
+            />
           }
           renderItem={({ item: section }) => (
             <Box className="mb-6">

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -109,6 +110,10 @@ export const PlayerControls = ({
   const progress = duration > 0 ? currentTime / duration : 0;
   const showBrightness =
     brightness != null && typeof onBrightnessChange === 'function';
+  // Tap the duration to flip between total length and time remaining —
+  // a small convenience that avoids mental arithmetic on long movies.
+  const [showRemaining, setShowRemaining] = useState(false);
+  const remaining = Math.max(0, duration - currentTime);
 
   return (
     <Box className="absolute inset-0">
@@ -220,9 +225,20 @@ export const PlayerControls = ({
           <Text size="xs" className="text-foreground">
             {formatTime(currentTime)}
           </Text>
-          <Text size="xs" className="text-muted-foreground">
-            {formatTime(duration)}
-          </Text>
+          <Pressable
+            onPress={() => setShowRemaining((v) => !v)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={
+              showRemaining ? 'Show total duration' : 'Show time remaining'
+            }
+          >
+            <Text size="xs" className="text-muted-foreground">
+              {showRemaining
+                ? `-${formatTime(remaining)}`
+                : formatTime(duration)}
+            </Text>
+          </Pressable>
         </HStack>
       </VStack>
       )}

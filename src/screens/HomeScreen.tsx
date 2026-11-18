@@ -10,17 +10,14 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Box } from '@/components/ui/box';
-import { Button, ButtonText } from '@/components/ui/button';
-import { Center } from '@/components/ui/center';
-import { Spinner } from '@/components/ui/spinner';
-import { Text } from '@/components/ui/text';
-import { VStack } from '@/components/ui/vstack';
 import { AppHeader } from '@/src/components/AppHeader';
 import { HeroCarousel } from '@/src/components/HeroCarousel';
 import { ContentRow } from '@/src/components/ContentRow';
 import { CatalogRow } from '@/src/components/CatalogRow';
 import { BrowseChips } from '@/src/components/BrowseChips';
 import { GenreGrid } from '@/src/components/GenreGrid';
+import { HomeSkeleton } from '@/src/components/HomeSkeleton';
+import { ErrorState } from '@/src/components/ErrorState';
 import { HomeScreenTV } from '@/src/components/tv/HomeScreenTV';
 import type { TVSideNavHandle } from '@/src/components/tv/TVSideNav';
 import { useHomeData } from '@/src/hooks/useHomeData';
@@ -106,27 +103,29 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   };
 
   if (loading) {
-    return (
-      <Center className="flex-1 bg-background">
-        <Spinner size="large" color="#E50914" />
-      </Center>
-    );
+    return <HomeSkeleton />;
   }
 
   if (error && !rows.length) {
     return (
-      <Center className="flex-1 bg-background px-8">
-        <VStack space="lg" className="items-center">
-          <Text className="text-center text-muted-foreground">{error}</Text>
-          <Button variant="outline" onPress={refresh} isDisabled={refreshing}>
-            <ButtonText>{refreshing ? 'Retrying…' : 'Try again'}</ButtonText>
-          </Button>
-        </VStack>
-      </Center>
+      <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+        <ErrorState
+          title="Couldn't load the catalog"
+          error={error}
+          onRetry={refresh}
+          retrying={refreshing}
+        />
+      </Box>
     );
   }
 
-  const heroHeight = height * 0.6;
+  const isLandscape = width > height;
+  // Portrait keeps the original tall cinematic hero; landscape (tablets, and
+  // free-rotating devices) caps it against width so the hero can't swallow
+  // the whole viewport and push every row below the fold.
+  const heroHeight = isLandscape
+    ? Math.min(height * 0.78, width * 0.52)
+    : height * 0.6;
   const continueItems = continueWatching.map((e) => e.item);
   const findContinueEntry = (item: MediaItem) =>
     continueWatching.find(

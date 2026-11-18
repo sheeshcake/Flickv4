@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Download,
   Pause,
   Play,
   RefreshCw,
@@ -24,6 +25,7 @@ import { Image } from '@/components/ui/image';
 import { Spinner } from '@/components/ui/spinner';
 import { Focusable } from '@/src/components/Focusable';
 import { ConfirmDialog } from '@/src/components/ConfirmDialog';
+import { EmptyState } from '@/src/components/EmptyState';
 import { useDownloads } from '@/src/hooks/useDownloads';
 import { formatBytes, type DownloadJob } from '@/src/services/DownloadService';
 import { TMDBService } from '@/src/services/TMDBService';
@@ -202,12 +204,11 @@ export const DownloadsScreen = () => {
       </Heading>
 
       {entries.length === 0 ? (
-        <Center className="flex-1 px-8">
-          <Text className="text-center text-muted-foreground">
-            No downloads yet. Tap Download on a movie or an episode to save it
-            here for offline playback.
-          </Text>
-        </Center>
+        <EmptyState
+          icon={Download}
+          title="No downloads yet"
+          description="Tap Download on a movie or an episode to save it here for offline playback."
+        />
       ) : (
         <FlatList
           data={entries}

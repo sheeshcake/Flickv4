@@ -28,6 +28,7 @@ interface DetailState {
 
 export const useDetailData = (item: MediaItem) => {
   const movie = isMovie(item);
+  const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<DetailState>({
     loading: true,
     error: null,
@@ -46,6 +47,7 @@ export const useDetailData = (item: MediaItem) => {
     let cancelled = false;
     const run = async () => {
       try {
+        setState((s) => ({ ...s, loading: true, error: null }));
         if (movie) {
           const [details, videos, similar, credits, certification, images] =
             await Promise.all([
@@ -114,9 +116,11 @@ export const useDetailData = (item: MediaItem) => {
     return () => {
       cancelled = true;
     };
-  }, [item.id, movie]);
+  }, [item.id, movie, attempt]);
 
-  return state;
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+
+  return { ...state, reload };
 };
 
 /** Loads episodes for a given TV season on demand. */

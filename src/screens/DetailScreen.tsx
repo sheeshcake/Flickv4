@@ -70,6 +70,8 @@ import {
 } from '@/components/ui/button';
 import { TrailerWebView } from '@/src/components/TrailerWebView';
 import { ContentCard } from '@/src/components/ContentCard';
+import { ErrorState } from '@/src/components/ErrorState';
+import { SkeletonBox, SkeletonLine } from '@/src/components/Skeleton';
 import { getGridColumns } from '@/src/utils/responsive';
 import { SeasonEpisodePicker } from '@/src/components/SeasonEpisodePicker';
 import { Focusable } from '@/src/components/Focusable';
@@ -117,6 +119,7 @@ export const DetailScreen = ({
     crew,
     certification,
     logoPath,
+    reload,
   } = useDetailData(item);
   const { isInList, toggle } = useMyList();
   const { servers, activeServer } = useServers();
@@ -1032,15 +1035,22 @@ export const DetailScreen = ({
 
         <Box className="mt-4">
           {loading && (
-            <Center className="py-10">
-              <Spinner size="large" color="#E50914" />
-            </Center>
+            <VStack space="md" className="px-4 py-6">
+              <SkeletonLine width="55%" height={16} />
+              <SkeletonBox width="100%" height={72} radius={12} />
+              <SkeletonBox width="100%" height={72} radius={12} />
+              <SkeletonBox width="100%" height={72} radius={12} />
+            </VStack>
           )}
 
           {!loading && error && (
-            <Center className="py-10 px-8">
-              <Text className="text-center text-muted-foreground">{error}</Text>
-            </Center>
+            <ErrorState
+              compact
+              title="Couldn't load details"
+              error={error}
+              onRetry={reload}
+              retrying={loading}
+            />
           )}
 
           {!loading && !error && tab === 'episodes' && !movie && (
