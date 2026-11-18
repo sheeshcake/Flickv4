@@ -161,7 +161,7 @@ const summarizeEpisodes = (episodes: DownloadJob[]): string => {
 export const DownloadsScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { jobs, pause, resume, remove } = useDownloads();
+  const { jobs, pause, resume, remove, clearCompleted } = useDownloads();
   const [pendingDelete, setPendingDelete] = useState<DownloadJob | null>(null);
 
   const entries = useMemo(() => groupJobs(jobs), [jobs]);
@@ -199,9 +199,26 @@ export const DownloadsScreen = () => {
 
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <Heading size="2xl" bold className="mb-4 mt-4 px-4 text-foreground">
-        Downloads
-      </Heading>
+      <HStack space="md" className="mb-4 mt-4 items-center justify-between px-4">
+        <Heading size="2xl" bold className="text-foreground">
+          Downloads
+        </Heading>
+        {entries.some((e) =>
+          e.kind === 'movie'
+            ? e.job.status === 'completed'
+            : e.episodes.some((j) => j.status === 'completed'),
+        ) ? (
+          <Focusable
+            onPress={() => void clearCompleted()}
+            className="rounded-full px-3 py-1"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <Text size="xs" className="text-primary">
+              Clear completed
+            </Text>
+          </Focusable>
+        ) : null}
+      </HStack>
 
       {entries.length === 0 ? (
         <EmptyState

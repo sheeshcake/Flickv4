@@ -11,6 +11,7 @@ import { FinishedMoviesProvider } from '@/src/hooks/useFinishedMovies';
 import { ServersProvider } from '@/src/hooks/useServers';
 import { MyListProvider } from '@/src/hooks/useMyList';
 import { CatalogRegionProvider } from '@/src/hooks/useCatalogRegion';
+import { DnsSettingsProvider } from '@/src/hooks/useDnsSettings';
 import { HomeDataProvider } from '@/src/hooks/useHomeData';
 import { VideoQualityProvider } from '@/src/hooks/useVideoQuality';
 import { VideoAspectProvider } from '@/src/hooks/useVideoAspect';
@@ -39,6 +40,7 @@ export default function App() {
           <ServersProvider>
             <MyListProvider>
               <CatalogRegionProvider>
+<DnsSettingsProvider>
                 <HomeDataProvider>
                   <SubtitleSettingsProvider>
                     <VideoQualityProvider>
@@ -60,6 +62,7 @@ export default function App() {
                     </VideoQualityProvider>
                   </SubtitleSettingsProvider>
                 </HomeDataProvider>
+              </DnsSettingsProvider>
               </CatalogRegionProvider>
             </MyListProvider>
           </ServersProvider>

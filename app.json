@@ -2,7 +2,7 @@
   "expo": {
     "name": "CoFFe House",
     "slug": "flick",
-    "version": "1.0",
+    "version": "1.1",
     "orientation": "default",
     "icon": "./assets/applogo/ic_launcher.jpeg",
     "userInterfaceStyle": "dark",
@@ -35,7 +35,7 @@
       ],
       "predictiveBackGestureEnabled": true,
       "package": "com.coffehouse.app",
-      "versionCode": 1
+      "versionCode": 20307
     },
     "web": {
       "favicon": "./assets/favicon.png"

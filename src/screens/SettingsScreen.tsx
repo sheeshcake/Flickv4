@@ -9,6 +9,7 @@ import {
   Gauge,
   Info,
   Globe,
+  Wifi,
   Heart,
   MonitorPlay,
   Ratio,
@@ -34,6 +35,7 @@ import {
 } from '@/src/hooks/useVideoAspect';
 import { getLanguageLabel } from '@/src/constants/languages';
 import { getRegionName, useCatalogRegion } from '@/src/hooks/useCatalogRegion';
+import { useDnsSettings } from '@/src/hooks/useDnsSettings';
 import { useFinishedMovies } from '@/src/hooks/useFinishedMovies';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
@@ -60,6 +62,8 @@ export const SettingsScreen = () => {
   const videoAspectLabel = getAspectLabel(videoAspect);
   const { region } = useCatalogRegion();
   const regionName = getRegionName(region);
+  const { preset: dnsPreset } = useDnsSettings();
+  const dnsLabel = dnsPreset === 'system' ? 'System default' : dnsPreset;
 
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -83,6 +87,12 @@ export const SettingsScreen = () => {
             label="Catalog region"
             value={regionName}
             onPress={() => navigation.navigate('RegionSettings')}
+          />
+          <MenuRow
+            icon={Wifi}
+            label="Speed server / DNS"
+            value={dnsLabel}
+            onPress={() => navigation.navigate('DnsSettings')}
           />
           <MenuRow
             icon={MonitorPlay}

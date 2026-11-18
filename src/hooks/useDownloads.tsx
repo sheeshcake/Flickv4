@@ -25,6 +25,7 @@ interface DownloadsContextValue {
   resume: typeof DownloadService.resume;
   cancel: typeof DownloadService.cancel;
   remove: typeof DownloadService.remove;
+  clearCompleted: typeof DownloadService.clearCompleted;
   getLocalSource: typeof DownloadService.getLocalSource;
   prepareLocalPlayback: typeof DownloadService.prepareLocalPlayback;
   stopLocalPlayback: typeof DownloadService.stopLocalPlayback;
@@ -53,6 +54,7 @@ export const DownloadsProvider = ({ children }: { children: ReactNode }) => {
       resume: DownloadService.resume.bind(DownloadService),
       cancel: DownloadService.cancel.bind(DownloadService),
       remove: DownloadService.remove.bind(DownloadService),
+      clearCompleted: DownloadService.clearCompleted.bind(DownloadService),
       getLocalSource: DownloadService.getLocalSource.bind(DownloadService),
       prepareLocalPlayback:
         DownloadService.prepareLocalPlayback.bind(DownloadService),

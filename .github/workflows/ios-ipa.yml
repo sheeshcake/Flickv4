@@ -15,11 +15,11 @@ on:
       app_version:
         description: 'APP_VERSION / CFBundleShortVersionString (e.g. 1.0)'
         required: false
-        default: '1.0'
+        default: '1.1'
       build_number:
         description: 'CFBundleVersion (integer, must increase per install)'
         required: false
-        default: '20306'
+        default: '20307'
       xcode_version:
         description: 'Xcode version (26.4+ required: expo-modules-core 57 needs Swift 6.3)'
         required: false
