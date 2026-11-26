@@ -41,8 +41,8 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 90
     env:
-      APP_VERSION: ${{ github.event.inputs.app_version || '1.0' }}
-      BUILD_NUMBER: ${{ github.event.inputs.build_number || '20306' }}
+      APP_VERSION: ${{ github.event.inputs.app_version || '1.1' }}
+      BUILD_NUMBER: ${{ github.event.inputs.build_number || '20307' }}
       XCODE_VERSION: ${{ github.event.inputs.xcode_version || '26.6' }}
 
     steps:
