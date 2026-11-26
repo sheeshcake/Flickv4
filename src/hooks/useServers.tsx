@@ -181,15 +181,6 @@ const BUNDLED_EXTRA_SERVERS: RemoteServerJson[] = [
     scraper_timeout_seconds: 40,
   },
   {
-    id: 'vidsrc-cc',
-    name: 'VidSrc CC',
-    url: 'https://vidsrc.cc',
-    movie_url_pattern: '{url}/v3/embed/movie/{tmdbId}?autoplay=true',
-    tv_url_pattern:
-      '{url}/v3/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true',
-    scraper_timeout_seconds: 40,
-  },
-  {
     id: 'vidsrc-su',
     name: 'VidSrc SU',
     url: 'https://vidsrc.su',
@@ -198,21 +189,31 @@ const BUNDLED_EXTRA_SERVERS: RemoteServerJson[] = [
     scraper_timeout_seconds: 40,
   },
   {
-    id: 'videasy-net',
-    name: 'VidEasy Net',
-    url: 'https://player.videasy.net',
-    movie_url_pattern: '{url}/movie/{tmdbId}?autoplay=true',
-    tv_url_pattern: '{url}/tv/{tmdbId}/{season}/{episode}?autoplay=true',
+    id: 'vidsrc-to',
+    name: 'VidSrc TO',
+    url: 'https://vidsrc.to',
+    movie_url_pattern: '{url}/embed/movie/{tmdbId}?autoplay=true',
+    tv_url_pattern:
+      '{url}/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true',
     scraper_timeout_seconds: 40,
   },
   {
-    id: '2embed-stream',
-    name: '2Embed Stream',
-    url: 'https://www.2embed.stream',
+    id: '2embed-online',
+    name: '2Embed',
+    url: 'https://www.2embed.online',
     movie_url_pattern: '{url}/embed/movie/{tmdbId}?autoplay=true',
     tv_url_pattern:
       '{url}/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true',
     scraper_timeout_seconds: 45,
+  },
+  {
+    id: 'pstream',
+    name: 'P-Stream',
+    url: 'https://iframe.pstream.org',
+    movie_url_pattern: '{url}/embed/tmdb-movie-{tmdbId}?autoplay=true',
+    tv_url_pattern:
+      '{url}/embed/tmdb-tv-{tmdbId}/{season}/{episode}?autoplay=true',
+    scraper_timeout_seconds: 40,
   },
 ];
 

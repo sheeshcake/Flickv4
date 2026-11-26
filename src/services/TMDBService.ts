@@ -245,7 +245,16 @@ class TMDBServiceImpl {
     for (const credit of credits) {
       if (credit.media_type !== 'movie' && credit.media_type !== 'tv') continue;
       const key = `${credit.media_type}-${credit.id}`;
-      if (unique.has(key)) continue;
+      const existing = unique.get(key);
+      if (existing) {
+        // A cast row and a crew row can point at the same title. Prefer the
+        // copy that actually has artwork so the grid never shows blank cards.
+        if (!existing.poster_path && credit.poster_path) {
+          const better = this.personCreditToMediaItem(credit);
+          if (better) unique.set(key, better);
+        }
+        continue;
+      }
       const item = this.personCreditToMediaItem(credit);
       if (item) unique.set(key, item);
     }
