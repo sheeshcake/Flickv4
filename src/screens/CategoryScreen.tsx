@@ -118,7 +118,13 @@ export const CategoryScreen = ({
             colors={['#C47C48', '#6B3D22']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            className="h-10 w-10 items-center justify-center rounded-2xl"
+            style={{
+              width: 40,
+              height: 40,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 16,
+            }}
           >
             <Icon as={Coffee} size="sm" className="text-primary-foreground" />
           </LinearGradient>

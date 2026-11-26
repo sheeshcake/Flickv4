@@ -128,7 +128,13 @@ export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
         <HStack space="sm" className="items-center">
           <LinearGradient
             colors={['#C47C48', '#6B3D22']}
-            className="h-8 w-8 items-center justify-center rounded-xl"
+            style={{
+              width: 32,
+              height: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 12,
+            }}
           >
             <Icon as={Coffee} size="sm" className="text-primary-foreground" />
           </LinearGradient>
@@ -198,7 +204,13 @@ export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
                 <HStack space="sm" className="items-center">
                   <LinearGradient
                     colors={['rgba(196,124,72,0.38)', 'rgba(196,124,72,0.08)']}
-                    className="h-9 w-9 items-center justify-center rounded-xl"
+                    style={{
+                      width: 36,
+                      height: 36,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 12,
+                    }}
                   >
                     <Icon
                       as={entry.icon}

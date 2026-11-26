@@ -32,9 +32,6 @@ interface AppHeaderProps {
   topInset?: number;
 }
 
-const AnimatedBox = Animated.createAnimatedComponent(Box);
-const AnimatedText = Animated.createAnimatedComponent(Text);
-
 // Logo starts slightly oversized (1.3x) while unscrolled/over the hero, and
 // settles to its natural size (1x) once fully scrolled — the version text's
 // left padding scales by the same factor so its gap from the logo shrinks
@@ -73,26 +70,24 @@ export const AppHeader = ({
 
   return (
     <Box className="relative" style={{ paddingTop: topInset }}>
-      <AnimatedBox
-        className="absolute inset-0 border-b border-border bg-background"
-        style={backdropStyle}
-        pointerEvents="none"
-      />
+      <Animated.View style={backdropStyle} pointerEvents="none">
+        <Box className="absolute inset-0 border-b border-border bg-background" />
+      </Animated.View>
       <HStack
         className="items-center space-between pt-3 pb-1"
         style={{ paddingHorizontal }}
       >
-        <Animated.View style={[{ width: 120, height: 32 }, logoStyle]}>
-          <FlickLogo width={120} height={32} />
+        <Animated.View style={logoStyle}>
+          <Box style={{ width: 120, height: 32 }}>
+            <FlickLogo width={120} height={32} />
+          </Box>
         </Animated.View>
         <HStack space="sm" className="items-center">
-          <AnimatedText
-            size="xs"
-            className="text-muted-foreground"
-            style={versionStyle}
-          >
-            v{getAppVersion()}
-          </AnimatedText>
+          <Animated.View style={versionStyle}>
+            <Text size="xs" className="text-muted-foreground">
+              v{getAppVersion()}
+            </Text>
+          </Animated.View>
           <Box>{right}</Box>
         </HStack>
       </HStack>

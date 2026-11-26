@@ -75,7 +75,7 @@ export const ContentRow = ({
           <HStack space="sm" className="items-center">
             <LinearGradient
               colors={['#C47C48', '#6B3D22']}
-              className="h-6 w-1 rounded-full"
+              style={{ width: 4, height: 24, borderRadius: 999 }}
             />
             <Heading size={isTv ? '2xl' : 'lg'} className="text-foreground">
               {title}

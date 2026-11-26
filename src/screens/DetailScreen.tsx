@@ -96,8 +96,6 @@ import {
 } from '@/src/types';
 import type { RootStackScreenProps } from '@/src/navigation/types';
 
-const AnimatedBox = Animated.createAnimatedComponent(Box);
-
 export type Tab = 'episodes' | 'trailers' | 'similar';
 
 export const DetailScreen = ({
@@ -1146,11 +1144,9 @@ export const DetailScreen = ({
         className="absolute left-0 right-0 top-0 z-50"
         pointerEvents="box-none"
       >
-        <AnimatedBox
-          className="absolute inset-0 border-b border-border bg-background"
-          style={headerProgressStyle}
-          pointerEvents="none"
-        />
+        <Animated.View style={headerProgressStyle} pointerEvents="none">
+          <Box className="absolute inset-0 border-b border-border bg-background" />
+        </Animated.View>
         <HStack
           className="items-center justify-between px-4 pb-3"
           style={{ paddingTop: insets.top + 8 }}
@@ -1163,11 +1159,8 @@ export const DetailScreen = ({
             <Icon as={ArrowLeft} className="text-foreground" />
           </Focusable>
 
-          <AnimatedBox
-            className="flex-1 items-center px-2"
-            style={headerTitleStyle}
-            pointerEvents="none"
-          >
+          <Animated.View style={headerTitleStyle} pointerEvents="none">
+            <Box className="flex-1 items-center px-2">
             {logoUrl ? (
               <Image
                 source={{ uri: logoUrl }}
@@ -1185,7 +1178,8 @@ export const DetailScreen = ({
                 {getTitle(item)}
               </Text>
             )}
-          </AnimatedBox>
+            </Box>
+          </Animated.View>
 
           <Box className="h-10 w-10" />
         </HStack>

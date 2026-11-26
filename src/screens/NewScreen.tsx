@@ -148,7 +148,13 @@ const SectionHeading = ({
         colors={['#C47C48', '#6B3D22']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        className="h-8 w-8 items-center justify-center rounded-xl"
+        style={{
+          width: 32,
+          height: 32,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: 12,
+        }}
       >
         <Icon as={SectionIcon} size="sm" className="text-primary-foreground" />
       </LinearGradient>
@@ -303,7 +309,13 @@ export const NewScreen = () => {
             colors={['#C47C48', '#6B3D22']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            className="h-11 w-11 items-center justify-center rounded-2xl"
+            style={{
+              width: 44,
+              height: 44,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 16,
+            }}
           >
             <Icon as={Coffee} size="lg" className="text-primary-foreground" />
           </LinearGradient>
@@ -466,7 +478,11 @@ export const NewScreen = () => {
                       <HStack space="sm" className="flex-1 items-center">
                         <LinearGradient
                           colors={['#C47C48', '#6B3D22']}
-                          className="h-9 w-1.5 rounded-full"
+                          style={{
+                            width: 6,
+                            height: 36,
+                            borderRadius: 999,
+                          }}
                         />
                         <VStack className="flex-1">
                           <Text bold className="text-foreground" numberOfLines={1}>
