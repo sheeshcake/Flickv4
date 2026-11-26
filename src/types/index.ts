@@ -196,3 +196,11 @@ export const getTitle = (item: MediaItem): string =>
 
 export const getReleaseDate = (item: MediaItem): string | undefined =>
   isMovie(item) ? item.release_date : item.first_air_date;
+
+export interface DiscoverFilters {
+  mediaType?: 'all' | 'movie' | 'tv';
+  yearFrom?: number;
+  yearTo?: number;
+  language?: 'all' | 'ar' | 'en' | string;
+  originCountry?: string;
+}

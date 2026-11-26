@@ -5,12 +5,14 @@ import {
 import {
   Download as DownloadIcon,
   Home as HomeIcon,
+  Library as LibraryIcon,
   Radio as LiveIcon,
   Search as SearchIcon,
   Settings as SettingsIcon,
 } from 'lucide-react-native';
 import { HomeScreen } from '@/src/screens/HomeScreen';
 import { SearchScreen } from '@/src/screens/SearchScreen';
+import { LibraryScreen } from '@/src/screens/LibraryScreen';
 import { SettingsScreen } from '@/src/screens/SettingsScreen';
 import { DownloadsScreen } from '@/src/screens/DownloadsScreen';
 import { LiveTvScreen } from '@/src/screens/LiveTvScreen';
@@ -19,6 +21,7 @@ import { LIVE_TV_CONFIG } from '@/src/config/env';
 export type MainTabParamList = {
   Home: undefined;
   Search: undefined;
+  Library: undefined;
   Live: undefined;
   Downloads: undefined;
   Settings: undefined;
@@ -54,6 +57,15 @@ export const TabNavigator = () => {
         options={{
           tabBarIcon: ({ color, size }) => (
             <SearchIcon color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Library"
+        component={LibraryScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <LibraryIcon color={color} size={size} />
           ),
         }}
       />

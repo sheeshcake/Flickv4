@@ -2,6 +2,7 @@ import { TMDB_CONFIG } from '@/src/config/env';
 import {
   ContentRatingsResponse,
   CreditsResponse,
+  DiscoverFilters,
   ExternalIdsResponse,
   Genre,
   isMovie,
@@ -148,6 +149,39 @@ class TMDBServiceImpl {
       sort_by: 'popularity.desc',
       page,
     });
+  }
+
+  // ── Library / Discover with filters ────────────────────────────────────
+  discoverMoviesFiltered(filters: DiscoverFilters, page = 1) {
+    const params: QueryParams = {
+      page,
+      sort_by: 'popularity.desc',
+      include_adult: false,
+    };
+    if (filters.yearFrom)
+      params['primary_release_date.gte'] = `${filters.yearFrom}-01-01`;
+    if (filters.yearTo)
+      params['primary_release_date.lte'] = `${filters.yearTo}-12-31`;
+    if (filters.language && filters.language !== 'all')
+      params.with_original_language = filters.language;
+    if (filters.originCountry)
+      params.with_origin_country = filters.originCountry.toUpperCase();
+    return this.request<TMDBResponse<Movie>>('/discover/movie', params);
+  }
+
+  discoverTVFiltered(filters: DiscoverFilters, page = 1) {
+    const params: QueryParams = {
+      page,
+      sort_by: 'popularity.desc',
+      include_adult: false,
+    };
+    if (filters.yearFrom) params['first_air_date.gte'] = `${filters.yearFrom}-01-01`;
+    if (filters.yearTo) params['first_air_date.lte'] = `${filters.yearTo}-12-31`;
+    if (filters.language && filters.language !== 'all')
+      params.with_original_language = filters.language;
+    if (filters.originCountry)
+      params.with_origin_country = filters.originCountry.toUpperCase();
+    return this.request<TMDBResponse<TVShow>>('/discover/tv', params);
   }
 
   // ── Search ───────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
 import {
   Download as DownloadIcon,
   Home as HomeIcon,
+  Library as LibraryIcon,
   Radio as LiveIcon,
   Search as SearchIcon,
   Settings as SettingsIcon,
@@ -21,7 +22,7 @@ import { Focusable } from '@/src/components/Focusable';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import { LIVE_TV_CONFIG } from '@/src/config/env';
 
-export type TVTab = 'Home' | 'Search' | 'Live' | 'Downloads' | 'Settings';
+export type TVTab = 'Home' | 'Search' | 'Library' | 'Live' | 'Downloads' | 'Settings';
 
 interface TVSideNavProps {
   activeTab: TVTab;
@@ -37,6 +38,7 @@ export interface TVSideNavHandle {
 const TABS: { key: TVTab; label: string; icon: typeof HomeIcon }[] = [
   { key: 'Home', label: 'Home', icon: HomeIcon },
   { key: 'Search', label: 'Search', icon: SearchIcon },
+  { key: 'Library', label: 'Library', icon: LibraryIcon },
   ...(LIVE_TV_CONFIG.enabled
     ? [{ key: 'Live' as const, label: 'Live', icon: LiveIcon }]
     : []),
