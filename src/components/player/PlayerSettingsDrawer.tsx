@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Gauge,
   Layers,
+  Palette,
   Ratio,
   Server,
   Settings2,
@@ -21,6 +22,7 @@ import { Text } from '@/components/ui/text';
 import { VStack } from '@/components/ui/vstack';
 import { Focusable } from '@/src/components/Focusable';
 import type { PlaybackServer } from '@/src/hooks/useServers';
+import type { SubtitleSettings } from '@/src/hooks/useSubtitleSettings';
 import {
   getAspectLabel,
   VIDEO_ASPECT_OPTIONS,
@@ -29,9 +31,8 @@ import {
 import type { Variant } from '@/src/utils/hlsVariants';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
-/** Session-only — resets to `1` (Normal) every time a new video is opened,
- * matching the `PlayerCore` state it backs. See the flick-player-controls
- * skill's "session-only vs per-server vs persisted" table for why. */
+/** Playback speed is remembered per title (`flick.playerPreferences`) — the
+ * list itself stays the same, only the starting value is now persisted. */
 export const PLAYBACK_SPEED_OPTIONS = [
   0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2,
 ] as const;
@@ -60,6 +61,42 @@ const formatOffset = (seconds: number): string => {
   return `${sign}${seconds}s`;
 };
 
+const SUBTITLE_SIZE_OPTIONS = [
+  { label: 'Small', value: 14 },
+  { label: 'Medium', value: 18 },
+  { label: 'Large', value: 24 },
+  { label: 'Extra large', value: 30 },
+] as const;
+
+const SUBTITLE_COLOR_OPTIONS = [
+  { label: 'White', value: '#FFFFFF' },
+  { label: 'Yellow', value: '#FFE066' },
+  { label: 'Cyan', value: '#7DE2FC' },
+] as const;
+
+const SUBTITLE_BACKGROUND_OPTIONS = [
+  { label: 'None', value: 0 },
+  { label: 'Light', value: 0.35 },
+  { label: 'Normal', value: 0.6 },
+  { label: 'Dark', value: 0.85 },
+] as const;
+
+export type SubtitleAppearance = Pick<
+  SubtitleSettings,
+  'fontSize' | 'textColor' | 'backgroundOpacity' | 'bold' | 'textShadow'
+>;
+
+const sizeLabelFor = (value: number): string =>
+  SUBTITLE_SIZE_OPTIONS.find((o) => o.value === value)?.label ??
+  `${value}px`;
+
+const colorLabelFor = (value: string): string =>
+  SUBTITLE_COLOR_OPTIONS.find((o) => o.value === value)?.label ?? 'White';
+
+const backgroundLabelFor = (value: number): string =>
+  SUBTITLE_BACKGROUND_OPTIONS.find((o) => o.value === value)?.label ??
+  'Normal';
+
 const formatBitrate = (bps: number): string => {
   if (!bps) return '';
   const mbps = bps / 1_000_000;
@@ -74,7 +111,8 @@ type SettingsCategory =
   | 'aspect'
   | 'speed'
   | 'audio'
-  | 'subtitles';
+  | 'subtitles'
+  | 'appearance';
 
 const CATEGORY_LABELS: Record<SettingsCategory, string> = {
   server: 'Server',
@@ -84,6 +122,7 @@ const CATEGORY_LABELS: Record<SettingsCategory, string> = {
   speed: 'Playback speed',
   audio: 'Audio',
   subtitles: 'Subtitles',
+  appearance: 'Subtitle appearance',
 };
 
 export interface StreamflixSourceOption {
@@ -132,6 +171,10 @@ interface PlayerSettingsDrawerProps {
    * rewrites the local VTT sidecar timestamps in `PlayerCore`.
    */
   onChangeSubtitleOffset?: (next: number) => void;
+  /** Subtitle look & feel. Backed by the global persisted subtitle store, so
+   * it applies to both our overlay and the OS/native caption renderer. */
+  subtitleAppearance: SubtitleAppearance;
+  onChangeSubtitleAppearance: (patch: Partial<SubtitleAppearance>) => void;
 }
 
 /**
@@ -175,6 +218,8 @@ export const PlayerSettingsDrawer = ({
   onSelectSubtitle,
   subtitleOffsetSeconds,
   onChangeSubtitleOffset,
+  subtitleAppearance,
+  onChangeSubtitleAppearance,
 }: PlayerSettingsDrawerProps) => {
   const [activeCategory, setActiveCategory] =
     useState<SettingsCategory | null>(null);
@@ -213,6 +258,9 @@ export const PlayerSettingsDrawer = ({
       ? audioTracks[0]?.label ?? 'Default'
       : audioTracks.find((t) => t.index === selectedAudioIndex)?.label ??
         'Default';
+  const appearanceValue = `${sizeLabelFor(subtitleAppearance.fontSize)}, ${colorLabelFor(
+    subtitleAppearance.textColor,
+  )}, ${backgroundLabelFor(subtitleAppearance.backgroundOpacity)} bg`;
 
   return (
     <Box style={StyleSheet.absoluteFill} className="z-50">
@@ -304,6 +352,12 @@ export const PlayerSettingsDrawer = ({
                   label="Subtitles"
                   value={subtitleValue}
                   onPress={() => setActiveCategory('subtitles')}
+                />
+                <SettingsMenuRow
+                  icon={Palette}
+                  label="Subtitle appearance"
+                  value={appearanceValue}
+                  onPress={() => setActiveCategory('appearance')}
                 />
               </SettingsSection>
 
@@ -523,6 +577,77 @@ export const PlayerSettingsDrawer = ({
                   No subtitles found for this title.
                 </Text>
               ) : null}
+            </VStack>
+          )}
+
+          {activeCategory === 'appearance' && (
+            <VStack space="lg">
+              <Text size="xs" className="text-muted-foreground">
+                Changes apply immediately and are saved for future playback.
+              </Text>
+
+              <SettingsSection title="Text size">
+                {SUBTITLE_SIZE_OPTIONS.map((opt, idx) => (
+                  <OptionRow
+                    key={opt.value}
+                    label={opt.label}
+                    active={subtitleAppearance.fontSize === opt.value}
+                    hasTVPreferredFocus={idx === 0}
+                    onPress={() =>
+                      onChangeSubtitleAppearance({ fontSize: opt.value })
+                    }
+                  />
+                ))}
+              </SettingsSection>
+
+              <SettingsSection title="Text color">
+                {SUBTITLE_COLOR_OPTIONS.map((opt, idx) => (
+                  <OptionRow
+                    key={opt.value}
+                    label={opt.label}
+                    active={subtitleAppearance.textColor === opt.value}
+                    hasTVPreferredFocus={idx === 0}
+                    onPress={() =>
+                      onChangeSubtitleAppearance({ textColor: opt.value })
+                    }
+                  />
+                ))}
+              </SettingsSection>
+
+              <SettingsSection title="Background">
+                {SUBTITLE_BACKGROUND_OPTIONS.map((opt, idx) => (
+                  <OptionRow
+                    key={opt.value}
+                    label={opt.label}
+                    active={subtitleAppearance.backgroundOpacity === opt.value}
+                    hasTVPreferredFocus={idx === 0}
+                    onPress={() =>
+                      onChangeSubtitleAppearance({
+                        backgroundOpacity: opt.value,
+                      })
+                    }
+                  />
+                ))}
+              </SettingsSection>
+
+              <SettingsSection title="Style">
+                <OptionRow
+                  label="Bold text"
+                  active={subtitleAppearance.bold}
+                  onPress={() =>
+                    onChangeSubtitleAppearance({ bold: !subtitleAppearance.bold })
+                  }
+                />
+                <OptionRow
+                  label="Text shadow"
+                  active={subtitleAppearance.textShadow}
+                  onPress={() =>
+                    onChangeSubtitleAppearance({
+                      textShadow: !subtitleAppearance.textShadow,
+                    })
+                  }
+                />
+              </SettingsSection>
             </VStack>
           )}
         </ScrollView>

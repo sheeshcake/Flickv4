@@ -18,6 +18,7 @@ import { VideoQualityProvider } from '@/src/hooks/useVideoQuality';
 import { VideoAspectProvider } from '@/src/hooks/useVideoAspect';
 import { PlayerDebugSettingsProvider } from '@/src/hooks/usePlayerDebugSettings';
 import { PlaybackSettingsProvider } from '@/src/hooks/usePlaybackSettings';
+import { PlayerPreferencesProvider } from '@/src/hooks/usePlayerPreferences';
 import { DownloadsProvider } from '@/src/hooks/useDownloads';
 import { DownloadResolverHost } from '@/src/components/DownloadResolverHost';
 import { lockPortrait } from '@/src/utils/orientation';
@@ -39,29 +40,31 @@ function AppInner() {
           <ServersProvider>
             <MyListProvider>
               <CatalogRegionProvider>
-              <DnsSettingsProvider>
-                <HomeDataProvider>
-                  <SubtitleSettingsProvider>
-                    <VideoQualityProvider>
-                      <VideoAspectProvider>
-                        <PlayerDebugSettingsProvider>
-                          <PlaybackSettingsProvider>
-                            <FinishedMoviesProvider>
-                              <ContinueWatchingProvider>
-                                <DownloadsProvider>
-                                  <StatusBar style="light" />
-                                  <AppNavigator />
-                                  <DownloadResolverHost />
-                                </DownloadsProvider>
-                              </ContinueWatchingProvider>
-                            </FinishedMoviesProvider>
-                          </PlaybackSettingsProvider>
-                        </PlayerDebugSettingsProvider>
-                      </VideoAspectProvider>
-                    </VideoQualityProvider>
-                  </SubtitleSettingsProvider>
-                </HomeDataProvider>
-              </DnsSettingsProvider>
+                <DnsSettingsProvider>
+                  <HomeDataProvider>
+                    <SubtitleSettingsProvider>
+                      <PlayerPreferencesProvider>
+                        <VideoQualityProvider>
+                          <VideoAspectProvider>
+                            <PlayerDebugSettingsProvider>
+                              <PlaybackSettingsProvider>
+                                <FinishedMoviesProvider>
+                                  <ContinueWatchingProvider>
+                                    <DownloadsProvider>
+                                      <StatusBar style="light" />
+                                      <AppNavigator />
+                                      <DownloadResolverHost />
+                                    </DownloadsProvider>
+                                  </ContinueWatchingProvider>
+                                </FinishedMoviesProvider>
+                              </PlaybackSettingsProvider>
+                            </PlayerDebugSettingsProvider>
+                          </VideoAspectProvider>
+                        </VideoQualityProvider>
+                      </PlayerPreferencesProvider>
+                    </SubtitleSettingsProvider>
+                  </HomeDataProvider>
+                </DnsSettingsProvider>
               </CatalogRegionProvider>
             </MyListProvider>
           </ServersProvider>

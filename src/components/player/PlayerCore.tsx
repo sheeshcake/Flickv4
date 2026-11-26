@@ -26,7 +26,9 @@ import { PlayerControls } from '@/src/components/player/PlayerControls';
 import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer';
 import {
   PlayerSettingsDrawer,
+  PLAYBACK_SPEED_OPTIONS,
   type PlaybackSpeed,
+  type SubtitleAppearance,
 } from '@/src/components/player/PlayerSettingsDrawer';
 import {
   PIP_SUBTITLE_FONT_SIZE,
@@ -47,9 +49,16 @@ import {
 } from '@/src/hooks/useNextEpisode';
 import { useWatchNextRecommendation } from '@/src/hooks/useWatchNextRecommendation';
 import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
+import {
+  usePlayerPreferences,
+  type PlayerPreference,
+} from '@/src/hooks/usePlayerPreferences';
 import { useServers } from '@/src/hooks/useServers';
 import { useSubtitles } from '@/src/hooks/useSubtitles';
-import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
+import {
+  DEFAULT_SUBTITLE_SETTINGS,
+  useSubtitleSettings,
+} from '@/src/hooks/useSubtitleSettings';
 import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
 import { useVideoQuality } from '@/src/hooks/useVideoQuality';
 import { File } from 'expo-file-system';
@@ -114,7 +123,10 @@ interface PlayerCoreProps {
  * unlike expo-video's `isPictureInPictureSupported()`. */
 const isPipSupported = (): boolean =>
   Platform.OS === 'ios' ||
-  (Platform.OS === 'android' && Number(Platform.Version) >= 26);
+  (Platform.OS === 'android' && Number(Platform.Version) >= 26) ||
+  (Platform.OS === 'web' &&
+    typeof document !== 'undefined' &&
+    !!document.pictureInPictureEnabled);
 
 /** Approximates expo-video's old `preferredForwardBufferDuration` (seconds)
  * as ExoPlayer `bufferConfig` (ms-based) for Android. iOS uses the RNV
@@ -169,6 +181,23 @@ export const PlayerCore = ({
   const isFocused = useIsFocused();
   const { servers, activeServer } = useServers();
   const { upsert, advanceEpisode } = useContinueWatching();
+  const preferences = usePlayerPreferences();
+  // TV preferences are per show (not per episode), mirroring Continue
+  // Watching's key so every episode of a series inherits the same choices.
+  const preferenceSubject = useMemo(
+    () => ({ id: item.id, media_type: item.media_type }),
+    [item.id, item.media_type],
+  );
+  const persistedPref = useMemo(
+    () =>
+      preferences.ready ? preferences.getFor(preferenceSubject) : undefined,
+    [preferences, preferenceSubject],
+  );
+  // Locally chosen values take effect immediately; the provider persists them
+  // for the next time this title is opened.
+  const [prefOverride, setPrefOverride] = useState<Partial<PlayerPreference>>(
+    {},
+  );
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
   // Set right before autoplay hands off to the next episode. Guards the
@@ -182,10 +211,22 @@ export const PlayerCore = ({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [episodesOpen, setEpisodesOpen] = useState(false);
   const [pipActive, setPipActive] = useState(false);
-  // Session-only: resets to Normal every time a new video/PlayerCore mounts,
-  // rather than persisting app-wide — see the flick-player-controls skill's
-  // "session-only vs per-server vs persisted" table.
+  // Starting speed comes from this title's saved preference. Changes made
+  // during playback update both this state and the persisted per-title store.
   const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(1);
+  const appliedInitialSpeedRef = useRef(false);
+  useEffect(() => {
+    if (!preferences.ready || appliedInitialSpeedRef.current) return;
+    if (prefOverride.playbackRate !== undefined) return;
+    appliedInitialSpeedRef.current = true;
+    const saved = preferences.getFor(preferenceSubject).playbackRate;
+    if (
+      typeof saved === 'number' &&
+      PLAYBACK_SPEED_OPTIONS.some((option) => option === saved)
+    ) {
+      setPlaybackRate(saved as PlaybackSpeed);
+    }
+  }, [preferences, preferenceSubject, prefOverride.playbackRate]);
   const {
     volume,
     setVolume,
@@ -218,6 +259,15 @@ export const PlayerCore = ({
     [onSelectStreamflixSource],
   );
 
+  const handleSelectSpeed = useCallback(
+    (speed: PlaybackSpeed) => {
+      setPlaybackRate(speed);
+      setPrefOverride((prev) => ({ ...prev, playbackRate: speed }));
+      preferences.saveFor(preferenceSubject, { playbackRate: speed });
+    },
+    [preferences, preferenceSubject],
+  );
+
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [selectedAudioIndex, setSelectedAudioIndex] = useState<number | null>(
     null,
@@ -225,6 +275,65 @@ export const PlayerCore = ({
   const onAudioTracks = useCallback((data: OnAudioTracksData) => {
     setAudioTracks(data.audioTracks ?? []);
   }, []);
+
+  // Remembered audio choice: prefer a language code (stable across servers)
+  // and fall back to the raw index for streams that don't expose one.
+  const preferredAudioLanguage =
+    prefOverride.audioLanguage !== undefined
+      ? prefOverride.audioLanguage
+      : persistedPref?.audioLanguage;
+  const preferredAudioIndex =
+    prefOverride.audioIndex !== undefined
+      ? prefOverride.audioIndex
+      : persistedPref?.audioIndex;
+
+  useEffect(() => {
+    if (!audioTracks.length) return;
+    if (preferredAudioLanguage === undefined && preferredAudioIndex === undefined) {
+      return;
+    }
+    if (preferredAudioLanguage == null && preferredAudioIndex == null) {
+      setSelectedAudioIndex(null);
+      return;
+    }
+    const normalize = (value: unknown): string =>
+      typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const wantedLanguage = normalize(preferredAudioLanguage);
+    const byLanguage = wantedLanguage
+      ? audioTracks.find(
+          (track) =>
+            normalize(track.language) === wantedLanguage ||
+            normalize(track.title) === wantedLanguage,
+        )
+      : undefined;
+    const byIndex =
+      preferredAudioIndex != null
+        ? audioTracks.find(
+            (track, i) => (track.index ?? i) === preferredAudioIndex,
+          )
+        : undefined;
+    const match = byLanguage ?? byIndex;
+    if (match) {
+      setSelectedAudioIndex(match.index ?? audioTracks.indexOf(match));
+    }
+  }, [audioTracks, preferredAudioLanguage, preferredAudioIndex]);
+
+  const handleSelectAudio = useCallback(
+    (index: number) => {
+      setSelectedAudioIndex(index);
+      const track = audioTracks.find((t, i) => (t.index ?? i) === index);
+      const language =
+        typeof track?.language === 'string' && track.language.trim()
+          ? track.language
+          : undefined;
+      setPrefOverride((prev) => ({ ...prev, audioLanguage: language, audioIndex: index }));
+      preferences.saveFor(preferenceSubject, {
+        audioLanguage: language,
+        audioIndex: index,
+      });
+    },
+    [audioTracks, preferences, preferenceSubject],
+  );
 
   const extraSubtitleTracks = useMemo<WyzieSubtitle[]>(
     () =>
@@ -290,7 +399,8 @@ export const PlayerCore = ({
       : undefined,
   );
 
-  const { settings: subtitleSettings } = useSubtitleSettings();
+  const { settings: subtitleSettings, update: updateSubtitleSettings } =
+    useSubtitleSettings();
   const nativeSubtitlesEnabled = subtitleSettings.renderMode === 'native';
   // Sidecar (native OS) subtitle rendering via react-native-video's
   // `source.textTracks` works on Android always, but NOT with HLS playlists
@@ -304,6 +414,19 @@ export const PlayerCore = ({
   // embedded to select).
   const useNativeSidecar =
     nativeSubtitlesEnabled && !(Platform.OS === 'ios' && isHls);
+
+  // Explicit `null` means the user picked "Off" for this title; `undefined`
+  // falls back to the app-wide default language. Waiting for the preference
+  // store before enabling subtitle search prevents the global default from
+  // auto-selecting a track before the saved one is known.
+  const preferredSubtitleLanguage =
+    prefOverride.subtitleLanguage !== undefined
+      ? prefOverride.subtitleLanguage
+      : persistedPref?.subtitleLanguage;
+  const preferredDefaultLanguage =
+    preferredSubtitleLanguage === undefined
+      ? subtitleSettings.defaultLanguage
+      : preferredSubtitleLanguage ?? '';
 
   // Online: Wyzie SRT search drives the picker (format=vtt often returns an
   // empty list). Offline: `localSubtitles` skips the network. Cue parse is
@@ -321,8 +444,9 @@ export const PlayerCore = ({
     tmdbId: item.id,
     season,
     episode,
+    enabled: preferences.ready,
     loadCues: !useNativeSidecar,
-    defaultLanguage: subtitleSettings.defaultLanguage,
+    defaultLanguage: preferredDefaultLanguage,
     localTracks: localSubtitles,
     format: 'srt',
     extraTracks: extraSubtitleTracks,
@@ -334,6 +458,41 @@ export const PlayerCore = ({
     label: `${t.display}${t.isHearingImpaired ? ' (CC)' : ''}`,
   }));
   const subtitlesActive = wyzieSelectedId != null;
+
+  const handleSelectSubtitle = useCallback(
+    (id: string | null) => {
+      const chosen = id ? wyzieTracks.find((track) => track.id === id) : null;
+      const language = chosen?.language ?? null;
+      setPrefOverride((prev) => ({ ...prev, subtitleLanguage: language }));
+      preferences.saveFor(preferenceSubject, { subtitleLanguage: language });
+      selectWyzieTrack(id);
+    },
+    [wyzieTracks, preferences, preferenceSubject, selectWyzieTrack],
+  );
+
+  const subtitleAppearance: SubtitleAppearance = useMemo(
+    () => ({
+      fontSize: subtitleSettings.fontSize,
+      textColor: subtitleSettings.textColor,
+      backgroundOpacity: subtitleSettings.backgroundOpacity,
+      bold: subtitleSettings.bold,
+      textShadow: subtitleSettings.textShadow,
+    }),
+    [
+      subtitleSettings.fontSize,
+      subtitleSettings.textColor,
+      subtitleSettings.backgroundOpacity,
+      subtitleSettings.bold,
+      subtitleSettings.textShadow,
+    ],
+  );
+  const appearanceActive =
+    subtitleSettings.fontSize !== DEFAULT_SUBTITLE_SETTINGS.fontSize ||
+    subtitleSettings.textColor !== DEFAULT_SUBTITLE_SETTINGS.textColor ||
+    subtitleSettings.backgroundOpacity !==
+      DEFAULT_SUBTITLE_SETTINGS.backgroundOpacity ||
+    subtitleSettings.bold !== DEFAULT_SUBTITLE_SETTINGS.bold ||
+    subtitleSettings.textShadow !== DEFAULT_SUBTITLE_SETTINGS.textShadow;
 
   // Stable ids for native sidecar effects — avoid refetch/cancel races when
   // the track object identity changes but the selection did not.
@@ -353,8 +512,10 @@ export const PlayerCore = ({
   const settingsActive =
     playbackRate !== 1 ||
     subtitlesActive ||
+    selectedAudioIndex != null ||
     selectedVariantUri != null ||
-    aspect !== 'contain';
+    aspect !== 'contain' ||
+    appearanceActive;
 
   // Session-only sync offset (seconds) for the currently selected track.
   // Component mode applies it in cue lookup; native mode rewrites the local
@@ -1125,21 +1286,25 @@ export const PlayerCore = ({
             `Track ${(t.index ?? i) + 1}`,
         }))}
         selectedAudioIndex={selectedAudioIndex}
-        onSelectAudio={setSelectedAudioIndex}
+        onSelectAudio={handleSelectAudio}
         variants={variants}
         selectedVariantUri={selectedVariantUri}
         onSelectQuality={onSelectQuality}
         aspect={aspect}
         onSelectAspect={setAspect}
         playbackRate={playbackRate}
-        onSelectSpeed={setPlaybackRate}
+        onSelectSpeed={handleSelectSpeed}
         subtitleTracks={subtitleTrackOptions}
         selectedSubtitleId={wyzieSelectedId}
         subtitlesLoading={loadingWyzieTracks}
         subtitlesError={wyzieError}
-        onSelectSubtitle={selectWyzieTrack}
+        onSelectSubtitle={handleSelectSubtitle}
         subtitleOffsetSeconds={subtitleOffsetSeconds}
         onChangeSubtitleOffset={setSubtitleOffsetSeconds}
+        subtitleAppearance={subtitleAppearance}
+        onChangeSubtitleAppearance={(patch) =>
+          updateSubtitleSettings(patch)
+        }
       />
 
       {isTVShow && onSelectEpisode && (
