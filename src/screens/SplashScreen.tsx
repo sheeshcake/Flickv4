@@ -24,9 +24,10 @@ import type { RootStackScreenProps } from '@/src/navigation/types';
 const MESSAGES: string[] = Array.isArray(loadingMessages)
   ? loadingMessages
   : Object.values(loadingMessages as Record<string, string>);
-const MESSAGE_INTERVAL = 1000;
-const TOTAL_MS = 2200;
-const LAND_MS = 200;
+const MESSAGE_INTERVAL = 350;
+/** Quick welcome: visible for ~1s, then a short polished fade. */
+const TOTAL_MS = 1050;
+const FADE_OUT_MS = 240;
 
 // Coffee steam particles config
 const STEAM_COUNT = 6;
@@ -42,14 +43,15 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
   const { loaded: regionLoaded } = useCatalogRegion();
 
   const drawDoneRef = useRef(false);
-  const bootDoneRef = useRef(false);
   const didStartExitRef = useRef(false);
   const didNavigateRef = useRef(false);
   const landTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bootFnsRef = useRef({ refreshBuiltInServers, prefetch });
   bootFnsRef.current = { refreshBuiltInServers, prefetch };
 
-  // Shared animation values
+  // Shared animation values. `exitOpacity` fades the whole welcome image so
+  // the handoff to Main never shows a hard cut.
+  const exitOpacity = useSharedValue(1);
   const logoScale = useSharedValue(0.7);
   const logoOpacity = useSharedValue(0);
   const titleOpacity = useSharedValue(0);
@@ -65,10 +67,17 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
 
   const maybeExit = useCallback(() => {
     if (didStartExitRef.current) return;
-    if (!drawDoneRef.current || !bootDoneRef.current) return;
+    // Network warming is deliberately NOT a gate: a slow server list or TMDB
+    // request must never keep the welcome image on screen. Boot runs in the
+    // background and Home renders its own skeleton if needed.
+    if (!drawDoneRef.current) return;
     didStartExitRef.current = true;
-    landTimerRef.current = setTimeout(goMain, LAND_MS);
-  }, [goMain]);
+    exitOpacity.value = withTiming(0, {
+      duration: FADE_OUT_MS,
+      easing: Easing.inOut(Easing.quad),
+    });
+    landTimerRef.current = setTimeout(goMain, FADE_OUT_MS);
+  }, [exitOpacity, goMain]);
   const maybeExitRef = useRef(maybeExit);
   maybeExitRef.current = maybeExit;
 
@@ -92,26 +101,26 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
     );
     // Logo entrance
     logoOpacity.value = withTiming(1, {
-      duration: 700,
+      duration: 240,
       easing: Easing.out(Easing.cubic),
     });
     logoScale.value = withTiming(1, {
-      duration: 900,
+      duration: 340,
       easing: Easing.out(Easing.back(1.4)),
     });
     // Title
     titleOpacity.value = withDelay(
-      400,
-      withTiming(1, { duration: 600, easing: Easing.out(Easing.cubic) }),
+      90,
+      withTiming(1, { duration: 240, easing: Easing.out(Easing.cubic) }),
     );
     titleTranslate.value = withDelay(
-      400,
-      withTiming(0, { duration: 600, easing: Easing.out(Easing.cubic) }),
+      90,
+      withTiming(0, { duration: 240, easing: Easing.out(Easing.cubic) }),
     );
     // Tagline
     taglineOpacity.value = withDelay(
-      900,
-      withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) }),
+      180,
+      withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) }),
     );
 
     const fallback = setTimeout(() => markDrawDoneRef.current(), TOTAL_MS);
@@ -133,10 +142,10 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
     void (async () => {
       const { refreshBuiltInServers: refreshServers, prefetch: prefetchHome } =
         bootFnsRef.current;
-      await Promise.all([refreshServers(), prefetchHome()]);
+      // Fire-and-forget: failures are soft, and none of this blocks the
+      // welcome animation. Home has its own skeleton/retry states.
+      await Promise.allSettled([refreshServers(), prefetchHome()]);
       if (cancelled) return;
-      bootDoneRef.current = true;
-      maybeExitRef.current();
     })();
 
     return () => {
@@ -167,11 +176,15 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
   const bgStyle = useAnimatedStyle(() => ({
     opacity: 0.5 + bgShift.value * 0.35,
   }));
+  const exitStyle = useAnimatedStyle(() => ({
+    opacity: exitOpacity.value,
+  }));
 
   const logoSize = Math.min(windowWidth * 0.55, 260);
 
   return (
-    <Box className="flex-1 bg-background">
+    <Animated.View style={[{ flex: 1 }, exitStyle]} pointerEvents="box-none">
+      <Box className="flex-1 bg-background">
       {/* Animated coffee-toned gradient background */}
       <Animated.View
         style={[{ position: 'absolute', inset: 0 }, bgStyle]}
@@ -221,7 +234,7 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
         </Animated.View>
 
         <Animated.View
-          entering={FadeIn.delay(1100).duration(400)}
+          entering={FadeIn.delay(150).duration(200)}
           style={{ opacity: showCopy ? 1 : 0 }}
         >
           <ActivityIndicator size="large" color="#E50914" />
@@ -237,7 +250,8 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
           </Text>
         </Box>
       </VStack>
-    </Box>
+      </Box>
+    </Animated.View>
   );
 };
 

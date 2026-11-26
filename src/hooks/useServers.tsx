@@ -164,6 +164,70 @@ const mapRemoteServer = (s: RemoteServerJson): PlaybackServer => {
   };
 };
 
+/**
+ * Five reputable free embed providers bundled with the app so playback still
+ * has strong fallbacks when the remote list is unreachable or hasn't been
+ * updated. Remote entries always win on id collisions, so the upstream list
+ * can override or retire any of these without an app release.
+ */
+const BUNDLED_EXTRA_SERVERS: RemoteServerJson[] = [
+  {
+    id: 'bingeapi',
+    name: 'BingeAPI',
+    url: 'https://bingeapi.st',
+    movie_url_pattern: '{url}/embed/movie/{tmdbId}?autoplay=true',
+    tv_url_pattern:
+      '{url}/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true',
+    scraper_timeout_seconds: 40,
+  },
+  {
+    id: 'vidsrc-cc',
+    name: 'VidSrc CC',
+    url: 'https://vidsrc.cc',
+    movie_url_pattern: '{url}/v3/embed/movie/{tmdbId}?autoplay=true',
+    tv_url_pattern:
+      '{url}/v3/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true',
+    scraper_timeout_seconds: 40,
+  },
+  {
+    id: 'vidsrc-su',
+    name: 'VidSrc SU',
+    url: 'https://vidsrc.su',
+    movie_url_pattern: '{url}/movie/{tmdbId}?autoplay=true',
+    tv_url_pattern: '{url}/tv/{tmdbId}/{season}/{episode}?autoplay=true',
+    scraper_timeout_seconds: 40,
+  },
+  {
+    id: 'videasy-net',
+    name: 'VidEasy Net',
+    url: 'https://player.videasy.net',
+    movie_url_pattern: '{url}/movie/{tmdbId}?autoplay=true',
+    tv_url_pattern: '{url}/tv/{tmdbId}/{season}/{episode}?autoplay=true',
+    scraper_timeout_seconds: 40,
+  },
+  {
+    id: '2embed-stream',
+    name: '2Embed Stream',
+    url: 'https://www.2embed.stream',
+    movie_url_pattern: '{url}/embed/movie/{tmdbId}?autoplay=true',
+    tv_url_pattern:
+      '{url}/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true',
+    scraper_timeout_seconds: 45,
+  },
+];
+
+export const FALLBACK_BUILT_IN_SERVERS: PlaybackServer[] =
+  BUNDLED_EXTRA_SERVERS.map(mapRemoteServer);
+
+/** Remote list first (so it can update/retire entries), then bundled extras. */
+export const mergeBuiltInServers = (servers: PlaybackServer[]): PlaybackServer[] => {
+  const byId = new Map<string, PlaybackServer>();
+  [...servers, ...FALLBACK_BUILT_IN_SERVERS].forEach((server) => {
+    if (!byId.has(server.id)) byId.set(server.id, server);
+  });
+  return [...byId.values()];
+};
+
 export const STREAMFLIX_SERVER: PlaybackServer = {
   id: STREAMFLIX_SERVER_ID,
   name: 'Streamflix',
@@ -267,6 +331,10 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
   const [customLoaded, setCustomLoaded] = useState(false);
 
   const refreshBuiltInServers = useCallback(async () => {
+    // Always expose the bundled extras immediately — even on a brand-new
+    // offline install with no cache and no network response yet.
+    setBuiltInServers(mergeBuiltInServers([]));
+
     // Cache first: instant, offline-friendly render using whatever was last
     // successfully fetched (if anything yet).
     try {
@@ -274,7 +342,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       if (raw) {
         const parsed = JSON.parse(raw) as RemoteServerJson[];
         if (Array.isArray(parsed)) {
-          setBuiltInServers(parsed.map(mapRemoteServer));
+          setBuiltInServers(mergeBuiltInServers(parsed.map(mapRemoteServer)));
         }
       }
     } catch {
@@ -297,7 +365,7 @@ export const ServersProvider = ({ children }: { children: ReactNode }) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as RemoteServerJson[];
       if (Array.isArray(json)) {
-        setBuiltInServers(json.map(mapRemoteServer));
+        setBuiltInServers(mergeBuiltInServers(json.map(mapRemoteServer)));
         AsyncStorage.setItem(
           BUILT_IN_SERVERS_CACHE_KEY,
           JSON.stringify(json),

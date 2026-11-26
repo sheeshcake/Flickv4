@@ -1,4 +1,4 @@
-import { useState, type RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
 import { RefreshControl } from 'react-native';
 import Animated, {
@@ -49,7 +49,8 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const deviceKind = useDeviceKind();
-  const { hero, rows, loading, error, refreshing, refresh } = useHomeData();
+  const { hero, rows, loading, error, refreshing, refresh, prefetch } =
+    useHomeData();
   const { items: myList, isInList, toggle } = useMyList();
   const { entries: continueWatching, remove: removeContinue } =
     useContinueWatching();
@@ -59,6 +60,13 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   // header to exit selection mode without deleting anything.
   const [cwSelecting, setCwSelecting] = useState(false);
   const [myListSelecting, setMyListSelecting] = useState(false);
+
+  // Normally Splash warms the first home wave. When the welcome image is
+  // disabled the app starts on Main instead, so Home must warm it itself.
+  // `prefetch` is idempotent and no-ops when Splash already did the work.
+  useEffect(() => {
+    void prefetch();
+  }, [prefetch]);
 
   // Drives the sticky AppHeader's fade-in backdrop + logo shrink as the hero
   // scrolls out of view — see AppHeader's `progress` prop.

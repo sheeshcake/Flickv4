@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   CalendarClock,
   Check,
+  ChevronRight,
   Download,
   Play,
   Plus,
@@ -34,7 +35,10 @@ import {
   DownloadQualitySheet,
   type DownloadQualityChoice,
 } from '@/src/components/DownloadQualitySheet';
-import { CastSheet } from '@/src/components/CastSheet';
+import {
+  CastSheet,
+  type CastPersonTarget,
+} from '@/src/components/CastSheet';
 import { useDownloads } from '@/src/hooks/useDownloads';
 import { useServers } from '@/src/hooks/useServers';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
@@ -242,6 +246,18 @@ export const DetailScreen = ({
       .map((c) => c.name)
       .join(', ');
   }, [movie, details, crew]);
+
+  const openPerson = useCallback(
+    (person: CastPersonTarget) => {
+      setCastSheetOpen(false);
+      navigation.push('Person', {
+        personId: person.personId,
+        name: person.name,
+        profilePath: person.profilePath,
+      });
+    },
+    [navigation],
+  );
 
   const firstEpisode = episodes[0];
 
@@ -1002,6 +1018,21 @@ export const DetailScreen = ({
             </Text>
           )}
 
+          {(cast.length > 0 || crew.length > 0) && (
+            <Focusable
+              onPress={() => setCastSheetOpen(true)}
+              className="mt-2 rounded-md"
+              focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+            >
+              <HStack className="items-center justify-between rounded-md bg-card/60 px-3 py-2">
+                <Text size="sm" className="font-semibold text-primary">
+                  View all cast & crew
+                </Text>
+                <Icon as={ChevronRight} size="sm" className="text-primary" />
+              </HStack>
+            </Focusable>
+          )}
+
           <HStack className="mt-2 justify-around">
             <ActionIcon
               icon={isInList(item) ? Check : Plus}
@@ -1182,7 +1213,9 @@ export const DetailScreen = ({
       <CastSheet
         visible={castSheetOpen}
         cast={cast}
+        crew={crew}
         onClose={() => setCastSheetOpen(false)}
+        onPressPerson={openPerson}
       />
     </Box>
   );

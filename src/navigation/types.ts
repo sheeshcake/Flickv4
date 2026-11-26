@@ -10,6 +10,12 @@ export type RootStackParamList = {
   Splash: undefined;
   Main: undefined;
   Detail: { item: MediaItem };
+  Person: {
+    personId: number;
+    name?: string;
+    profilePath?: string | null;
+    knownForDepartment?: string;
+  };
   ViewMore: { title: string; query: CategoryQuery };
   SubtitleSettings: undefined;
   ServerSettings: undefined;
@@ -18,6 +24,7 @@ export type RootStackParamList = {
   RegionSettings: undefined;
   DnsSettings: undefined;
   ThemeSettings: undefined;
+  WelcomeSettings: undefined;
   PlaybackPerformance: undefined;
   Disclaimer: undefined;
   Credits: undefined;

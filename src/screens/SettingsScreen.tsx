@@ -11,6 +11,7 @@ import {
   Globe,
   Wifi,
   Heart,
+  Image as ImageIcon,
   MonitorPlay,
   Ratio,
   Palette,
@@ -41,6 +42,10 @@ import { useTheme } from '@/src/hooks/useTheme';
 import { useFinishedMovies } from '@/src/hooks/useFinishedMovies';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
+import {
+  getWelcomeLabel,
+  useWelcomeSettings,
+} from '@/src/hooks/useWelcomeSettings';
 import { formatMemoryGb } from '@/src/utils/deviceRecommendations';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -68,6 +73,7 @@ export const SettingsScreen = () => {
   const dnsLabel = dnsPreset === 'system' ? 'System default' : dnsPreset;
   const { mode: themeMode, palette: themePalette } = useTheme();
   const themeLabel = `${themeMode} · ${themePalette}`;
+  const { mode: welcomeMode } = useWelcomeSettings();
 
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -103,6 +109,12 @@ export const SettingsScreen = () => {
             label="Theme"
             value={themeLabel}
             onPress={() => navigation.navigate('ThemeSettings')}
+          />
+          <MenuRow
+            icon={ImageIcon}
+            label="Welcome image"
+            value={getWelcomeLabel(welcomeMode)}
+            onPress={() => navigation.navigate('WelcomeSettings')}
           />
           <MenuRow
             icon={MonitorPlay}

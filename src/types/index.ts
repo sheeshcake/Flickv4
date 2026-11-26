@@ -57,6 +57,42 @@ export interface Creator {
   profile_path?: string | null;
 }
 
+/** A single movie/TV credit returned by TMDB's person endpoints. */
+export interface PersonCredit {
+  id: number;
+  media_type: 'movie' | 'tv';
+  overview?: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  title?: string;
+  name?: string;
+  release_date?: string;
+  first_air_date?: string;
+  vote_average?: number;
+  popularity?: number;
+  genre_ids?: number[];
+  character?: string;
+  episode_count?: number;
+  job?: string;
+  department?: string;
+  adult?: boolean;
+}
+
+export interface PersonCombinedCreditsResponse {
+  cast: PersonCredit[];
+  crew: PersonCredit[];
+}
+
+export interface PersonDetails {
+  id: number;
+  name: string;
+  profile_path?: string | null;
+  biography?: string;
+  known_for_department?: string;
+  popularity?: number;
+  place_of_birth?: string;
+}
+
 export interface VideoResult {
   id: string;
   key: string;

@@ -4,10 +4,14 @@ import {
   CreditsResponse,
   ExternalIdsResponse,
   Genre,
+  isMovie,
   MediaImagesResponse,
   MediaItem,
   Movie,
   MovieDetails,
+  PersonCombinedCreditsResponse,
+  PersonCredit,
+  PersonDetails,
   ReleaseDatesResponse,
   SeasonDetails,
   TmdbImage,
@@ -185,6 +189,79 @@ class TMDBServiceImpl {
 
   getTVShowCredits(id: number) {
     return this.request<CreditsResponse>(`/tv/${id}/credits`);
+  }
+
+  // ── People ───────────────────────────────────────────────────────────
+  getPersonDetails(personId: number) {
+    return this.request<PersonDetails>(`/person/${personId}`);
+  }
+
+  getPersonCombinedCredits(personId: number) {
+    return this.request<PersonCombinedCreditsResponse>(
+      `/person/${personId}/combined_credits`,
+    );
+  }
+
+  private personCreditToMediaItem(credit: PersonCredit): MediaItem | null {
+    if (credit.media_type === 'movie') {
+      if (!credit.title) return null;
+      return {
+        id: credit.id,
+        title: credit.title,
+        overview: credit.overview ?? '',
+        poster_path: credit.poster_path ?? null,
+        backdrop_path: credit.backdrop_path ?? null,
+        release_date: credit.release_date,
+        vote_average: credit.vote_average,
+        popularity: credit.popularity,
+        genre_ids: credit.genre_ids,
+        media_type: 'movie',
+      };
+    }
+    if (!credit.name) return null;
+    return {
+      id: credit.id,
+      name: credit.name,
+      overview: credit.overview ?? '',
+      poster_path: credit.poster_path ?? null,
+      backdrop_path: credit.backdrop_path ?? null,
+      first_air_date: credit.first_air_date,
+      vote_average: credit.vote_average,
+      popularity: credit.popularity,
+      genre_ids: credit.genre_ids,
+      media_type: 'tv',
+    };
+  }
+
+  /**
+   * Every movie/TV work for a person: cast roles AND crew jobs, de-duplicated
+   * by media type + TMDB id, sorted by popularity then release date.
+   */
+  async getPersonWorks(personId: number): Promise<MediaItem[]> {
+    const data = await this.getPersonCombinedCredits(personId);
+    const credits = [...(data.cast ?? []), ...(data.crew ?? [])];
+    const unique = new Map<string, MediaItem>();
+
+    for (const credit of credits) {
+      if (credit.media_type !== 'movie' && credit.media_type !== 'tv') continue;
+      const key = `${credit.media_type}-${credit.id}`;
+      if (unique.has(key)) continue;
+      const item = this.personCreditToMediaItem(credit);
+      if (item) unique.set(key, item);
+    }
+
+    const dateOf = (item: MediaItem) =>
+      isMovie(item) ? item.release_date ?? '' : item.first_air_date ?? '';
+    const titleOf = (item: MediaItem) =>
+      'title' in item ? item.title : item.name;
+
+    return [...unique.values()].sort((a, b) => {
+      const popularityDiff = (b.popularity ?? 0) - (a.popularity ?? 0);
+      if (popularityDiff !== 0) return popularityDiff;
+      const dateDiff = dateOf(b).localeCompare(dateOf(a));
+      if (dateDiff !== 0) return dateDiff;
+      return titleOf(a).localeCompare(titleOf(b));
+    });
   }
 
   getSimilarMovies(id: number, page = 1) {
