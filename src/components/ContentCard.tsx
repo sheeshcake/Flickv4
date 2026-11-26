@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable } from 'react-native';
 import { X } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -32,7 +33,7 @@ interface ContentCardProps {
   onRequestDelete?: (item: MediaItem) => void;
 }
 
-export const ContentCard = ({
+const ContentCardBase = ({
   item,
   width,
   onPress,
@@ -130,3 +131,5 @@ export const ContentCard = ({
     </Focusable>
   );
 };
+
+export const ContentCard = memo(ContentCardBase);

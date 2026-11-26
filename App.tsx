@@ -11,65 +11,78 @@ import { FinishedMoviesProvider } from '@/src/hooks/useFinishedMovies';
 import { ServersProvider } from '@/src/hooks/useServers';
 import { MyListProvider } from '@/src/hooks/useMyList';
 import { CatalogRegionProvider } from '@/src/hooks/useCatalogRegion';
+import { DnsSettingsProvider } from '@/src/hooks/useDnsSettings';
+import { ThemeProvider, useTheme } from '@/src/hooks/useTheme';
 import { HomeDataProvider } from '@/src/hooks/useHomeData';
 import { VideoQualityProvider } from '@/src/hooks/useVideoQuality';
 import { VideoAspectProvider } from '@/src/hooks/useVideoAspect';
 import { PlayerDebugSettingsProvider } from '@/src/hooks/usePlayerDebugSettings';
 import { PlaybackSettingsProvider } from '@/src/hooks/usePlaybackSettings';
+import { WelcomeSettingsProvider } from '@/src/hooks/useWelcomeSettings';
+import { PlayerPreferencesProvider } from '@/src/hooks/usePlayerPreferences';
 import { DownloadsProvider } from '@/src/hooks/useDownloads';
-import { WatchPartyProvider } from '@/src/hooks/useWatchParty';
 import { DownloadResolverHost } from '@/src/components/DownloadResolverHost';
-import { UpdateChecker } from '@/src/components/UpdateChecker';
 import { lockPortrait } from '@/src/utils/orientation';
 import { bootstrapDownloadPermissions } from '@/src/utils/downloadPermissions';
+import { bootstrapReleaseReminders } from '@/src/services/ReleaseReminderService';
 import '@/global.css';
 
-export default function App() {
+// Inner component so it can read the theme context provided above.
+function AppInner() {
+  const { mode, palette } = useTheme();
+  const gluestackMode = mode === 'system' ? 'system' : mode;
   useEffect(() => {
     lockPortrait();
-    // Ask for notification permission once, on the very first launch, so
-    // downloads can surface progress notifications without silently failing.
-    // Subsequent launches are a no-op; the actual Download button re-asks
-    // if permission was denied.
     void bootstrapDownloadPermissions();
+    void bootstrapReleaseReminders();
   }, []);
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <GluestackUIProvider mode="dark">
+        <GluestackUIProvider mode={gluestackMode} palette={palette}>
           <ServersProvider>
             <MyListProvider>
               <CatalogRegionProvider>
-                <HomeDataProvider>
-                  <SubtitleSettingsProvider>
-                    <VideoQualityProvider>
-                      <VideoAspectProvider>
-                        <PlayerDebugSettingsProvider>
-                          <PlaybackSettingsProvider>
-                            <FinishedMoviesProvider>
-                              <ContinueWatchingProvider>
-                                <DownloadsProvider>
-                                  <WatchPartyProvider>
-                                    <StatusBar style="light" />
-                                    <AppNavigator />
-                                    <DownloadResolverHost />
-                                    <UpdateChecker />
-                                  </WatchPartyProvider>
-                                </DownloadsProvider>
-                              </ContinueWatchingProvider>
-                            </FinishedMoviesProvider>
-                          </PlaybackSettingsProvider>
-                        </PlayerDebugSettingsProvider>
-                      </VideoAspectProvider>
-                    </VideoQualityProvider>
-                  </SubtitleSettingsProvider>
-                </HomeDataProvider>
+                <DnsSettingsProvider>
+                  <HomeDataProvider>
+                    <SubtitleSettingsProvider>
+                      <PlayerPreferencesProvider>
+                        <VideoQualityProvider>
+                          <VideoAspectProvider>
+                            <PlayerDebugSettingsProvider>
+                              <PlaybackSettingsProvider>
+                                <FinishedMoviesProvider>
+                                  <ContinueWatchingProvider>
+                                    <DownloadsProvider>
+                                      <WelcomeSettingsProvider>
+                                        <StatusBar style="light" />
+                                        <AppNavigator />
+                                        <DownloadResolverHost />
+                                      </WelcomeSettingsProvider>
+                                    </DownloadsProvider>
+                                  </ContinueWatchingProvider>
+                                </FinishedMoviesProvider>
+                              </PlaybackSettingsProvider>
+                            </PlayerDebugSettingsProvider>
+                          </VideoAspectProvider>
+                        </VideoQualityProvider>
+                      </PlayerPreferencesProvider>
+                    </SubtitleSettingsProvider>
+                  </HomeDataProvider>
+                </DnsSettingsProvider>
               </CatalogRegionProvider>
             </MyListProvider>
           </ServersProvider>
         </GluestackUIProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
   );
 }

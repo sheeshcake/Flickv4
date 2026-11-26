@@ -26,7 +26,6 @@ import { useDownloads } from '@/src/hooks/useDownloads';
 import { usePlayerDebugSettings } from '@/src/hooks/usePlayerDebugSettings';
 import { TMDBService } from '@/src/services/TMDBService';
 import { forceLandscape, restoreOrientation } from '@/src/utils/orientation';
-import { buildEmbedUrl } from '@/src/utils/streamUrl';
 import { playbackHeadersFor } from '@/src/services/playbackHeaders';
 import {
   StreamflixService,
@@ -49,17 +48,6 @@ import {
 } from '@/src/types';
 import { resolveFirstAiredEpisode } from '@/src/hooks/useWatchNextRecommendation';
 import type { RootStackScreenProps } from '@/src/navigation/types';
-import { useWatchParty } from '@/src/hooks/useWatchParty';
-import {
-  PARTY_URI_MAX,
-  isPartyStreamUri,
-  partySourceKind,
-  type PartyContent,
-} from '@/src/party/protocol';
-import {
-  mediaItemFromPartyContent,
-  partyContentFromItem,
-} from '@/src/party/content';
 
 export const PlayerScreen = ({
   route,
@@ -91,10 +79,6 @@ export const PlayerScreen = ({
     prepareLocalPlayback,
     stopLocalPlayback,
   } = useDownloads();
-  const { role, send, subscribe, leaveRoom, room } = useWatchParty();
-  const roleRef = useRef(role);
-  roleRef.current = role;
-  const stayInRoomOnExitRef = useRef(true);
   // Settings > "Debug video player" — when on, render the stream-resolving
   // WebViewScraper full-screen and interactive instead of invisible, so you
   // can watch exactly what the embed page is doing.
@@ -114,9 +98,6 @@ export const PlayerScreen = ({
    * available" UI instead of silently falling back to a sample URL.
    */
   const [noSource, setNoSource] = useState(false);
-  const [waitingForHost, setWaitingForHost] = useState(
-    () => role === 'guest' && Boolean(room?.browsing),
-  );
 
   useEffect(() => {
     setItem(routeItem);
@@ -189,41 +170,6 @@ export const PlayerScreen = ({
     setSource(s);
   }, []);
 
-  const publishHostSource = useCallback(
-    (url: string, kind?: 'hls' | 'file', sourceId?: string) => {
-      if (role !== 'host') return;
-      // Only the scraped media URL — never the embed/page link.
-      // Streamflix Vidrock URLs are sometimes extensionless (type from API).
-      if (isStreamflixServer(activeServer) || isFlixQuestServer(activeServer)) {
-        if (!/^https?:\/\//i.test(url)) return;
-      } else if (!isPartyStreamUri(url)) {
-        return;
-      }
-      const headers = playbackHeadersFor(activeServer);
-      send({
-        type: 'source',
-        uri: url.slice(0, PARTY_URI_MAX),
-        kind: kind ?? partySourceKind(url),
-        referer: headers.Referer.slice(0, PARTY_URI_MAX),
-        origin: headers.Origin.slice(0, PARTY_URI_MAX),
-        ...(sourceId ? { sourceId: sourceId.slice(0, 80) } : {}),
-        ...(isStreamflixServer(activeServer)
-          ? {}
-          : {
-              embedUrl: buildEmbedUrl(activeServer, {
-                type,
-                tmdbId: item.id,
-                imdbId,
-                season,
-                episode,
-                title: getTitle(item),
-              }).slice(0, PARTY_URI_MAX),
-            }),
-      });
-    },
-    [role, send, activeServer, type, item, imdbId, season, episode],
-  );
-
   // Resolve a downloaded local copy for whatever we're currently trying to
   // play. Priority: explicit `localSourceId` from the caller (e.g. the
   // Downloads screen), otherwise best-effort lookup by the current item +
@@ -256,7 +202,6 @@ export const PlayerScreen = ({
   // background download for this same episode finished mid-playback, we
   // don't want to restart or spam a toast — we just leave the stream alone.
   useEffect(() => {
-    if (waitingForHost) return;
     if (!playingDownloaded || !localJob?.id) {
       void stopLocalPlayback();
       return;
@@ -292,7 +237,6 @@ export const PlayerScreen = ({
       cancelled = true;
     };
   }, [
-    waitingForHost,
     playingDownloaded,
     localJob?.id,
     prepareLocalPlayback,
@@ -335,9 +279,8 @@ export const PlayerScreen = ({
         // stream hosts require (403 otherwise).
         headers: playbackHeadersFor(activeServer),
       });
-      publishHostSource(url);
     },
-    [finish, activeServer, scraperDebugEnabled, publishHostSource],
+    [finish, activeServer, scraperDebugEnabled],
   );
 
   // Shared by manual server switching (Settings > Server, in-player) and
@@ -449,26 +392,13 @@ export const PlayerScreen = ({
       });
       setActiveStreamflixSourceId(resolved.id);
       setExtractorSubtitles(resolved.subtitles ?? []);
-      publishHostSource(resolved.uri, resolved.kind, resolved.id);
     },
-    [activeServer, finish, publishHostSource],
+    [activeServer, finish],
   );
-
-  // Late-joining web clients read the last source off the room; re-publish
-  // when PlayerCore is already up (source resolved before the party, or
-  // remount) so the companion page is not stuck on "waiting".
-  useEffect(() => {
-    const uri =
-      typeof source === 'object' && source && typeof source.uri === 'string'
-        ? source.uri
-        : null;
-    if (!uri) return;
-    publishHostSource(uri, undefined, activeStreamflixSourceId ?? undefined);
-  }, [source, publishHostSource, activeStreamflixSourceId]);
 
   useEffect(() => {
     if (playingDownloaded) return;
-    if (resolvedRef.current || source || noSource || waitingForHost) return;
+    if (resolvedRef.current || source || noSource) return;
     if (!usingRestResolver) return;
     let cancelled = false;
     const run = async () => {
@@ -537,7 +467,6 @@ export const PlayerScreen = ({
     playingDownloaded,
     source,
     noSource,
-    waitingForHost,
     usingRestResolver,
     usingFlixquest,
     activeServer,
@@ -617,130 +546,9 @@ export const PlayerScreen = ({
       setEpisode(nextEpisode);
       setTitle(`${getTitle(item)} — ${ep.name}`);
       setSubtitle(`S${nextSeason} E${nextEpisode}`);
-      if (role === 'host') {
-        send({ type: 'episode', season: nextSeason, episode: nextEpisode });
-      }
-    },
-    [item, season, episode, role, send, resetTriedStreamflix],
-  );
-
-  const applyPartyEpisode = useCallback(
-    (nextSeason: number, nextEpisode: number) => {
-      if (season === nextSeason && episode === nextEpisode) return;
-      setTriedServerIds(new Set());
-      resetTriedStreamflix();
-      setPreferredStreamflixSourceId(null);
-      setStreamflixSources([]);
-      setActiveStreamflixSourceId(null);
-      setExtractorSubtitles([]);
-      resolvedRef.current = false;
-      setSource(null);
-      setNoSource(false);
-      setDebugStreamFound(false);
-      setEffectiveResumeFrom(undefined);
-      setSeason(nextSeason);
-      setEpisode(nextEpisode);
-      setTitle(`${getTitle(item)} — S${nextSeason} E${nextEpisode}`);
-      setSubtitle(`S${nextSeason} E${nextEpisode}`);
     },
     [item, season, episode, resetTriedStreamflix],
   );
-
-  const resetPlaybackForParty = useCallback(() => {
-    setTriedServerIds(new Set());
-    resetTriedStreamflix();
-    setPreferredStreamflixSourceId(null);
-    setStreamflixSources([]);
-    setActiveStreamflixSourceId(null);
-    setExtractorSubtitles([]);
-    resolvedRef.current = false;
-    setSource(null);
-    setNoSource(false);
-    setDebugStreamFound(false);
-    setEffectiveResumeFrom(undefined);
-  }, [resetTriedStreamflix]);
-
-  const applyPartyContent = useCallback(
-    async (content: PartyContent) => {
-      setWaitingForHost(false);
-      try {
-        const next = await mediaItemFromPartyContent(content);
-        setItem(next);
-        setSeason(content.season);
-        setEpisode(content.episode);
-        setTitle(
-          content.season != null && content.episode != null
-            ? `${getTitle(next)} — S${content.season} E${content.episode}`
-            : getTitle(next),
-        );
-        setSubtitle(
-          content.season != null && content.episode != null
-            ? `S${content.season} E${content.episode}`
-            : undefined,
-        );
-        resetPlaybackForParty();
-      } catch {
-        resetPlaybackForParty();
-      }
-    },
-    [resetPlaybackForParty],
-  );
-
-  useEffect(() => {
-    if (role !== 'host') return;
-    send({
-      type: 'content',
-      content: partyContentFromItem(item, season, episode, imdbId),
-    });
-    // Title identity only — episode switches use the episode message.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, item.id, item.media_type]);
-
-  useEffect(() => {
-    return subscribe((msg) => {
-      if (role === 'guest' && msg.type === 'episode') {
-        applyPartyEpisode(msg.season, msg.episode);
-      }
-      if (role === 'guest' && msg.type === 'browse') {
-        setWaitingForHost(true);
-        resetPlaybackForParty();
-      }
-      if (role === 'guest' && msg.type === 'content') {
-        void applyPartyContent(msg.content);
-      }
-      if (msg.type === 'ended' && role) {
-        stayInRoomOnExitRef.current = false;
-        navigation.goBack();
-      }
-    });
-  }, [
-    subscribe,
-    role,
-    applyPartyEpisode,
-    applyPartyContent,
-    resetPlaybackForParty,
-    navigation,
-  ]);
-
-  useEffect(() => {
-    return () => {
-      if (!stayInRoomOnExitRef.current) return;
-      if (roleRef.current === 'host') {
-        send({ type: 'browse' });
-        return;
-      }
-      if (roleRef.current === 'guest') leaveRoom();
-    };
-    // Host stays in the room; guests leave. Role is read from a ref so this
-    // only runs on unmount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleLeaveParty = useCallback(() => {
-    stayInRoomOnExitRef.current = false;
-    leaveRoom();
-    navigation.goBack();
-  }, [leaveRoom, navigation]);
 
   const handleBack = useCallback(() => {
     navigation.goBack();
@@ -789,9 +597,8 @@ export const PlayerScreen = ({
         imdbId={imdbId}
         resumeFrom={effectiveResumeFrom}
         onBack={handleBack}
-        onLeaveParty={handleLeaveParty}
         onSelectEpisode={
-          type === 'tv' && role !== 'guest' ? handleSelectEpisode : undefined
+          type === 'tv' ? handleSelectEpisode : undefined
         }
         onSelectServer={playingDownloaded ? undefined : handleSelectServer}
         streamflixSources={usingRestResolver ? streamflixSources : []}
@@ -813,30 +620,6 @@ export const PlayerScreen = ({
   // Scrape (or playback) failed on every configured server. Instead of
   // silently loading a sample video, let the user know nothing is playable
   // and give them a way back to the previous screen.
-  if (waitingForHost) {
-    return (
-      <Box className="flex-1 bg-black">
-        <StatusBar hidden />
-        <Center className="flex-1 px-8">
-          <Spinner size="large" color="#E50914" />
-          <Text size="lg" bold className="mt-4 text-center text-foreground">
-            Host is picking something else…
-          </Text>
-          <Text size="sm" className="mt-2 text-center text-muted-foreground">
-            Stay in the room. Playback starts when they choose a title.
-          </Text>
-        </Center>
-        <Pressable
-          onPress={handleLeaveParty}
-          hitSlop={16}
-          style={{ position: 'absolute', top: 24, left: 16, zIndex: 10 }}
-        >
-          <Icon as={ArrowLeft} size="xl" className="text-foreground" />
-        </Pressable>
-      </Box>
-    );
-  }
-
   if (noSource) {
     return (
       <Box className="flex-1 bg-black">
@@ -870,7 +653,7 @@ export const PlayerScreen = ({
   return (
     <Box className="flex-1 bg-black">
       <StatusBar hidden />
-      {!playingDownloaded && !usingRestResolver && !waitingForHost && (
+      {!playingDownloaded && !usingRestResolver && (
         <WebViewScraper
           server={activeServer}
           tmdbId={item.id}
@@ -910,7 +693,7 @@ export const PlayerScreen = ({
         </Center>
       ) : (
         <Center style={StyleSheet.absoluteFill} className="bg-black">
-          <Spinner size="large" color="#E50914" />
+          <Spinner size="large" color="#D32F2F" />
           <Text className="mt-4 text-muted-foreground">
             {tryingStreamflixSource
               ? `Trying ${tryingStreamflixSource.name}…`

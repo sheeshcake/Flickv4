@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Download,
   Pause,
   Play,
   RefreshCw,
@@ -24,6 +25,7 @@ import { Image } from '@/components/ui/image';
 import { Spinner } from '@/components/ui/spinner';
 import { Focusable } from '@/src/components/Focusable';
 import { ConfirmDialog } from '@/src/components/ConfirmDialog';
+import { EmptyState } from '@/src/components/EmptyState';
 import { useDownloads } from '@/src/hooks/useDownloads';
 import { formatBytes, type DownloadJob } from '@/src/services/DownloadService';
 import { TMDBService } from '@/src/services/TMDBService';
@@ -159,7 +161,7 @@ const summarizeEpisodes = (episodes: DownloadJob[]): string => {
 export const DownloadsScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
-  const { jobs, pause, resume, remove } = useDownloads();
+  const { jobs, pause, resume, remove, clearCompleted } = useDownloads();
   const [pendingDelete, setPendingDelete] = useState<DownloadJob | null>(null);
 
   const entries = useMemo(() => groupJobs(jobs), [jobs]);
@@ -197,17 +199,33 @@ export const DownloadsScreen = () => {
 
   return (
     <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <Heading size="2xl" bold className="mb-4 mt-4 px-4 text-foreground">
-        Downloads
-      </Heading>
+      <HStack space="md" className="mb-4 mt-4 items-center justify-between px-4">
+        <Heading size="2xl" bold className="text-foreground">
+          Downloads
+        </Heading>
+        {entries.some((e) =>
+          e.kind === 'movie'
+            ? e.job.status === 'completed'
+            : e.episodes.some((j) => j.status === 'completed'),
+        ) ? (
+          <Focusable
+            onPress={() => void clearCompleted()}
+            className="rounded-full px-3 py-1"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <Text size="xs" className="text-primary">
+              Clear completed
+            </Text>
+          </Focusable>
+        ) : null}
+      </HStack>
 
       {entries.length === 0 ? (
-        <Center className="flex-1 px-8">
-          <Text className="text-center text-muted-foreground">
-            No downloads yet. Tap Download on a movie or an episode to save it
-            here for offline playback.
-          </Text>
-        </Center>
+        <EmptyState
+          icon={Download}
+          title="No downloads yet"
+          description="Tap Download on a movie or an episode to save it here for offline playback."
+        />
       ) : (
         <FlatList
           data={entries}
@@ -403,7 +421,7 @@ const EpisodeRow = ({
             <Icon as={Play} className="text-primary-foreground" />
           </Focusable>
         ) : job.status === 'downloading' || job.status === 'resolving' || job.status === 'queued' ? (
-          <Spinner size="small" color="#E50914" />
+          <Spinner size="small" color="#D32F2F" />
         ) : job.status === 'failed' ? (
           <Icon as={AlertCircle} className="text-primary" />
         ) : (
@@ -505,7 +523,7 @@ const DownloadRow = ({
               <Icon as={Play} className="text-primary-foreground" />
             </Focusable>
           ) : job.status === 'downloading' || job.status === 'resolving' || job.status === 'queued' ? (
-            <Spinner size="small" color="#E50914" />
+            <Spinner size="small" color="#D32F2F" />
           ) : job.status === 'failed' ? (
             <Icon as={AlertCircle} className="text-primary" />
           ) : (

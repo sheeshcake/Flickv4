@@ -105,7 +105,7 @@ export const PlayerEpisodeDrawer = ({
         <Box className="px-4 pb-2">
           {seasonsLoading && !seasons.length ? (
             <Center className="py-4">
-              <Spinner color="#E50914" />
+              <Spinner color="#D32F2F" />
             </Center>
           ) : (
             <ScrollView
@@ -143,7 +143,7 @@ export const PlayerEpisodeDrawer = ({
         <ScrollView className="flex-1 px-4 pb-6">
           {episodesLoading ? (
             <Center className="py-10">
-              <Spinner color="#E50914" />
+              <Spinner color="#D32F2F" />
             </Center>
           ) : (
             <VStack space="md">

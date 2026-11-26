@@ -1,4 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { BrowseScope } from '@/src/config/categoriesCatalog';
 import type { CategoryQuery } from '@/src/services/categories';
 import type {
   LiveChannel,
@@ -10,17 +11,26 @@ export type RootStackParamList = {
   Splash: undefined;
   Main: undefined;
   Detail: { item: MediaItem };
+  Person: {
+    personId: number;
+    name?: string;
+    profilePath?: string | null;
+    knownForDepartment?: string;
+  };
   ViewMore: { title: string; query: CategoryQuery };
+  Category: { scope: BrowseScope; categoryId?: string };
   SubtitleSettings: undefined;
   ServerSettings: undefined;
   VideoQualitySettings: undefined;
   VideoAspectSettings: undefined;
   RegionSettings: undefined;
+  DnsSettings: undefined;
+  ThemeSettings: undefined;
+  WelcomeSettings: undefined;
   PlaybackPerformance: undefined;
   Disclaimer: undefined;
   Credits: undefined;
   FinishedMovies: undefined;
-  JoinParty: { code?: string };
   LivePlayer: {
     channel: LiveChannel;
     channels: LiveChannel[];

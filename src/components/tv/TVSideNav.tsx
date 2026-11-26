@@ -4,6 +4,7 @@ import {
   Home as HomeIcon,
   Radio as LiveIcon,
   Search as SearchIcon,
+  Sparkles as NewIcon,
   Settings as SettingsIcon,
 } from 'lucide-react-native';
 import Animated, {
@@ -21,7 +22,7 @@ import { Focusable } from '@/src/components/Focusable';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 import { LIVE_TV_CONFIG } from '@/src/config/env';
 
-export type TVTab = 'Home' | 'Search' | 'Live' | 'Downloads' | 'Settings';
+export type TVTab = 'Home' | 'Search' | 'New' | 'Live' | 'Downloads' | 'Settings';
 
 interface TVSideNavProps {
   activeTab: TVTab;
@@ -37,6 +38,7 @@ export interface TVSideNavHandle {
 const TABS: { key: TVTab; label: string; icon: typeof HomeIcon }[] = [
   { key: 'Home', label: 'Home', icon: HomeIcon },
   { key: 'Search', label: 'Search', icon: SearchIcon },
+  { key: 'New', label: 'New', icon: NewIcon },
   ...(LIVE_TV_CONFIG.enabled
     ? [{ key: 'Live' as const, label: 'Live', icon: LiveIcon }]
     : []),
@@ -46,8 +48,6 @@ const TABS: { key: TVTab; label: string; icon: typeof HomeIcon }[] = [
 
 const COLLAPSED_WIDTH = 84;
 const EXPANDED_WIDTH = 208;
-
-const AnimatedVStack = Animated.createAnimatedComponent(VStack);
 
 /**
  * TV shell rail: sits collapsed as an icon-only strip so the content pane
@@ -84,13 +84,13 @@ export const TVSideNav = forwardRef<TVSideNavHandle, TVSideNavProps>(
     const animatedStyle = useAnimatedStyle(() => ({ width: width.value }));
 
     return (
-      <AnimatedVStack
-        space="xl"
-        className={`h-full border-r border-border bg-card py-10 ${
-          collapsed ? 'items-center px-3' : 'px-6'
-        }`}
-        style={animatedStyle}
-      >
+      <Animated.View style={animatedStyle}>
+        <VStack
+          space="xl"
+          className={`h-full border-r border-border bg-card py-10 ${
+            collapsed ? 'items-center px-3' : 'px-6'
+          }`}
+        >
         <Box className={collapsed ? 'mb-8 h-10 w-10' : 'mb-8 h-16 w-20'}>
           <FlickLogo
             width={collapsed ? 40 : 80}
@@ -135,7 +135,8 @@ export const TVSideNav = forwardRef<TVSideNavHandle, TVSideNavProps>(
             </Focusable>
           );
         })}
-      </AnimatedVStack>
+        </VStack>
+      </Animated.View>
     );
   },
 );

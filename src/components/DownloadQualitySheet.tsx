@@ -242,7 +242,7 @@ export const DownloadQualitySheet = ({
                 </Text>
                 {resolving ? (
                   <HStack className="items-center px-3 py-3" space="sm">
-                    <Spinner color="#E50914" />
+                    <Spinner color="#D32F2F" />
                     <Text className="text-muted-foreground">
                       Finding stream…
                     </Text>

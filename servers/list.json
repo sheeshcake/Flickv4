@@ -88,5 +88,55 @@
         "movie_alias": null,
         "tv_alias": null,
         "scraper_timeout_seconds": 30
+    },
+    {
+        "id": "bingeapi",
+        "name": "BingeAPI",
+        "url": "https://bingeapi.st",
+        "movie_url_pattern": "{url}/embed/movie/{tmdbId}?autoplay=true",
+        "tv_url_pattern": "{url}/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true",
+        "movie_alias": null,
+        "tv_alias": null,
+        "scraper_timeout_seconds": 40
+    },
+    {
+        "id": "vidsrc-su",
+        "name": "VidSrc SU",
+        "url": "https://vidsrc.su",
+        "movie_url_pattern": "{url}/movie/{tmdbId}?autoplay=true",
+        "tv_url_pattern": "{url}/tv/{tmdbId}/{season}/{episode}?autoplay=true",
+        "movie_alias": null,
+        "tv_alias": null,
+        "scraper_timeout_seconds": 40
+    },
+    {
+        "id": "vidsrc-to",
+        "name": "VidSrc TO",
+        "url": "https://vidsrc.to",
+        "movie_url_pattern": "{url}/embed/movie/{tmdbId}?autoplay=true",
+        "tv_url_pattern": "{url}/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true",
+        "movie_alias": null,
+        "tv_alias": null,
+        "scraper_timeout_seconds": 40
+    },
+    {
+        "id": "2embed-online",
+        "name": "2Embed",
+        "url": "https://www.2embed.online",
+        "movie_url_pattern": "{url}/embed/movie/{tmdbId}?autoplay=true",
+        "tv_url_pattern": "{url}/embed/tv/{tmdbId}/{season}/{episode}?autoplay=true",
+        "movie_alias": null,
+        "tv_alias": null,
+        "scraper_timeout_seconds": 45
+    },
+    {
+        "id": "pstream",
+        "name": "P-Stream",
+        "url": "https://iframe.pstream.org",
+        "movie_url_pattern": "{url}/embed/tmdb-movie-{tmdbId}?autoplay=true",
+        "tv_url_pattern": "{url}/embed/tmdb-tv-{tmdbId}/{season}/{episode}?autoplay=true",
+        "movie_alias": null,
+        "tv_alias": null,
+        "scraper_timeout_seconds": 40
     }
 ]

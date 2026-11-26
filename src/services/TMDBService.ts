@@ -4,10 +4,14 @@ import {
   CreditsResponse,
   ExternalIdsResponse,
   Genre,
+  isMovie,
   MediaImagesResponse,
   MediaItem,
   Movie,
   MovieDetails,
+  PersonCombinedCreditsResponse,
+  PersonCredit,
+  PersonDetails,
   ReleaseDatesResponse,
   SeasonDetails,
   TmdbImage,
@@ -17,10 +21,24 @@ import {
   VideoResponse,
 } from '@/src/types';
 
-type QueryParams = Record<string, string | number | boolean | undefined>;
+export type QueryParams = Record<string, string | number | boolean | undefined>;
 
 /** Abort a request if the network stalls, so the UI never hangs forever. */
 const REQUEST_TIMEOUT_MS = 15000;
+
+/** Local-calendar ISO date (`YYYY-MM-DD`), avoiding UTC day drift. */
+const toIsoDate = (date: Date): string =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+
+const dateAfterDays = (days: number): Date => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date;
+};
 
 export class TMDBError extends Error {
   status?: number;
@@ -91,6 +109,57 @@ class TMDBServiceImpl {
     return this.request<TMDBResponse<TVShow>>('/trending/tv/week', { page });
   }
 
+  /** Weekly mixed trending list (movies + TV), used by "Everyone Watching". */
+  getTrendingAll(page = 1) {
+    return this.request<TMDBResponse<MediaItem>>('/trending/all/week', { page });
+  }
+
+  getUpcomingMovies(page = 1, region?: string) {
+    return this.request<TMDBResponse<Movie>>('/movie/upcoming', { page, region });
+  }
+
+  /**
+   * TV shows with a first-air date in the next 120 days. News/talk/soap/
+   * reality are excluded so the Coming Soon rail stays theatrical.
+   */
+  discoverUpcomingTV(page = 1) {
+    return this.request<TMDBResponse<TVShow>>('/discover/tv', {
+      page,
+      sort_by: 'popularity.desc',
+      include_adult: false,
+      'first_air_date.gte': toIsoDate(dateAfterDays(1)),
+      'first_air_date.lte': toIsoDate(dateAfterDays(120)),
+      without_genres: '10763,10767,10766,10764',
+    });
+  }
+
+  getOnTheAirTV(page = 1) {
+    return this.request<TMDBResponse<TVShow>>('/tv/on_the_air', { page });
+  }
+
+  /** Currently playing movies in the selected region — used by Recently Added. */
+  getNowPlayingMovies(page = 1, region?: string) {
+    return this.request<TMDBResponse<Movie>>('/movie/now_playing', {
+      page,
+      region,
+    });
+  }
+
+  /**
+   * Series that first aired in the last 90 days. News/talk/soap/reality are
+   * excluded so the Recently Added rail stays scripted like the rest of the app.
+   */
+  discoverRecentlyAddedTV(page = 1) {
+    return this.request<TMDBResponse<TVShow>>('/discover/tv', {
+      page,
+      sort_by: 'first_air_date.desc',
+      include_adult: false,
+      'first_air_date.gte': toIsoDate(dateAfterDays(-90)),
+      'first_air_date.lte': toIsoDate(new Date()),
+      without_genres: '10763,10767,10766,10764',
+    });
+  }
+
   getPopularMovies(page = 1, region?: string) {
     return this.request<TMDBResponse<Movie>>('/movie/popular', {
       page,
@@ -107,6 +176,23 @@ class TMDBServiceImpl {
 
   getTopRatedMovies(page = 1) {
     return this.request<TMDBResponse<Movie>>('/movie/top_rated', { page });
+  }
+
+  getTopRatedTVShows(page = 1) {
+    return this.request<TMDBResponse<TVShow>>('/tv/top_rated', { page });
+  }
+
+  /**
+   * Generic `/discover` escape hatch for the Nightflix-style category recipes:
+   * popularity, vote-count bands, and release-date cutoffs are passed through
+   * exactly as TMDB expects them.
+   */
+  discoverMoviesAdvanced(params: QueryParams) {
+    return this.request<TMDBResponse<Movie>>('/discover/movie', params);
+  }
+
+  discoverTVAdvanced(params: QueryParams) {
+    return this.request<TMDBResponse<TVShow>>('/discover/tv', params);
   }
 
   discoverMoviesByGenre(genreId: number, page = 1, region?: string) {
@@ -185,6 +271,88 @@ class TMDBServiceImpl {
 
   getTVShowCredits(id: number) {
     return this.request<CreditsResponse>(`/tv/${id}/credits`);
+  }
+
+  // ── People ───────────────────────────────────────────────────────────
+  getPersonDetails(personId: number) {
+    return this.request<PersonDetails>(`/person/${personId}`);
+  }
+
+  getPersonCombinedCredits(personId: number) {
+    return this.request<PersonCombinedCreditsResponse>(
+      `/person/${personId}/combined_credits`,
+    );
+  }
+
+  private personCreditToMediaItem(credit: PersonCredit): MediaItem | null {
+    if (credit.media_type === 'movie') {
+      if (!credit.title) return null;
+      return {
+        id: credit.id,
+        title: credit.title,
+        overview: credit.overview ?? '',
+        poster_path: credit.poster_path ?? null,
+        backdrop_path: credit.backdrop_path ?? null,
+        release_date: credit.release_date,
+        vote_average: credit.vote_average,
+        popularity: credit.popularity,
+        genre_ids: credit.genre_ids,
+        media_type: 'movie',
+      };
+    }
+    if (!credit.name) return null;
+    return {
+      id: credit.id,
+      name: credit.name,
+      overview: credit.overview ?? '',
+      poster_path: credit.poster_path ?? null,
+      backdrop_path: credit.backdrop_path ?? null,
+      first_air_date: credit.first_air_date,
+      vote_average: credit.vote_average,
+      popularity: credit.popularity,
+      genre_ids: credit.genre_ids,
+      media_type: 'tv',
+    };
+  }
+
+  /**
+   * Every movie/TV work for a person: cast roles AND crew jobs, de-duplicated
+   * by media type + TMDB id, sorted by popularity then release date.
+   */
+  async getPersonWorks(personId: number): Promise<MediaItem[]> {
+    const data = await this.getPersonCombinedCredits(personId);
+    const credits = [...(data.cast ?? []), ...(data.crew ?? [])];
+    const unique = new Map<string, MediaItem>();
+
+    for (const credit of credits) {
+      if (credit.media_type !== 'movie' && credit.media_type !== 'tv') continue;
+      const key = `${credit.media_type}-${credit.id}`;
+      const existing = unique.get(key);
+      if (existing) {
+        // A cast row and a crew row can point at the same title. Prefer the
+        // copy that actually has artwork so the grid never shows blank cards.
+        if (!existing.poster_path && credit.poster_path) {
+          const better = this.personCreditToMediaItem(credit);
+          if (better) unique.set(key, better);
+        }
+        continue;
+      }
+      const item = this.personCreditToMediaItem(credit);
+      if (item) unique.set(key, item);
+    }
+
+    const dateOf = (item: MediaItem) =>
+      isMovie(item) ? item.release_date ?? '' : item.first_air_date ?? '';
+    const titleOf = (item: MediaItem) =>
+      'title' in item ? item.title : item.name;
+
+    return [...unique.values()].sort((a, b) => {
+      const popularityDiff = (b.popularity ?? 0) - (a.popularity ?? 0);
+      if (popularityDiff !== 0) return popularityDiff;
+      const dateDiff = dateOf(b).localeCompare(dateOf(a));
+      if (dateDiff !== 0) return dateDiff;
+      return titleOf(a).localeCompare(titleOf(b));
+    });
   }
 
   getSimilarMovies(id: number, page = 1) {

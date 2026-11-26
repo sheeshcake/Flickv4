@@ -13,10 +13,10 @@ if [ -f .env ]; then
   set +a
 fi
 
-APP_VERSION="${APP_VERSION:-2.1.5}"
+APP_VERSION="${APP_VERSION:-1.0}"
 ANDROID_VERSION_CODE="${ANDROID_VERSION_CODE:-1}"
 OUT_DIR="${ROOT}/build"
-IPA="${OUT_DIR}/Flick.ipa"
+IPA="${OUT_DIR}/CoFFeHouse.ipa"
 DERIVED="${OUT_DIR}/DerivedData"
 
 mkdir -p "$OUT_DIR"
@@ -49,7 +49,7 @@ mkdir -p "${OUT_DIR}/Payload"
 cp -R "$APP" "${OUT_DIR}/Payload/"
 (
   cd "$OUT_DIR"
-  zip -qry "Flick.ipa" Payload
+  zip -qry "CoFFeHouse.ipa" Payload
   rm -rf Payload
 )
 

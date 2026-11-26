@@ -428,8 +428,14 @@ const mergeCatalog = (
   };
 };
 
-const M3U_CATEGORY = 'PH';
 const M3U_ID_PREFIX = 'm3u:';
+
+/** Channels whose name/category indicates a news feed are dropped from Live TV. */
+const NEWS_NAME_RE =
+  /\bnews\b|أخبار|خبر|noticias|nachrichten|журнал|новости/i;
+const isNewsChannel = (name: string, categories: string[] = []): boolean =>
+  categories.some((c) => /^news$/i.test(c.trim())) ||
+  NEWS_NAME_RE.test(name);
 const EXTINF_RE = /^#E(?:XT|CT)INF:-?\d+(?:\s+[^,]*)?,\s*(.+?)\s*$/i;
 
 const slugify = (name: string): string => {
@@ -440,7 +446,7 @@ const slugify = (name: string): string => {
   return slug || 'channel';
 };
 
-const parseM3uPlaylist = (text: string): LiveChannel[] => {
+const parseM3uPlaylist = (text: string, category: string): LiveChannel[] => {
   const lines = text.split(/\r?\n/);
   const channels: LiveChannel[] = [];
   const usedIds = new Set<string>();
@@ -468,6 +474,8 @@ const parseM3uPlaylist = (text: string): LiveChannel[] => {
     }
     if (line.startsWith('#')) continue;
     if (!pendingName) continue;
+    // Drop news channels from the free M3U sources.
+    if (isNewsChannel(pendingName)) continue;
     try {
       const href = new URL(line).href;
       if (href.startsWith('http://') || href.startsWith('https://')) {
@@ -477,7 +485,7 @@ const parseM3uPlaylist = (text: string): LiveChannel[] => {
           name: pendingName,
           letter,
           streamUrl: href,
-          categories: [M3U_CATEGORY],
+          categories: [category],
           eventTitles: [],
         });
       }
@@ -490,22 +498,28 @@ const parseM3uPlaylist = (text: string): LiveChannel[] => {
 };
 
 const fetchM3uChannels = async (): Promise<LiveChannel[]> => {
-  if (!LIVE_TV_M3U_CONFIG.enabled || !LIVE_TV_M3U_CONFIG.url) return [];
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-  try {
-    log('GET', LIVE_TV_M3U_CONFIG.url);
-    const res = await fetch(LIVE_TV_M3U_CONFIG.url, {
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new Error(`Live TV playlist request failed (${res.status}).`);
+  if (!LIVE_TV_M3U_CONFIG.enabled) return [];
+  const sources = LIVE_TV_M3U_CONFIG.sources;
+  if (!sources.length) return [];
+  const results: LiveChannel[] = [];
+  for (const source of sources) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    try {
+      log('GET', source.url);
+      const res = await fetch(source.url, { signal: controller.signal });
+      if (!res.ok) {
+        throw new Error(`Live TV playlist request failed (${res.status}).`);
+      }
+      const text = await res.text();
+      results.push(...parseM3uPlaylist(text, source.category));
+    } catch (e) {
+      log('M3U fetch failed', source.url, e);
+    } finally {
+      clearTimeout(timeout);
     }
-    const text = await res.text();
-    return parseM3uPlaylist(text);
-  } finally {
-    clearTimeout(timeout);
   }
+  return results;
 };
 
 const emptyEpg = (): LiveEpg => ({ timezone: '', days: [] });
@@ -515,7 +529,8 @@ const mergeM3uIntoCatalog = (
   m3uChannels: LiveChannel[],
 ): LiveCatalog => {
   if (!m3uChannels.length) return catalog;
-  const categories = [...new Set([...catalog.categories, M3U_CATEGORY])].sort(
+  const m3uCategories = [...new Set(m3uChannels.flatMap((c) => c.categories))];
+  const categories = [...new Set([...catalog.categories, ...m3uCategories])].sort(
     (a, b) => a.localeCompare(b),
   );
   return {
@@ -577,7 +592,8 @@ const getCatalog = async (opts?: {
           Array.isArray(channelsBody.channels) ? channelsBody.channels : []
         )
           .map(parseChannel)
-          .filter((c): c is LiveChannel => c != null);
+          .filter((c): c is LiveChannel => c != null)
+          .filter((c) => !isNewsChannel(c.name, c.categories));
         flixCatalog = mergeCatalog(channels, parseEpg(epgBody));
       })().catch((error: unknown) => {
         flixError = error;

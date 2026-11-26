@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { ImageBackground } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CalendarClock, Play, Plus, Check } from 'lucide-react-native';
@@ -9,9 +10,10 @@ import { Image } from '@/components/ui/image';
 import { Text } from '@/components/ui/text';
 import { Icon } from '@/components/ui/icon';
 import { Focusable } from '@/src/components/Focusable';
-import { TMDBService } from '@/src/services/TMDBService';
+import { TMDBService, pickTrailerKey } from '@/src/services/TMDBService';
 import { useTitleLogo } from '@/src/hooks/useTitleLogo';
-import { getTitle, type MediaItem } from '@/src/types';
+import { getTitle, isMovie, type MediaItem } from '@/src/types';
+import { TrailerWebView } from '@/src/components/TrailerWebView';
 import type { DeviceKind } from '@/src/utils/responsive';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
@@ -48,20 +50,48 @@ export const HeroBanner = ({
   const logoPath = useTitleLogo(item);
   const logoUrl = TMDBService.getImageUrl(logoPath, 'w780');
   const padding = deviceKind === 'phone' ? 16 : 32;
-  const logoHeight = deviceKind === 'phone' ? 140 : 200;
+
+  // Netflix-style muted trailer preview on the hero. Fetched lazily per hero
+  // item; falls back to the static backdrop if no YouTube trailer exists.
+  const [trailerKey, setTrailerKey] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const fetcher = isMovie(item)
+      ? TMDBService.getMovieVideos(item.id)
+      : TMDBService.getTVShowVideos(item.id);
+    fetcher
+      .then((v) => {
+        if (!cancelled) setTrailerKey(pickTrailerKey(v));
+      })
+      .catch(() => {
+        if (!cancelled) setTrailerKey(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.id, item.media_type]);
 
   return (
     <Box style={{ height }} className="w-full">
-      <ImageBackground
-        source={{ uri: backdrop }}
-        resizeMode="cover"
-        style={{ flex: 1, justifyContent: 'flex-end' }}
-      >
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,1)']}
-          style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0 }}
-        />
-        <VStack space="md" style={{ padding }} className="items-center pb-15">
+      {trailerKey ? (
+        <TrailerWebView youtubeKey={trailerKey} preview paused={false} />
+      ) : (
+        <ImageBackground
+          source={{ uri: backdrop }}
+          resizeMode="cover"
+          style={{ flex: 1, justifyContent: 'flex-end' }}
+        >
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,1)']}
+            style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0 }}
+          />
+        </ImageBackground>
+      )}
+      <LinearGradient
+        colors={['transparent', 'rgba(0,0,0,0.6)', 'rgba(0,0,0,1)']}
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, top: 0, pointerEvents: 'none' }}
+      />
+      <VStack space="md" style={{ padding, position: 'absolute', bottom: 0, left: 0, right: 0 }} className="items-center pb-15">
           {logoUrl ? (
             <Image
               source={{ uri: logoUrl }}
@@ -126,7 +156,6 @@ export const HeroBanner = ({
             </Focusable>
           </HStack>
         </VStack>
-      </ImageBackground>
     </Box>
   );
 };

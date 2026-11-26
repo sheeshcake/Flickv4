@@ -51,9 +51,9 @@ class WyzieServiceImpl {
     language,
     format = 'srt',
   }: SearchParams): Promise<WyzieSubtitle[]> {
-    if (!this.apiKey) {
-      throw new WyzieError('Missing Wyzie API key.');
-    }
+    // Optional source: without a key we simply return no tracks so the
+    // keyless Vidrock catalog still provides subtitles.
+    if (!this.apiKey) return [];
 
     const url = new URL(`${this.baseUrl}/search`);
     url.searchParams.set('id', String(tmdbId));

@@ -2,16 +2,17 @@ import {
   BottomTabBar,
   createBottomTabNavigator,
 } from '@react-navigation/bottom-tabs';
-import { PartySessionBar } from '@/src/components/party/PartySessionBar';
 import {
   Download as DownloadIcon,
   Home as HomeIcon,
   Radio as LiveIcon,
+  Sparkles as NewIcon,
   Search as SearchIcon,
   Settings as SettingsIcon,
 } from 'lucide-react-native';
 import { HomeScreen } from '@/src/screens/HomeScreen';
 import { SearchScreen } from '@/src/screens/SearchScreen';
+import { NewScreen } from '@/src/screens/NewScreen';
 import { SettingsScreen } from '@/src/screens/SettingsScreen';
 import { DownloadsScreen } from '@/src/screens/DownloadsScreen';
 import { LiveTvScreen } from '@/src/screens/LiveTvScreen';
@@ -20,6 +21,7 @@ import { LIVE_TV_CONFIG } from '@/src/config/env';
 export type MainTabParamList = {
   Home: undefined;
   Search: undefined;
+  New: undefined;
   Live: undefined;
   Downloads: undefined;
   Settings: undefined;
@@ -30,18 +32,13 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 export const TabNavigator = () => {
   return (
     <Tab.Navigator
-      tabBar={(props) => (
-        <>
-          <PartySessionBar placement="tabs" />
-          <BottomTabBar {...props} />
-        </>
-      )}
+      tabBar={(props) => <BottomTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#E50914',
+        tabBarActiveTintColor: '#D32F2F',
         tabBarInactiveTintColor: '#8c8c8c',
         tabBarStyle: {
-          backgroundColor: '#000000',
+          backgroundColor: '#0C0907',
           borderTopColor: '#1f1f1f',
           borderTopWidth: 1,
         },
@@ -60,6 +57,15 @@ export const TabNavigator = () => {
         options={{
           tabBarIcon: ({ color, size }) => (
             <SearchIcon color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="New"
+        component={NewScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <NewIcon color={color} size={size} />
           ),
         }}
       />

@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   NavigationContainer,
   DarkTheme,
@@ -7,23 +6,26 @@ import {
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SplashScreen } from '@/src/screens/SplashScreen';
 import { DetailScreen } from '@/src/screens/DetailScreen';
+import { PersonScreen } from '@/src/screens/PersonScreen';
 import { PlayerScreen } from '@/src/screens/PlayerScreen';
 import { LivePlayerScreen } from '@/src/screens/LivePlayerScreen';
 import { ViewMoreScreen } from '@/src/screens/ViewMoreScreen';
+import { CategoryScreen } from '@/src/screens/CategoryScreen';
 import { SubtitleSettingsScreen } from '@/src/screens/SubtitleSettingsScreen';
 import { ServerSettingsScreen } from '@/src/screens/ServerSettingsScreen';
 import { VideoQualitySettingsScreen } from '@/src/screens/VideoQualitySettingsScreen';
 import { VideoAspectSettingsScreen } from '@/src/screens/VideoAspectSettingsScreen';
 import { RegionSettingsScreen } from '@/src/screens/RegionSettingsScreen';
+import { DnsSettingsScreen } from '@/src/screens/DnsSettingsScreen';
+import { ThemeSettingsScreen } from '@/src/screens/ThemeSettingsScreen';
+import { WelcomeSettingsScreen } from '@/src/screens/WelcomeSettingsScreen';
 import { PlaybackPerformanceScreen } from '@/src/screens/PlaybackPerformanceScreen';
 import { DisclaimerScreen } from '@/src/screens/DisclaimerScreen';
 import { CreditsScreen } from '@/src/screens/CreditsScreen';
 import { FinishedMoviesScreen } from '@/src/screens/FinishedMoviesScreen';
 import { TabNavigator } from './TabNavigator';
 import { TVNavigator } from './TVNavigator';
-import { JoinPartyScreen } from '@/src/screens/JoinPartyScreen';
-import { PartyLinkHandler } from '@/src/components/party/PartyLinkHandler';
-import { PartySessionBar } from '@/src/components/party/PartySessionBar';
+import { useWelcomeSettings } from '@/src/hooks/useWelcomeSettings';
 import { isTVLayout } from '@/src/utils/tv';
 import { isTablet } from '@/src/utils/responsive';
 import type { RootStackParamList } from './types';
@@ -43,32 +45,25 @@ const navTheme = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
-    background: '#000000',
-    card: '#000000',
-    primary: '#E50914',
+    background: '#0C0907',
+    card: '#0C0907',
+    primary: '#D32F2F',
     text: '#FFFFFF',
-    border: '#1f1f1f',
+    border: '#3C2E24',
   },
 };
 
 export const AppNavigator = () => {
-  const [routeName, setRouteName] = useState<string | undefined>();
-  const syncRoute = () => {
-    if (!navigationRef.isReady()) return;
-    setRouteName(navigationRef.getCurrentRoute()?.name);
-  };
+  const { mode: welcomeMode, ready: welcomeReady } = useWelcomeSettings();
+
+  // Wait for the persisted choice before mounting the navigator so "No
+  // welcome" never flashes the splash for one frame on a cold start.
+  if (!welcomeReady) return null;
 
   return (
-    <NavigationContainer
-      ref={navigationRef}
-      theme={navTheme}
-      onReady={syncRoute}
-      onStateChange={syncRoute}
-    >
-      <PartyLinkHandler />
-      <PartySessionBar routeName={routeName} />
+    <NavigationContainer ref={navigationRef} theme={navTheme}>
       <Stack.Navigator
-        initialRouteName="Splash"
+        initialRouteName={welcomeMode === 'off' ? 'Main' : 'Splash'}
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
@@ -89,7 +84,9 @@ export const AppNavigator = () => {
           component={DetailScreen}
           options={{ animation: 'slide_from_bottom' }}
         />
+        <Stack.Screen name="Person" component={PersonScreen} />
         <Stack.Screen name="ViewMore" component={ViewMoreScreen} />
+        <Stack.Screen name="Category" component={CategoryScreen} />
         <Stack.Screen
           name="SubtitleSettings"
           component={SubtitleSettingsScreen}
@@ -104,6 +101,12 @@ export const AppNavigator = () => {
           component={VideoAspectSettingsScreen}
         />
         <Stack.Screen name="RegionSettings" component={RegionSettingsScreen} />
+        <Stack.Screen name="DnsSettings" component={DnsSettingsScreen} />
+        <Stack.Screen name="ThemeSettings" component={ThemeSettingsScreen} />
+        <Stack.Screen
+          name="WelcomeSettings"
+          component={WelcomeSettingsScreen}
+        />
         <Stack.Screen
           name="PlaybackPerformance"
           component={PlaybackPerformanceScreen}
@@ -111,7 +114,6 @@ export const AppNavigator = () => {
         <Stack.Screen name="Disclaimer" component={DisclaimerScreen} />
         <Stack.Screen name="Credits" component={CreditsScreen} />
         <Stack.Screen name="FinishedMovies" component={FinishedMoviesScreen} />
-        <Stack.Screen name="JoinParty" component={JoinPartyScreen} />
         <Stack.Screen
           name="Player"
           component={PlayerScreen}

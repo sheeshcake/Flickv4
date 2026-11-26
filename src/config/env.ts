@@ -34,40 +34,38 @@ export const SAMPLE_VIDEO_URL =
   process.env.EXPO_PUBLIC_SAMPLE_VIDEO_URL ||
   'https://media.w3.org/2010/05/sintel/trailer.mp4';
 
-// GitHub repository the in-app updater polls for the latest release. Override
-// via `.env` if you fork the project into your own repo.
-// Watch-party WebSocket, e.g. wss://flickv4.nibbleph.dev
-export const WATCH_PARTY_CONFIG = {
-  url: process.env.EXPO_PUBLIC_WATCH_PARTY_URL?.trim() || '',
-  enabled: Boolean(process.env.EXPO_PUBLIC_WATCH_PARTY_URL?.trim()),
-} as const;
-
 /** FlixQuest scraper API (VOD providers + DLHD live TV). Empty = feature off. */
 export const FLIXQUEST_CONFIG = {
   url: process.env.EXPO_PUBLIC_FLIXQUEST_API_URL?.trim() || '',
   enabled: Boolean(process.env.EXPO_PUBLIC_FLIXQUEST_API_URL?.trim()),
 } as const;
 
-/** Remote M3U playlist merged into Live TV as the PH category. */
-const DEFAULT_LIVE_TV_M3U_URL =
-  'https://raw.githubusercontent.com/Harleythetech/IPHTV/main/ph.m3u';
+/** Free GitHub M3U playlists merged into Live TV as Movies/Series categories. */
+export interface LiveTvM3uSource {
+  url: string;
+  category: string;
+}
 
+const DEFAULT_LIVE_TV_M3U_SOURCES: LiveTvM3uSource[] = [
+  {
+    url: 'https://iptv-org.github.io/iptv/categories/movies.m3u',
+    category: 'Movies',
+  },
+  {
+    url: 'https://iptv-org.github.io/iptv/categories/series.m3u',
+    category: 'Series',
+  },
+];
+
+const envUrl = process.env.EXPO_PUBLIC_LIVE_TV_M3U_URL?.trim();
 export const LIVE_TV_M3U_CONFIG = {
-  url: process.env.EXPO_PUBLIC_LIVE_TV_M3U_URL?.trim() || DEFAULT_LIVE_TV_M3U_URL,
+  sources: envUrl
+    ? [{ url: envUrl, category: 'Movies' }]
+    : DEFAULT_LIVE_TV_M3U_SOURCES,
   enabled: true,
 } as const;
 
-/** Live tab is shown when FlixQuest DLHD and/or the PH M3U playlist is on. */
+/** Live tab is shown when FlixQuest DLHD and/or the M3U playlists are on. */
 export const LIVE_TV_CONFIG = {
   enabled: FLIXQUEST_CONFIG.enabled || LIVE_TV_M3U_CONFIG.enabled,
-} as const;
-
-export const UPDATE_CONFIG = {
-  OWNER: process.env.EXPO_PUBLIC_UPDATE_REPO_OWNER || 'sheeshcake',
-  REPO: process.env.EXPO_PUBLIC_UPDATE_REPO_NAME || 'Flickv4',
-  API_BASE_URL: 'https://api.github.com',
-  /** Minimum hours between automatic update checks. */
-  CHECK_INTERVAL_HOURS: 24,
-  /** Delay in ms after mount before the first check, so app boot is snappy. */
-  INITIAL_CHECK_DELAY_MS: 2000,
 } as const;

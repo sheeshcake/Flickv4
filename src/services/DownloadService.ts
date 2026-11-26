@@ -651,6 +651,20 @@ class DownloadServiceImpl {
     this.emit();
   }
 
+  /**
+   * Remove every completed job in one shot. Used by the Downloads screen's
+   * "Clear completed" action so users can reclaim space without deleting
+   * items one by one.
+   */
+  async clearCompleted(): Promise<void> {
+    const completed = [...this.jobs.values()].filter(
+      (j) => j.status === 'completed',
+    );
+    for (const job of completed) {
+      await this.remove(job.id);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Pipeline
   // -------------------------------------------------------------------------

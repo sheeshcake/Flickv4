@@ -10,10 +10,12 @@ export const useSafeLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export function GluestackUIProvider({
-  mode = 'light',
+  mode = 'dark',
+  palette = 'coffee',
   ...props
 }: {
   mode?: ModeType;
+  palette?: 'classic' | 'coffee';
   children?: React.ReactNode;
 }) {
   const handleMediaQuery = React.useCallback((e: MediaQueryListEvent) => {
@@ -30,6 +32,13 @@ export function GluestackUIProvider({
       }
     }
   }, [mode]);
+
+  useSafeLayoutEffect(() => {
+    const documentElement = document.documentElement;
+    if (!documentElement) return;
+    if (palette === 'coffee') documentElement.classList.add('coffee');
+    else documentElement.classList.remove('coffee');
+  }, [palette]);
 
   useSafeLayoutEffect(() => {
     if (mode !== 'system') return;

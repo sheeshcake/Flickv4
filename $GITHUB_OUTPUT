@@ -1,0 +1,3 @@
+"app_version=${VERSION}" 
+"build_number=${CODE}" 
+"release_tag=${RELEASE_TAG}" 

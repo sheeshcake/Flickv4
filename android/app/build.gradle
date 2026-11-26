@@ -29,7 +29,7 @@ def loadDotEnv = { String path ->
 }
 
 def dotenv = loadDotEnv("${projectRoot}/.env")
-def envVersionName = (dotenv.APP_VERSION ?: "0.0.0").toString().trim()
+def envVersionName = (dotenv.APP_VERSION ?: "1.0").toString().trim()
 def envVersionCode = (dotenv.ANDROID_VERSION_CODE ?: "1").toString().trim().toInteger()
 
 /**
@@ -117,7 +117,7 @@ android {
 
     namespace 'com.flickv4'
     defaultConfig {
-        applicationId 'com.flickv4'
+        applicationId 'com.coffehouse.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // From project `.env` (APP_VERSION / ANDROID_VERSION_CODE) — keep in

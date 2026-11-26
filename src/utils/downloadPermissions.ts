@@ -99,7 +99,7 @@ export const ensureDownloadPermissions = async (): Promise<boolean> => {
     return await new Promise<boolean>((resolve) => {
       Alert.alert(
         'Enable download notifications',
-        'Flick uses notifications to show download progress. You can turn this on in Settings.',
+        'CoFFe House uses notifications to show download progress. You can turn this on in Settings.',
         [
           {
             text: 'Not now',

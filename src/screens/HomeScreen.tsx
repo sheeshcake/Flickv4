@@ -1,4 +1,4 @@
-import { useState, type RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
 import { RefreshControl } from 'react-native';
 import Animated, {
@@ -10,23 +10,24 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Box } from '@/components/ui/box';
-import { Button, ButtonText } from '@/components/ui/button';
-import { Center } from '@/components/ui/center';
-import { Spinner } from '@/components/ui/spinner';
-import { Text } from '@/components/ui/text';
-import { VStack } from '@/components/ui/vstack';
 import { AppHeader } from '@/src/components/AppHeader';
 import { HeroCarousel } from '@/src/components/HeroCarousel';
 import { ContentRow } from '@/src/components/ContentRow';
 import { CatalogRow } from '@/src/components/CatalogRow';
 import { BrowseChips } from '@/src/components/BrowseChips';
 import { GenreGrid } from '@/src/components/GenreGrid';
+import { HomeSkeleton } from '@/src/components/HomeSkeleton';
+import { ErrorState } from '@/src/components/ErrorState';
 import { HomeScreenTV } from '@/src/components/tv/HomeScreenTV';
 import type { TVSideNavHandle } from '@/src/components/tv/TVSideNav';
 import { useHomeData } from '@/src/hooks/useHomeData';
 import { useMyList } from '@/src/hooks/useMyList';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
 import { useDeviceKind } from '@/src/hooks/useDeviceKind';
+import type {
+  BrowseScope,
+  CategoryDefinition,
+} from '@/src/config/categoriesCatalog';
 import { getReleaseDate, getTitle, type MediaItem } from '@/src/types';
 import { getComingSoon } from '@/src/utils/comingSoon';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -52,7 +53,8 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const deviceKind = useDeviceKind();
-  const { hero, rows, loading, error, refreshing, refresh } = useHomeData();
+  const { hero, rows, loading, error, refreshing, refresh, prefetch } =
+    useHomeData();
   const { items: myList, isInList, toggle } = useMyList();
   const { entries: continueWatching, remove: removeContinue } =
     useContinueWatching();
@@ -62,6 +64,13 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   // header to exit selection mode without deleting anything.
   const [cwSelecting, setCwSelecting] = useState(false);
   const [myListSelecting, setMyListSelecting] = useState(false);
+
+  // Normally Splash warms the first home wave. When the welcome image is
+  // disabled the app starts on Main instead, so Home must warm it itself.
+  // `prefetch` is idempotent and no-ops when Splash already did the work.
+  useEffect(() => {
+    void prefetch();
+  }, [prefetch]);
 
   // Drives the sticky AppHeader's fade-in backdrop + logo shrink as the hero
   // scrolls out of view — see AppHeader's `progress` prop.
@@ -75,6 +84,9 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   });
 
   const openDetail = (item: MediaItem) => navigation.navigate('Detail', { item });
+
+  const openCategory = (scope: BrowseScope, category?: CategoryDefinition) =>
+    navigation.navigate('Category', { scope, categoryId: category?.id });
 
   const play = (item: MediaItem, resumeFrom?: number) =>
     navigation.navigate('Player', {
@@ -106,27 +118,29 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   };
 
   if (loading) {
-    return (
-      <Center className="flex-1 bg-background">
-        <Spinner size="large" color="#E50914" />
-      </Center>
-    );
+    return <HomeSkeleton />;
   }
 
   if (error && !rows.length) {
     return (
-      <Center className="flex-1 bg-background px-8">
-        <VStack space="lg" className="items-center">
-          <Text className="text-center text-muted-foreground">{error}</Text>
-          <Button variant="outline" onPress={refresh} isDisabled={refreshing}>
-            <ButtonText>{refreshing ? 'Retrying…' : 'Try again'}</ButtonText>
-          </Button>
-        </VStack>
-      </Center>
+      <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+        <ErrorState
+          title="Couldn't load the catalog"
+          error={error}
+          onRetry={refresh}
+          retrying={refreshing}
+        />
+      </Box>
     );
   }
 
-  const heroHeight = height * 0.6;
+  const isLandscape = width > height;
+  // Portrait keeps the original tall cinematic hero; landscape (tablets, and
+  // free-rotating devices) caps it against width so the hero can't swallow
+  // the whole viewport and push every row below the fold.
+  const heroHeight = isLandscape
+    ? Math.min(height * 0.78, width * 0.52)
+    : height * 0.6;
   const continueItems = continueWatching.map((e) => e.item);
   const findContinueEntry = (item: MediaItem) =>
     continueWatching.find(
@@ -177,9 +191,7 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
         onViewMore={(row) =>
           navigation.navigate('ViewMore', { title: row.title, query: row.query })
         }
-        onSelectGenre={(title, query) =>
-          navigation.navigate('ViewMore', { title, query })
-        }
+        onSelectCategory={openCategory}
         sidebarRef={sidebarRef}
       />
     );
@@ -195,7 +207,7 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={refresh}
-            tintColor="#E50914"
+            tintColor="#D32F2F"
           />
         }
       >
@@ -222,12 +234,7 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
             onRegionPress={() => navigation.navigate('RegionSettings')}
           />
 
-          <GenreGrid
-            deviceKind={deviceKind}
-            onSelect={(title, query) =>
-              navigation.navigate('ViewMore', { title, query })
-            }
-          />
+          <GenreGrid deviceKind={deviceKind} onSelect={openCategory} />
 
           {continueItems.length > 0 && (
             <ContentRow

@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ScrollView } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Baby,
   Clapperboard,
+  Coffee,
   Compass,
   Drama,
   Ghost,
@@ -27,20 +29,33 @@ import { Heading } from '@/components/ui/heading';
 import { Text } from '@/components/ui/text';
 import { Icon } from '@/components/ui/icon';
 import { Focusable } from '@/src/components/Focusable';
-import { TMDBService } from '@/src/services/TMDBService';
-import { useCatalogRegion } from '@/src/hooks/useCatalogRegion';
-import type { CategoryQuery } from '@/src/services/categories';
-import type { Genre } from '@/src/types';
+import {
+  CATEGORY_CATALOG,
+  supportsScope,
+  type BrowseScope,
+  type CategoryDefinition,
+} from '@/src/config/categoriesCatalog';
 import type { DeviceKind } from '@/src/utils/responsive';
 import { getHorizontalPadding } from '@/src/utils/responsive';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 
-type GenreKind = 'movie' | 'tv';
-
 interface GenreGridProps {
   deviceKind: DeviceKind;
-  onSelect: (title: string, query: CategoryQuery) => void;
+  onSelect: (scope: BrowseScope, category?: CategoryDefinition) => void;
 }
+
+interface CategoryEntry {
+  id: string;
+  name: string;
+  icon: LucideIcon;
+  category?: CategoryDefinition;
+}
+
+const SCOPES: { key: BrowseScope; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'series', label: 'Series' },
+  { key: 'films', label: 'Films' },
+];
 
 const ICON_BY_NAME: Record<string, LucideIcon> = {
   action: Swords,
@@ -49,63 +64,60 @@ const ICON_BY_NAME: Record<string, LucideIcon> = {
   animation: Sparkles,
   comedy: Laugh,
   crime: Shield,
+  documentaries: Landmark,
   documentary: Landmark,
   drama: Drama,
   family: Users,
   fantasy: Sparkles,
   history: Landmark,
   horror: Ghost,
+  kids: Baby,
   music: Music,
   mystery: Skull,
+  reality: Tv,
   romance: Heart,
+  'sci-fi': Rocket,
   'science fiction': Rocket,
   'sci-fi & fantasy': Rocket,
+  thrillers: Skull,
   thriller: Skull,
   war: Swords,
-  'war & politics': Swords,
+  westerns: Landmark,
   western: Landmark,
-  kids: Baby,
-  news: Newspaper,
-  reality: Tv,
-  soap: Drama,
-  talk: Newspaper,
-  'tv movie': Clapperboard,
 };
 
 const iconFor = (name: string): LucideIcon =>
   ICON_BY_NAME[name.trim().toLowerCase()] ?? Clapperboard;
 
+const scopeName = (scope: BrowseScope): string =>
+  scope === 'series' ? 'All Series' : scope === 'films' ? 'All Films' : 'Everything';
+
 export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
   const padding = getHorizontalPadding(deviceKind);
-  const { region } = useCatalogRegion();
-  const [kind, setKind] = useState<GenreKind>('movie');
-  const [movieGenres, setMovieGenres] = useState<Genre[]>([]);
-  const [tvGenres, setTvGenres] = useState<Genre[]>([]);
+  const [scope, setScope] = useState<BrowseScope>('all');
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([TMDBService.getMovieGenres(), TMDBService.getTVGenres()])
-      .then(([movies, tv]) => {
-        if (cancelled) return;
-        setMovieGenres(movies.genres ?? []);
-        setTvGenres(tv.genres ?? []);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const entries = useMemo<CategoryEntry[]>(
+    () => [
+      { id: `all-${scope}`, name: scopeName(scope), icon: Sparkles, category: undefined },
+      ...CATEGORY_CATALOG.filter((category) => supportsScope(category, scope)).map(
+        (category) => ({
+          id: category.id,
+          name: category.name,
+          icon: iconFor(category.name),
+          category,
+        }),
+      ),
+    ],
+    [scope],
+  );
 
-  const genres = kind === 'movie' ? movieGenres : tvGenres;
-  const columns = useMemo(() => {
-    const cols: Genre[][] = [];
-    for (let i = 0; i < genres.length; i += 2) {
-      cols.push(genres.slice(i, i + 2));
+  const columns = useMemo<CategoryEntry[][]>(() => {
+    const cols: CategoryEntry[][] = [];
+    for (let i = 0; i < entries.length; i += 2) {
+      cols.push(entries.slice(i, i + 2));
     }
     return cols;
-  }, [genres]);
-
-  if (!movieGenres.length && !tvGenres.length) return null;
+  }, [entries]);
 
   return (
     <Box className="mb-6">
@@ -113,50 +125,54 @@ export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
         className="mb-3 items-center justify-between"
         style={{ paddingHorizontal: padding }}
       >
-        <Heading size="md" className="text-foreground">
-          Genres
-        </Heading>
+        <HStack space="sm" className="items-center">
+          <LinearGradient
+            colors={['#D32F2F', '#7A1414']}
+            style={{
+              width: 32,
+              height: 32,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 12,
+            }}
+          >
+            <Icon as={Coffee} size="sm" className="text-primary-foreground" />
+          </LinearGradient>
+          <VStack>
+            <Heading size="md" bold className="text-foreground">
+              Categories
+            </Heading>
+            <Text size="2xs" className="text-muted-foreground">
+              Pick your mood, brewed your way
+            </Text>
+          </VStack>
+        </HStack>
         <HStack space="sm">
-          <Focusable
-            onPress={() => setKind('movie')}
-            className={`rounded-full px-3 py-1 ${
-              kind === 'movie'
-                ? 'border border-primary/40 bg-primary/20'
-                : 'border border-border bg-card'
-            }`}
-            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
-          >
-            <Text
-              size="sm"
-              className={
-                kind === 'movie'
-                  ? 'font-semibold text-foreground'
-                  : 'text-muted-foreground'
-              }
-            >
-              Movies
-            </Text>
-          </Focusable>
-          <Focusable
-            onPress={() => setKind('tv')}
-            className={`rounded-full px-3 py-1 ${
-              kind === 'tv'
-                ? 'border border-primary/40 bg-primary/20'
-                : 'border border-border bg-card'
-            }`}
-            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
-          >
-            <Text
-              size="sm"
-              className={
-                kind === 'tv'
-                  ? 'font-semibold text-foreground'
-                  : 'text-muted-foreground'
-              }
-            >
-              TV
-            </Text>
-          </Focusable>
+          {SCOPES.map((option) => {
+            const active = scope === option.key;
+            return (
+              <Focusable
+                key={option.key}
+                onPress={() => setScope(option.key)}
+                className={`rounded-full px-3 py-1 ${
+                  active
+                    ? 'border border-primary/60 bg-primary/25'
+                    : 'border border-border bg-card/70'
+                }`}
+                focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+              >
+                <Text
+                  size="sm"
+                  bold={active}
+                  className={
+                    active ? 'text-foreground' : 'text-muted-foreground'
+                  }
+                >
+                  {option.label}
+                </Text>
+              </Focusable>
+            );
+          })}
         </HStack>
       </HStack>
 
@@ -171,33 +187,44 @@ export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
       >
         {columns.map((col, colIndex) => (
           <VStack key={`col-${colIndex}`} space="sm" className="w-44">
-            {col.map((genre) => (
+            {col.map((entry) => (
               <Focusable
-                key={genre.id}
-                onPress={() =>
-                  onSelect(genre.name, {
-                    kind: kind === 'movie' ? 'genreMovie' : 'genreTv',
-                    genreId: genre.id,
-                    region,
-                  })
-                }
-                className="rounded-xl border border-border bg-card px-3 py-3"
+                key={`${scope}-${entry.id}`}
+                onPress={() => onSelect(scope, entry.category)}
+                className="rounded-2xl border border-border/70 bg-card/80 px-3 py-3"
                 focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                style={{
+                  shadowColor: '#000',
+                  shadowOpacity: 0.22,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: 3,
+                }}
               >
                 <HStack space="sm" className="items-center">
-                  <Box className="h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
+                  <LinearGradient
+                    colors={['rgba(196,124,72,0.38)', 'rgba(196,124,72,0.08)']}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 12,
+                    }}
+                  >
                     <Icon
-                      as={iconFor(genre.name)}
+                      as={entry.icon}
                       size="sm"
-                      className="text-primary"
+                      className="text-primary-foreground"
                     />
-                  </Box>
+                  </LinearGradient>
                   <Text
                     size="sm"
+                    bold
                     className="flex-1 text-foreground"
                     numberOfLines={1}
                   >
-                    {genre.name}
+                    {entry.name}
                   </Text>
                 </HStack>
               </Focusable>

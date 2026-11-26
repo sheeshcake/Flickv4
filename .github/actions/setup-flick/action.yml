@@ -11,9 +11,6 @@ inputs:
     required: true
   wyzie_api_key:
     required: true
-  watch_party_url:
-    required: false
-    default: ''
   tmdb_base_url:
     required: false
     default: https://api.themoviedb.org/3
@@ -44,7 +41,6 @@ runs:
         ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
         EXPO_PUBLIC_TMDB_API_KEY: ${{ inputs.tmdb_api_key }}
         EXPO_PUBLIC_WYZIE_API_KEY: ${{ inputs.wyzie_api_key }}
-        EXPO_PUBLIC_WATCH_PARTY_URL: ${{ inputs.watch_party_url }}
         EXPO_PUBLIC_TMDB_BASE_URL: ${{ inputs.tmdb_base_url }}
         EXPO_PUBLIC_TMDB_IMAGE_BASE_URL: ${{ inputs.tmdb_image_base_url }}
         EXPO_PUBLIC_WYZIE_BASE_URL: ${{ inputs.wyzie_base_url }}
@@ -57,7 +53,6 @@ runs:
         EXPO_PUBLIC_WYZIE_BASE_URL=${EXPO_PUBLIC_WYZIE_BASE_URL}
         EXPO_PUBLIC_WYZIE_API_KEY=${EXPO_PUBLIC_WYZIE_API_KEY}
         EXPO_PUBLIC_SAMPLE_VIDEO_URL=https://media.w3.org/2010/05/sintel/trailer.mp4
-        EXPO_PUBLIC_WATCH_PARTY_URL=${EXPO_PUBLIC_WATCH_PARTY_URL}
         APP_VERSION=${APP_VERSION}
         ANDROID_VERSION_CODE=${ANDROID_VERSION_CODE}
         TMDB_API_KEY=${EXPO_PUBLIC_TMDB_API_KEY}

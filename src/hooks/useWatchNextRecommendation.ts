@@ -63,11 +63,11 @@ export const useWatchNextRecommendation = (
     request
       .then((res) => {
         if (cancelled) return;
-        const stamped: MediaItem[] = (res.results ?? []).map((row) =>
+        const stamped = (res.results ?? []).map((row) =>
           movie
             ? { ...row, media_type: 'movie' as const }
             : { ...row, media_type: 'tv' as const },
-        );
+        ) as unknown as MediaItem[];
         const pick =
           stamped.find(
             (candidate) =>

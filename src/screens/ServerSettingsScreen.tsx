@@ -407,7 +407,7 @@ const ServerRow = ({
         className="ml-3 flex-row items-center gap-1 rounded-full"
         focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
       >
-        <Spinner size="small" color="#E50914" />
+        <Spinner size="small" color="#D32F2F" />
         <Icon as={X} size="xs" className="text-muted-foreground" />
       </Focusable>
     ) : (

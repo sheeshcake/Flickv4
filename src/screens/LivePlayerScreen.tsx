@@ -144,7 +144,7 @@ export const LivePlayerScreen = ({
 
       {loading ? (
         <Center style={StyleSheet.absoluteFill} className="bg-black">
-          <Spinner size="large" color="#E50914" />
+          <Spinner size="large" color="#D32F2F" />
           <Text className="mt-4 text-muted-foreground">
             Tuning {channel.name}…
           </Text>

@@ -19,8 +19,8 @@ const readDisplayedBrightness = async (): Promise<number> => {
 };
 
 /**
- * In-player sliders bound to the phone’s real media volume and screen
- * brightness. Not sent over watch party.
+ * In-player sliders bound to the phone's real media volume and screen
+ * brightness.
  *
  * Brightness is a session window override (Netflix-style): we never write
  * global system brightness. The slider is seeded from the currently

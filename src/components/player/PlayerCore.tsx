@@ -24,22 +24,11 @@ import { Spinner } from '@/components/ui/spinner';
 import { Text } from '@/components/ui/text';
 import { PlayerControls } from '@/src/components/player/PlayerControls';
 import { PlayerEpisodeDrawer } from '@/src/components/player/PlayerEpisodeDrawer';
-import { PartyLobbyModal } from '@/src/components/party/PartyLobbyModal';
-import { PlayerChatDrawer } from '@/src/components/party/PlayerChatDrawer';
-import { PlayerChatToast } from '@/src/components/party/PlayerChatToast';
-import { PartyCallOverlay } from '@/src/components/party/PartyCallOverlay';
-import { PlayerPartyDrawer } from '@/src/components/party/PlayerPartyDrawer';
-import { PlayerReactionOverlay } from '@/src/components/party/PlayerReactionOverlay';
-import {
-  appendFloatingReaction,
-  isPartyReaction,
-  type FloatingReaction,
-} from '@/src/components/party/partyReactions';
-import { WatchPartyIntroModal } from '@/src/components/party/WatchPartyIntroModal';
-import { partyContentFromItem } from '@/src/party/content';
 import {
   PlayerSettingsDrawer,
+  PLAYBACK_SPEED_OPTIONS,
   type PlaybackSpeed,
+  type SubtitleAppearance,
 } from '@/src/components/player/PlayerSettingsDrawer';
 import {
   PIP_SUBTITLE_FONT_SIZE,
@@ -53,29 +42,27 @@ import {
 import { useControlsVisibility } from '@/src/components/player/useControlsVisibility';
 import { useTVRemote } from '@/src/components/player/useTVRemote';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
-import { useWatchParty } from '@/src/hooks/useWatchParty';
 import { useDevicePlaybackLevels } from '@/src/hooks/useDevicePlaybackLevels';
-import {
-  PARTY_URI_MAX,
-  isPartyStreamUri,
-  partySourceKind,
-  predictedHostTime,
-  type PartyChatLine,
-} from '@/src/party/protocol';
 import {
   UP_NEXT_LEAD_SECONDS,
   useNextEpisode,
 } from '@/src/hooks/useNextEpisode';
 import { useWatchNextRecommendation } from '@/src/hooks/useWatchNextRecommendation';
 import { usePlaybackSettings } from '@/src/hooks/usePlaybackSettings';
+import {
+  usePlayerPreferences,
+  type PlayerPreference,
+} from '@/src/hooks/usePlayerPreferences';
 import { useServers } from '@/src/hooks/useServers';
 import { useSubtitles } from '@/src/hooks/useSubtitles';
-import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
+import {
+  DEFAULT_SUBTITLE_SETTINGS,
+  useSubtitleSettings,
+} from '@/src/hooks/useSubtitleSettings';
 import { toResizeMode, useVideoAspect } from '@/src/hooks/useVideoAspect';
 import { useVideoQuality } from '@/src/hooks/useVideoQuality';
 import { File } from 'expo-file-system';
 import { fetchHlsVariants, type Variant } from '@/src/utils/hlsVariants';
-import { playbackHeadersFor } from '@/src/services/playbackHeaders';
 import type {
   StreamflixSource,
   StreamflixSubtitle,
@@ -97,7 +84,6 @@ interface PlayerCoreProps {
   imdbId?: string | null;
   resumeFrom?: number;
   onBack: () => void;
-  onLeaveParty?: () => void;
   /** TV only: called when the user picks a different episode from the drawer. */
   onSelectEpisode?: (season: number, episode: Episode) => void;
   /**
@@ -137,7 +123,10 @@ interface PlayerCoreProps {
  * unlike expo-video's `isPictureInPictureSupported()`. */
 const isPipSupported = (): boolean =>
   Platform.OS === 'ios' ||
-  (Platform.OS === 'android' && Number(Platform.Version) >= 26);
+  (Platform.OS === 'android' && Number(Platform.Version) >= 26) ||
+  (Platform.OS === 'web' &&
+    typeof document !== 'undefined' &&
+    !!document.pictureInPictureEnabled);
 
 /** Approximates expo-video's old `preferredForwardBufferDuration` (seconds)
  * as ExoPlayer `bufferConfig` (ms-based) for Android. iOS uses the RNV
@@ -177,7 +166,6 @@ export const PlayerCore = ({
   imdbId,
   resumeFrom,
   onBack,
-  onLeaveParty,
   onSelectEpisode,
   onSelectServer,
   streamflixSources = [],
@@ -193,28 +181,23 @@ export const PlayerCore = ({
   const isFocused = useIsFocused();
   const { servers, activeServer } = useServers();
   const { upsert, advanceEpisode } = useContinueWatching();
-  const {
-    enabled: partyEnabled,
-    role: partyRole,
-    room: partyRoom,
-    memberId: partyMemberId,
-    chat: partyChat,
-    displayName: partyDisplayName,
-    send: sendParty,
-    subscribe: subscribeParty,
-    leaveRoom,
-    rtc,
-    joinNotice,
-  } = useWatchParty();
-  const [partyOpen, setPartyOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [reactions, setReactions] = useState<FloatingReaction[]>([]);
-  const [chatToast, setChatToast] = useState<PartyChatLine | null>(null);
-  const prevChatLen = useRef(0);
-  const [partyIntroOpen, setPartyIntroOpen] = useState(false);
-  const [partyLobbyOpen, setPartyLobbyOpen] = useState(false);
-  const [callTilesHidden, setCallTilesHidden] = useState(false);
-  const waitingForGuestsRef = useRef(false);
+  const preferences = usePlayerPreferences();
+  // TV preferences are per show (not per episode), mirroring Continue
+  // Watching's key so every episode of a series inherits the same choices.
+  const preferenceSubject = useMemo(
+    () => ({ id: item.id, media_type: item.media_type }),
+    [item.id, item.media_type],
+  );
+  const persistedPref = useMemo(
+    () =>
+      preferences.ready ? preferences.getFor(preferenceSubject) : undefined,
+    [preferences, preferenceSubject],
+  );
+  // Locally chosen values take effect immediately; the provider persists them
+  // for the next time this title is opened.
+  const [prefOverride, setPrefOverride] = useState<Partial<PlayerPreference>>(
+    {},
+  );
   const lastSavedRef = useRef(0);
   const didResumeRef = useRef(false);
   // Set right before autoplay hands off to the next episode. Guards the
@@ -228,10 +211,22 @@ export const PlayerCore = ({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [episodesOpen, setEpisodesOpen] = useState(false);
   const [pipActive, setPipActive] = useState(false);
-  // Session-only: resets to Normal every time a new video/PlayerCore mounts,
-  // rather than persisting app-wide — see the flick-player-controls skill's
-  // "session-only vs per-server vs persisted" table.
+  // Starting speed comes from this title's saved preference. Changes made
+  // during playback update both this state and the persisted per-title store.
   const [playbackRate, setPlaybackRate] = useState<PlaybackSpeed>(1);
+  const appliedInitialSpeedRef = useRef(false);
+  useEffect(() => {
+    if (!preferences.ready || appliedInitialSpeedRef.current) return;
+    if (prefOverride.playbackRate !== undefined) return;
+    appliedInitialSpeedRef.current = true;
+    const saved = preferences.getFor(preferenceSubject).playbackRate;
+    if (
+      typeof saved === 'number' &&
+      PLAYBACK_SPEED_OPTIONS.some((option) => option === saved)
+    ) {
+      setPlaybackRate(saved as PlaybackSpeed);
+    }
+  }, [preferences, preferenceSubject, prefOverride.playbackRate]);
   const {
     volume,
     setVolume,
@@ -264,6 +259,15 @@ export const PlayerCore = ({
     [onSelectStreamflixSource],
   );
 
+  const handleSelectSpeed = useCallback(
+    (speed: PlaybackSpeed) => {
+      setPlaybackRate(speed);
+      setPrefOverride((prev) => ({ ...prev, playbackRate: speed }));
+      preferences.saveFor(preferenceSubject, { playbackRate: speed });
+    },
+    [preferences, preferenceSubject],
+  );
+
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
   const [selectedAudioIndex, setSelectedAudioIndex] = useState<number | null>(
     null,
@@ -271,6 +275,65 @@ export const PlayerCore = ({
   const onAudioTracks = useCallback((data: OnAudioTracksData) => {
     setAudioTracks(data.audioTracks ?? []);
   }, []);
+
+  // Remembered audio choice: prefer a language code (stable across servers)
+  // and fall back to the raw index for streams that don't expose one.
+  const preferredAudioLanguage =
+    prefOverride.audioLanguage !== undefined
+      ? prefOverride.audioLanguage
+      : persistedPref?.audioLanguage;
+  const preferredAudioIndex =
+    prefOverride.audioIndex !== undefined
+      ? prefOverride.audioIndex
+      : persistedPref?.audioIndex;
+
+  useEffect(() => {
+    if (!audioTracks.length) return;
+    if (preferredAudioLanguage === undefined && preferredAudioIndex === undefined) {
+      return;
+    }
+    if (preferredAudioLanguage == null && preferredAudioIndex == null) {
+      setSelectedAudioIndex(null);
+      return;
+    }
+    const normalize = (value: unknown): string =>
+      typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const wantedLanguage = normalize(preferredAudioLanguage);
+    const byLanguage = wantedLanguage
+      ? audioTracks.find(
+          (track) =>
+            normalize(track.language) === wantedLanguage ||
+            normalize(track.title) === wantedLanguage,
+        )
+      : undefined;
+    const byIndex =
+      preferredAudioIndex != null
+        ? audioTracks.find(
+            (track, i) => (track.index ?? i) === preferredAudioIndex,
+          )
+        : undefined;
+    const match = byLanguage ?? byIndex;
+    if (match) {
+      setSelectedAudioIndex(match.index ?? audioTracks.indexOf(match));
+    }
+  }, [audioTracks, preferredAudioLanguage, preferredAudioIndex]);
+
+  const handleSelectAudio = useCallback(
+    (index: number) => {
+      setSelectedAudioIndex(index);
+      const track = audioTracks.find((t, i) => (t.index ?? i) === index);
+      const language =
+        typeof track?.language === 'string' && track.language.trim()
+          ? track.language
+          : undefined;
+      setPrefOverride((prev) => ({ ...prev, audioLanguage: language, audioIndex: index }));
+      preferences.saveFor(preferenceSubject, {
+        audioLanguage: language,
+        audioIndex: index,
+      });
+    },
+    [audioTracks, preferences, preferenceSubject],
+  );
 
   const extraSubtitleTracks = useMemo<WyzieSubtitle[]>(
     () =>
@@ -303,8 +366,7 @@ export const PlayerCore = ({
   // definitively resolved things (not just "hasn't found one yet") —
   // otherwise a still-loading result gets misread as a confirmed finale.
   const [pendingAdvance, setPendingAdvance] = useState(false);
-  const watchNextEnabled =
-    !isTV && !partyRoom && !!onPlayRecommendation;
+  const watchNextEnabled = !isTV && !!onPlayRecommendation;
   const { recommendation, loading: recommendationLoading } =
     useWatchNextRecommendation(item, watchNextEnabled);
   const [showWatchNext, setShowWatchNext] = useState(false);
@@ -337,7 +399,8 @@ export const PlayerCore = ({
       : undefined,
   );
 
-  const { settings: subtitleSettings } = useSubtitleSettings();
+  const { settings: subtitleSettings, update: updateSubtitleSettings } =
+    useSubtitleSettings();
   const nativeSubtitlesEnabled = subtitleSettings.renderMode === 'native';
   // Sidecar (native OS) subtitle rendering via react-native-video's
   // `source.textTracks` works on Android always, but NOT with HLS playlists
@@ -351,6 +414,19 @@ export const PlayerCore = ({
   // embedded to select).
   const useNativeSidecar =
     nativeSubtitlesEnabled && !(Platform.OS === 'ios' && isHls);
+
+  // Explicit `null` means the user picked "Off" for this title; `undefined`
+  // falls back to the app-wide default language. Waiting for the preference
+  // store before enabling subtitle search prevents the global default from
+  // auto-selecting a track before the saved one is known.
+  const preferredSubtitleLanguage =
+    prefOverride.subtitleLanguage !== undefined
+      ? prefOverride.subtitleLanguage
+      : persistedPref?.subtitleLanguage;
+  const preferredDefaultLanguage =
+    preferredSubtitleLanguage === undefined
+      ? subtitleSettings.defaultLanguage
+      : preferredSubtitleLanguage ?? '';
 
   // Online: Wyzie SRT search drives the picker (format=vtt often returns an
   // empty list). Offline: `localSubtitles` skips the network. Cue parse is
@@ -368,8 +444,9 @@ export const PlayerCore = ({
     tmdbId: item.id,
     season,
     episode,
+    enabled: preferences.ready,
     loadCues: !useNativeSidecar,
-    defaultLanguage: subtitleSettings.defaultLanguage,
+    defaultLanguage: preferredDefaultLanguage,
     localTracks: localSubtitles,
     format: 'srt',
     extraTracks: extraSubtitleTracks,
@@ -381,6 +458,41 @@ export const PlayerCore = ({
     label: `${t.display}${t.isHearingImpaired ? ' (CC)' : ''}`,
   }));
   const subtitlesActive = wyzieSelectedId != null;
+
+  const handleSelectSubtitle = useCallback(
+    (id: string | null) => {
+      const chosen = id ? wyzieTracks.find((track) => track.id === id) : null;
+      const language = chosen?.language ?? null;
+      setPrefOverride((prev) => ({ ...prev, subtitleLanguage: language }));
+      preferences.saveFor(preferenceSubject, { subtitleLanguage: language });
+      selectWyzieTrack(id);
+    },
+    [wyzieTracks, preferences, preferenceSubject, selectWyzieTrack],
+  );
+
+  const subtitleAppearance: SubtitleAppearance = useMemo(
+    () => ({
+      fontSize: subtitleSettings.fontSize,
+      textColor: subtitleSettings.textColor,
+      backgroundOpacity: subtitleSettings.backgroundOpacity,
+      bold: subtitleSettings.bold,
+      textShadow: subtitleSettings.textShadow,
+    }),
+    [
+      subtitleSettings.fontSize,
+      subtitleSettings.textColor,
+      subtitleSettings.backgroundOpacity,
+      subtitleSettings.bold,
+      subtitleSettings.textShadow,
+    ],
+  );
+  const appearanceActive =
+    subtitleSettings.fontSize !== DEFAULT_SUBTITLE_SETTINGS.fontSize ||
+    subtitleSettings.textColor !== DEFAULT_SUBTITLE_SETTINGS.textColor ||
+    subtitleSettings.backgroundOpacity !==
+      DEFAULT_SUBTITLE_SETTINGS.backgroundOpacity ||
+    subtitleSettings.bold !== DEFAULT_SUBTITLE_SETTINGS.bold ||
+    subtitleSettings.textShadow !== DEFAULT_SUBTITLE_SETTINGS.textShadow;
 
   // Stable ids for native sidecar effects — avoid refetch/cancel races when
   // the track object identity changes but the selection did not.
@@ -400,8 +512,10 @@ export const PlayerCore = ({
   const settingsActive =
     playbackRate !== 1 ||
     subtitlesActive ||
+    selectedAudioIndex != null ||
     selectedVariantUri != null ||
-    aspect !== 'contain';
+    aspect !== 'contain' ||
+    appearanceActive;
 
   // Session-only sync offset (seconds) for the currently selected track.
   // Component mode applies it in cue lookup; native mode rewrites the local
@@ -412,52 +526,6 @@ export const PlayerCore = ({
   useEffect(() => {
     setSubtitleOffsetSeconds(0);
   }, [wyzieSelectedId]);
-
-  useEffect(() => {
-    if (partyRole !== 'host') return;
-    const uri = masterUri;
-    if (!uri || !isPartyStreamUri(uri)) return;
-    const headers = playbackHeadersFor(activeServer);
-    sendParty({
-      type: 'source',
-      uri: uri.slice(0, PARTY_URI_MAX),
-      kind: partySourceKind(uri),
-      referer: headers.Referer.slice(0, PARTY_URI_MAX),
-      origin: headers.Origin.slice(0, PARTY_URI_MAX),
-      ...(activeStreamflixSourceId
-        ? { sourceId: activeStreamflixSourceId.slice(0, 80) }
-        : {}),
-    });
-  }, [
-    partyRole,
-    masterUri,
-    sendParty,
-    activeServer,
-    activeStreamflixSourceId,
-  ]);
-
-  useEffect(() => {
-    if (partyRole !== 'host') return;
-    if (!selectedWyzieTrack || selectedWyzieIsLocal) {
-      sendParty({ type: 'subtitles', subtitles: null });
-      return;
-    }
-    sendParty({
-      type: 'subtitles',
-      subtitles: {
-        url: selectedWyzieTrack.url.slice(0, PARTY_URI_MAX),
-        language: selectedWyzieTrack.language,
-        display: selectedWyzieTrack.display,
-        offsetSeconds: subtitleOffsetSeconds,
-      },
-    });
-  }, [
-    partyRole,
-    selectedWyzieTrack,
-    selectedWyzieIsLocal,
-    subtitleOffsetSeconds,
-    sendParty,
-  ]);
 
   // Local WebVTT URI for the currently selected native track (converted
   // from Wyzie/offline SRT/VTT). Raw text is kept so sync offset changes can
@@ -579,7 +647,7 @@ export const PlayerCore = ({
   // Player state (mirrors what expo-video's `useEvent`/`player.*` used to
   // expose, now derived from react-native-video's declarative props/events).
   // -------------------------------------------------------------------------
-  const [paused, setPaused] = useState(partyRole === 'guest');
+  const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   useEffect(() => {
     pausedRef.current = paused;
@@ -600,13 +668,7 @@ export const PlayerCore = ({
     ? null
     : cueAt(currentTime - subtitleOffsetSeconds);
 
-  const controlsHold =
-    settingsOpen ||
-    episodesOpen ||
-    partyOpen ||
-    chatOpen ||
-    partyIntroOpen ||
-    partyLobbyOpen;
+  const controlsHold = settingsOpen || episodesOpen;
   const { visible, show, toggle } = useControlsVisibility(isPlaying, controlsHold);
 
   // Seconds left in the episode; `Infinity` until the player reports a real
@@ -959,154 +1021,28 @@ export const PlayerCore = ({
   }, [saveProgress]);
 
   const togglePlay = useCallback(() => {
-    if (partyRole === 'guest') return;
-    setPaused((p) => {
-      const next = !p;
-      if (partyRole === 'host') {
-        sendParty({ type: next ? 'pause' : 'play' });
-      }
-      return next;
-    });
+    setPaused((p) => !p);
     show();
-  }, [show, partyRole, sendParty]);
+  }, [show]);
 
   const seekBy = useCallback(
     (seconds: number) => {
-      if (partyRole === 'guest') return;
       const next = Math.max(0, currentTimeRef.current + seconds);
       videoRef.current?.seek(next);
-      if (partyRole === 'host') {
-        sendParty({ type: 'seek', positionSeconds: next });
-      }
       show();
     },
-    [show, partyRole, sendParty],
+    [show],
   );
 
   const seekToFraction = useCallback(
     (value: number) => {
-      if (partyRole === 'guest') return;
       if (duration > 0) {
         const next = value * duration;
         videoRef.current?.seek(next);
-        if (partyRole === 'host') {
-          sendParty({ type: 'seek', positionSeconds: next });
-        }
       }
     },
-    [duration, partyRole, sendParty],
+    [duration],
   );
-
-  useEffect(() => {
-    if (partyRole !== 'host') return;
-    const id = setInterval(() => {
-      sendParty({
-        type: 'heartbeat',
-        positionSeconds: currentTimeRef.current,
-        paused: pausedRef.current,
-      });
-    }, 2000);
-    return () => clearInterval(id);
-  }, [partyRole, sendParty]);
-
-  useEffect(() => {
-    return subscribeParty((msg) => {
-      if (msg.type === 'clock' && partyRole === 'guest') {
-        setPaused(msg.clock.paused);
-        const target = predictedHostTime(msg.clock);
-        if (Math.abs(currentTimeRef.current - target) > 1.5) {
-          videoRef.current?.seek(target);
-        }
-      }
-      if (msg.type === 'control' && partyRole === 'host') {
-        if (msg.action === 'play') {
-          setPaused(false);
-          sendParty({ type: 'play' });
-        } else if (msg.action === 'pause') {
-          setPaused(true);
-          sendParty({ type: 'pause' });
-        } else if (msg.action === 'seek' && msg.positionSeconds != null) {
-          videoRef.current?.seek(msg.positionSeconds);
-          sendParty({ type: 'seek', positionSeconds: msg.positionSeconds });
-        }
-      }
-    });
-  }, [subscribeParty, partyRole, sendParty]);
-
-  useEffect(() => {
-    if (partyRole !== 'host' || !partyRoom) return;
-    const waiting = partyRoom.members.some(
-      (m) => m.buffering && m.id !== partyMemberId,
-    );
-    if (waiting && !pausedRef.current) {
-      waitingForGuestsRef.current = true;
-      setPaused(true);
-      sendParty({ type: 'pause' });
-    } else if (!waiting && waitingForGuestsRef.current) {
-      waitingForGuestsRef.current = false;
-      setPaused(false);
-      sendParty({ type: 'play' });
-    }
-  }, [partyRole, partyRoom, partyMemberId, sendParty]);
-
-  const onBuffer = useCallback(
-    (e: { isBuffering?: boolean }) => {
-      if (!partyRole) return;
-      sendParty({ type: 'buffering', buffering: !!e.isBuffering });
-    },
-    [partyRole, sendParty],
-  );
-
-  useEffect(() => {
-    if (chatOpen) {
-      setChatToast(null);
-      prevChatLen.current = partyChat.length;
-      return;
-    }
-    if (partyChat.length <= prevChatLen.current) {
-      prevChatLen.current = partyChat.length;
-      return;
-    }
-    prevChatLen.current = partyChat.length;
-    const line = partyChat[partyChat.length - 1];
-    if (!line) return;
-    setChatToast(line);
-    const id = setTimeout(() => setChatToast(null), 4000);
-    return () => clearTimeout(id);
-  }, [partyChat, chatOpen]);
-
-  const enqueueReaction = useCallback((from: string, emoji: string) => {
-    if (!isPartyReaction(emoji)) return;
-    setReactions((prev) => appendFloatingReaction(prev, { from, emoji }));
-  }, []);
-
-  const expireReaction = useCallback((id: string) => {
-    setReactions((prev) => prev.filter((item) => item.id !== id));
-  }, []);
-
-  const sendReaction = useCallback(
-    (emoji: string) => {
-      if (!isPartyReaction(emoji)) return;
-      sendParty({ type: 'reaction', emoji });
-      enqueueReaction(partyDisplayName, emoji);
-      show();
-    },
-    [enqueueReaction, partyDisplayName, sendParty, show],
-  );
-
-  useEffect(() => {
-    if (!rtc.joined) setCallTilesHidden(false);
-  }, [rtc.joined]);
-
-  useEffect(() => {
-    if (!partyRoom) {
-      setReactions([]);
-      return;
-    }
-    return subscribeParty((msg) => {
-      if (msg.type === 'reaction') enqueueReaction(msg.from, msg.emoji);
-    });
-  }, [enqueueReaction, partyRoom, subscribeParty]);
 
   // On Android TV, `TVEventHandler`'s raw remote-event feed and the native
   // focus engine's own "click the focused view" handling both react to the
@@ -1121,10 +1057,6 @@ export const PlayerCore = ({
   const overlayOpen =
     settingsOpen ||
     episodesOpen ||
-    partyOpen ||
-    chatOpen ||
-    partyIntroOpen ||
-    partyLobbyOpen ||
     showUpNext ||
     seriesEnded ||
     showWatchNext;
@@ -1223,14 +1155,13 @@ export const PlayerCore = ({
           onError={onError}
           onEnd={onEnd}
           onProgress={onProgress}
-          onBuffer={onBuffer}
           onPictureInPictureStatusChanged={onPipStatusChanged}
         />
       )}
 
       {status === 'loading' && (
         <Center style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Spinner size="large" color="#E50914" />
+          <Spinner size="large" color="#D32F2F" />
         </Center>
       )}
 
@@ -1326,26 +1257,6 @@ export const PlayerCore = ({
               brightness != null ? handleBrightnessChange : undefined
             }
             onEnterPip={pipSupported ? enterPip : undefined}
-            partyCode={partyRoom?.code}
-            partyLocked={partyRole === 'guest'}
-            onOpenParty={
-              partyEnabled
-                ? () => {
-                    if (partyRoom) setPartyOpen(true);
-                    else setPartyIntroOpen(true);
-                    show();
-                  }
-                : undefined
-            }
-            onOpenChat={
-              partyRoom
-                ? () => {
-                    setChatOpen(true);
-                    show();
-                  }
-                : undefined
-            }
-            onSelectReaction={partyRoom ? sendReaction : undefined}
           />
         ) : overlayOpen ? null : (
           <Pressable
@@ -1375,21 +1286,25 @@ export const PlayerCore = ({
             `Track ${(t.index ?? i) + 1}`,
         }))}
         selectedAudioIndex={selectedAudioIndex}
-        onSelectAudio={setSelectedAudioIndex}
+        onSelectAudio={handleSelectAudio}
         variants={variants}
         selectedVariantUri={selectedVariantUri}
         onSelectQuality={onSelectQuality}
         aspect={aspect}
         onSelectAspect={setAspect}
         playbackRate={playbackRate}
-        onSelectSpeed={setPlaybackRate}
+        onSelectSpeed={handleSelectSpeed}
         subtitleTracks={subtitleTrackOptions}
         selectedSubtitleId={wyzieSelectedId}
         subtitlesLoading={loadingWyzieTracks}
         subtitlesError={wyzieError}
-        onSelectSubtitle={selectWyzieTrack}
+        onSelectSubtitle={handleSelectSubtitle}
         subtitleOffsetSeconds={subtitleOffsetSeconds}
         onChangeSubtitleOffset={setSubtitleOffsetSeconds}
+        subtitleAppearance={subtitleAppearance}
+        onChangeSubtitleAppearance={(patch) =>
+          updateSubtitleSettings(patch)
+        }
       />
 
       {isTVShow && onSelectEpisode && (
@@ -1405,91 +1320,6 @@ export const PlayerCore = ({
           onClose={() => setEpisodesOpen(false)}
         />
       )}
-
-      {partyRoom && partyRole && !pipActive && rtc.joined && (
-        <PartyCallOverlay
-          localStreamURL={rtc.localStreamURL}
-          remotes={rtc.remotes}
-          camOff={rtc.camOff}
-          hidden={callTilesHidden}
-          onToggleHidden={() => setCallTilesHidden((prev) => !prev)}
-        />
-      )}
-
-      {partyRoom && partyRole && !pipActive && (
-        <PlayerReactionOverlay items={reactions} onExpire={expireReaction} />
-      )}
-
-      {partyRoom && partyRole && !pipActive && (
-        <PlayerChatToast
-          line={
-            joinNotice
-              ? { from: joinNotice, text: 'joined' }
-              : chatToast
-          }
-          onOpen={() => setChatOpen(true)}
-        />
-      )}
-
-      {partyRoom && partyRole && (
-        <>
-          <PlayerPartyDrawer
-            visible={partyOpen}
-            room={partyRoom}
-            role={partyRole}
-            rtc={rtc}
-            tilesHidden={callTilesHidden}
-            onToggleTilesHidden={() => setCallTilesHidden((prev) => !prev)}
-            onLeave={() => {
-              setPartyOpen(false);
-              setChatOpen(false);
-              setReactions([]);
-              if (onLeaveParty) {
-                onLeaveParty();
-                return;
-              }
-              leaveRoom();
-              onBack();
-            }}
-            onClose={() => setPartyOpen(false)}
-          />
-          <PlayerChatDrawer
-            visible={chatOpen}
-            chat={partyChat}
-            onSend={(text) => sendParty({ type: 'chat', text })}
-            onClose={() => setChatOpen(false)}
-          />
-        </>
-      )}
-      <WatchPartyIntroModal
-        visible={partyIntroOpen}
-        presentation="overlay"
-        onContinue={() => {
-          setPartyIntroOpen(false);
-          setPartyLobbyOpen(true);
-        }}
-        onDismiss={() => setPartyIntroOpen(false)}
-      />
-      <PartyLobbyModal
-        visible={partyLobbyOpen}
-        presentation="overlay"
-        content={
-          partyLobbyOpen
-            ? partyContentFromItem(item, season, episode, imdbId)
-            : null
-        }
-        clock={{
-          positionSeconds: currentTimeRef.current,
-          paused: pausedRef.current,
-          updatedAt: Date.now(),
-        }}
-        playTogetherLabel="Done"
-        onPlayTogether={() => {
-          setPartyLobbyOpen(false);
-          setPartyOpen(true);
-        }}
-        onClose={() => setPartyLobbyOpen(false)}
-      />
     </Box>
   );
 };

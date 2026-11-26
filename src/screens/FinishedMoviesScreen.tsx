@@ -2,7 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { FlatList } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Play, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, CheckCircle2, Play, Trash2 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { Center } from '@/components/ui/center';
 import { HStack } from '@/components/ui/hstack';
@@ -12,6 +12,7 @@ import { Icon } from '@/components/ui/icon';
 import { Image } from '@/components/ui/image';
 import { Text } from '@/components/ui/text';
 import { Focusable } from '@/src/components/Focusable';
+import { EmptyState } from '@/src/components/EmptyState';
 import {
   useFinishedMovies,
   type FinishedMovieEntry,
@@ -52,12 +53,11 @@ export const FinishedMoviesScreen = () => {
       </HStack>
 
       {entries.length === 0 ? (
-        <Center className="flex-1 px-8">
-          <Text className="text-center text-muted-foreground">
-            No finished movies yet. Movies you watch all the way through
-            will show up here.
-          </Text>
-        </Center>
+        <EmptyState
+          icon={CheckCircle2}
+          title="No finished movies yet"
+          description="Movies you watch all the way through will show up here, ready to revisit."
+        />
       ) : (
         <FlatList
           data={entries}

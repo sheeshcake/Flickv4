@@ -22,12 +22,12 @@ import {
   ArrowLeft,
   CalendarClock,
   Check,
+  ChevronRight,
   Download,
   Play,
   Plus,
   RefreshCw,
   Share2,
-  Users,
   Volume2,
   VolumeX,
 } from 'lucide-react-native';
@@ -35,7 +35,10 @@ import {
   DownloadQualitySheet,
   type DownloadQualityChoice,
 } from '@/src/components/DownloadQualitySheet';
-import { CastSheet } from '@/src/components/CastSheet';
+import {
+  CastSheet,
+  type CastPersonTarget,
+} from '@/src/components/CastSheet';
 import { useDownloads } from '@/src/hooks/useDownloads';
 import { useServers } from '@/src/hooks/useServers';
 import { useSubtitleSettings } from '@/src/hooks/useSubtitleSettings';
@@ -71,6 +74,8 @@ import {
 } from '@/components/ui/button';
 import { TrailerWebView } from '@/src/components/TrailerWebView';
 import { ContentCard } from '@/src/components/ContentCard';
+import { ErrorState } from '@/src/components/ErrorState';
+import { SkeletonBox, SkeletonLine } from '@/src/components/Skeleton';
 import { getGridColumns } from '@/src/utils/responsive';
 import { SeasonEpisodePicker } from '@/src/components/SeasonEpisodePicker';
 import { Focusable } from '@/src/components/Focusable';
@@ -89,13 +94,7 @@ import {
   type TVShowDetails,
   type VideoResult,
 } from '@/src/types';
-import { PartyLobbyModal } from '@/src/components/party/PartyLobbyModal';
-import { WatchPartyIntroModal } from '@/src/components/party/WatchPartyIntroModal';
-import { partyContentFromItem } from '@/src/party/content';
-import { useWatchParty } from '@/src/hooks/useWatchParty';
 import type { RootStackScreenProps } from '@/src/navigation/types';
-
-const AnimatedBox = Animated.createAnimatedComponent(Box);
 
 export type Tab = 'episodes' | 'trailers' | 'similar';
 
@@ -122,15 +121,13 @@ export const DetailScreen = ({
     crew,
     certification,
     logoPath,
+    reload,
   } = useDetailData(item);
   const { isInList, toggle } = useMyList();
   const { servers, activeServer } = useServers();
   const { enqueue, getJobFor, resume, remove, pause } = useDownloads();
   const { settings: subtitleSettings } = useSubtitleSettings();
 
-  const { enabled: partyEnabled, room: partyRoom } = useWatchParty();
-  const [partyOpen, setPartyOpen] = useState(false);
-  const [partyIntroOpen, setPartyIntroOpen] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   // TV has no "Trailers & More" tab (see DetailScreenTV), so a TV movie
   // defaults straight to "More Like This" instead of a tab that doesn't
@@ -248,6 +245,18 @@ export const DetailScreen = ({
       .join(', ');
   }, [movie, details, crew]);
 
+  const openPerson = useCallback(
+    (person: CastPersonTarget) => {
+      setCastSheetOpen(false);
+      navigation.push('Person', {
+        personId: person.personId,
+        name: person.name,
+        profilePath: person.profilePath,
+      });
+    },
+    [navigation],
+  );
+
   const firstEpisode = episodes[0];
 
   const play = (opts?: {
@@ -270,7 +279,7 @@ export const DetailScreen = ({
   const onShare = async () => {
     try {
       await Share.share({
-        message: `Watch ${getTitle(item)} on Flick`,
+        message: `Watch ${getTitle(item)} on CoFFe House`,
       });
     } catch {
       // ignored
@@ -789,11 +798,6 @@ export const DetailScreen = ({
         onBack={() => navigation.goBack()}
         onPlay={play}
         onShare={onShare}
-        onStartParty={
-          partyEnabled && !coming.comingSoon
-            ? () => (partyRoom ? setPartyOpen(true) : setPartyIntroOpen(true))
-            : undefined
-        }
         isInList={isInList}
         onToggleList={toggle}
         movieJob={movieJob}
@@ -838,39 +842,6 @@ export const DetailScreen = ({
           setDownloadTarget(null);
           setResolvingEpisodeKey(null);
         }}
-      />
-      <WatchPartyIntroModal
-        visible={partyIntroOpen}
-        onContinue={() => {
-          setPartyIntroOpen(false);
-          setPartyOpen(true);
-        }}
-        onDismiss={() => setPartyIntroOpen(false)}
-      />
-      <PartyLobbyModal
-        visible={partyOpen}
-        content={
-          partyOpen
-            ? partyContentFromItem(
-                item,
-                movie ? undefined : selectedSeason ?? undefined,
-                movie ? undefined : firstEpisode?.episode_number,
-              )
-            : null
-        }
-        onPlayTogether={() => {
-          setPartyOpen(false);
-          play(
-            !movie && selectedSeason != null && firstEpisode
-              ? {
-                  season: selectedSeason,
-                  episode: firstEpisode.episode_number,
-                  label: `${getTitle(item)} — ${firstEpisode.name}`,
-                }
-              : undefined,
-          );
-        }}
-        onClose={() => setPartyOpen(false)}
       />
     </>
     );
@@ -1045,6 +1016,21 @@ export const DetailScreen = ({
             </Text>
           )}
 
+          {(cast.length > 0 || crew.length > 0) && (
+            <Focusable
+              onPress={() => setCastSheetOpen(true)}
+              className="mt-2 rounded-md"
+              focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+            >
+              <HStack className="items-center justify-between rounded-md bg-card/60 px-3 py-2">
+                <Text size="sm" className="font-semibold text-primary">
+                  View all cast & crew
+                </Text>
+                <Icon as={ChevronRight} size="sm" className="text-primary" />
+              </HStack>
+            </Focusable>
+          )}
+
           <HStack className="mt-2 justify-around">
             <ActionIcon
               icon={isInList(item) ? Check : Plus}
@@ -1052,15 +1038,6 @@ export const DetailScreen = ({
               onPress={() => toggle(item)}
             />
             <ActionIcon icon={Share2} label="Share" onPress={onShare} />
-            {partyEnabled && !coming.comingSoon && (
-              <ActionIcon
-                icon={Users}
-                label="Watch party"
-                onPress={() =>
-                  partyRoom ? setPartyOpen(true) : setPartyIntroOpen(true)
-                }
-              />
-            )}
           </HStack>
         </VStack>
 
@@ -1087,15 +1064,22 @@ export const DetailScreen = ({
 
         <Box className="mt-4">
           {loading && (
-            <Center className="py-10">
-              <Spinner size="large" color="#E50914" />
-            </Center>
+            <VStack space="md" className="px-4 py-6">
+              <SkeletonLine width="55%" height={16} />
+              <SkeletonBox width="100%" height={72} radius={12} />
+              <SkeletonBox width="100%" height={72} radius={12} />
+              <SkeletonBox width="100%" height={72} radius={12} />
+            </VStack>
           )}
 
           {!loading && error && (
-            <Center className="py-10 px-8">
-              <Text className="text-center text-muted-foreground">{error}</Text>
-            </Center>
+            <ErrorState
+              compact
+              title="Couldn't load details"
+              error={error}
+              onRetry={reload}
+              retrying={loading}
+            />
           )}
 
           {!loading && !error && tab === 'episodes' && !movie && (
@@ -1144,7 +1128,7 @@ export const DetailScreen = ({
               )}
               {similarLoadingMore && (
                 <Center className="py-4">
-                  <Spinner color="#E50914" />
+                  <Spinner color="#D32F2F" />
                 </Center>
               )}
             </VStack>
@@ -1160,11 +1144,9 @@ export const DetailScreen = ({
         className="absolute left-0 right-0 top-0 z-50"
         pointerEvents="box-none"
       >
-        <AnimatedBox
-          className="absolute inset-0 border-b border-border bg-background"
-          style={headerProgressStyle}
-          pointerEvents="none"
-        />
+        <Animated.View style={headerProgressStyle} pointerEvents="none">
+          <Box className="absolute inset-0 border-b border-border bg-background" />
+        </Animated.View>
         <HStack
           className="items-center justify-between px-4 pb-3"
           style={{ paddingTop: insets.top + 8 }}
@@ -1177,11 +1159,8 @@ export const DetailScreen = ({
             <Icon as={ArrowLeft} className="text-foreground" />
           </Focusable>
 
-          <AnimatedBox
-            className="flex-1 items-center px-2"
-            style={headerTitleStyle}
-            pointerEvents="none"
-          >
+          <Animated.View style={headerTitleStyle} pointerEvents="none">
+            <Box className="flex-1 items-center px-2">
             {logoUrl ? (
               <Image
                 source={{ uri: logoUrl }}
@@ -1199,7 +1178,8 @@ export const DetailScreen = ({
                 {getTitle(item)}
               </Text>
             )}
-          </AnimatedBox>
+            </Box>
+          </Animated.View>
 
           <Box className="h-10 w-10" />
         </HStack>
@@ -1227,40 +1207,9 @@ export const DetailScreen = ({
       <CastSheet
         visible={castSheetOpen}
         cast={cast}
+        crew={crew}
         onClose={() => setCastSheetOpen(false)}
-      />
-      <WatchPartyIntroModal
-        visible={partyIntroOpen}
-        onContinue={() => {
-          setPartyIntroOpen(false);
-          setPartyOpen(true);
-        }}
-        onDismiss={() => setPartyIntroOpen(false)}
-      />
-      <PartyLobbyModal
-        visible={partyOpen}
-        content={
-          partyOpen
-            ? partyContentFromItem(
-                item,
-                movie ? undefined : selectedSeason ?? undefined,
-                movie ? undefined : firstEpisode?.episode_number,
-              )
-            : null
-        }
-        onPlayTogether={() => {
-          setPartyOpen(false);
-          play(
-            !movie && selectedSeason != null && firstEpisode
-              ? {
-                  season: selectedSeason,
-                  episode: firstEpisode.episode_number,
-                  label: `${getTitle(item)} — ${firstEpisode.name}`,
-                }
-              : undefined,
-          );
-        }}
-        onClose={() => setPartyOpen(false)}
+        onPressPerson={openPerson}
       />
     </Box>
   );
@@ -1316,7 +1265,7 @@ export const MovieDownloadButton = ({
         onPress={onDownload}
       >
         {resolving ? (
-          <ButtonSpinner color="#E50914" />
+          <ButtonSpinner color="#D32F2F" />
         ) : (
           <ButtonIcon as={Download} className="text-secondary-foreground" />
         )}
@@ -1330,7 +1279,7 @@ export const MovieDownloadButton = ({
   if (status === 'resolving' || status === 'queued') {
     return (
       <Button size="lg" className="w-full bg-secondary" isDisabled>
-        <ButtonSpinner color="#E50914" />
+        <ButtonSpinner color="#D32F2F" />
         <ButtonText className="text-secondary-foreground">
           Preparing download…
         </ButtonText>
@@ -1390,7 +1339,7 @@ export const MovieDownloadButton = ({
       />
       <HStack space="sm" className="w-full items-center justify-center px-8">
         {isDownloading ? (
-          <ButtonSpinner color="#E50914" />
+          <ButtonSpinner color="#D32F2F" />
         ) : (
           <ButtonIcon as={RefreshCw} className="text-secondary-foreground" />
         )}

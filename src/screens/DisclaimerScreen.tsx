@@ -35,7 +35,7 @@ export const DisclaimerScreen = () => {
         <VStack space="lg" className="pb-10">
           <Section title="No hosted content">
             <Text className="text-muted-foreground">
-              Flick does not host, upload, or distribute any of the video
+              CoFFe House does not host, upload, or distribute any of the video
               content shown in the app. The app is a client that indexes public
               metadata and points at external streaming servers configured by
               the user under Settings → Playback server.
@@ -44,7 +44,7 @@ export const DisclaimerScreen = () => {
 
           <Section title="Third-party servers">
             <Text className="text-muted-foreground">
-              Any streams played through Flick come from third-party servers
+              Any streams played through CoFFe House come from third-party servers
               that are not owned, operated, or endorsed by us. The availability,
               legality, and quality of those streams is the sole responsibility
               of the operators of those servers.
@@ -55,7 +55,7 @@ export const DisclaimerScreen = () => {
             <Text className="text-muted-foreground">
               If you are a rights holder and believe your content is being
               streamed unlawfully through a third-party server, please contact
-              that server&apos;s operator directly. Flick does not have the
+              that server&apos;s operator directly. CoFFe House does not have the
               ability to remove content from external servers.
             </Text>
           </Section>

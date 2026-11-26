@@ -16,6 +16,17 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
                         <viewLayoutGuide key="safeArea" id="Rmq-lb-GrQ"/>
+                        <subviews>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" image="CoFFeHouseSplash" translatesAutoresizingMaskIntoConstraints="NO" id="COFFE-SPLASH-IMAGE">
+                                <rect key="frame" x="36.5" y="276.0" width="320" height="300"/>
+                            </imageView>
+                        </subviews>
+                        <constraints>
+                            <constraint firstItem="COFFE-SPLASH-IMAGE" firstAttribute="centerX" secondItem="EXPO-ContainerView" secondAttribute="centerX" id="COFFE-SPLASH-CENTER-X"/>
+                            <constraint firstItem="COFFE-SPLASH-IMAGE" firstAttribute="centerY" secondItem="EXPO-ContainerView" secondAttribute="centerY" id="COFFE-SPLASH-CENTER-Y"/>
+                            <constraint firstItem="COFFE-SPLASH-IMAGE" firstAttribute="width" constant="320" id="COFFE-SPLASH-WIDTH"/>
+                            <constraint firstItem="COFFE-SPLASH-IMAGE" firstAttribute="height" constant="300" id="COFFE-SPLASH-HEIGHT"/>
+                        </constraints>
                         <color key="backgroundColor" red="0.0" green="0.0" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                     </view>
                 </viewController>
@@ -24,4 +35,7 @@
             <point key="canvasLocation" x="0.0" y="0.0"/>
         </scene>
     </scenes>
+    <resources>
+        <image name="CoFFeHouseSplash" width="1024" height="1024"/>
+    </resources>
 </document>
