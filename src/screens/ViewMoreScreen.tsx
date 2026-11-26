@@ -147,7 +147,7 @@ export const ViewMoreScreen = ({
           ListFooterComponent={
             loadingMore ? (
               <Center className="py-6">
-                <Spinner color="#C47C48" />
+                <Spinner color="#D32F2F" />
               </Center>
             ) : loadMoreError ? (
               <ErrorState

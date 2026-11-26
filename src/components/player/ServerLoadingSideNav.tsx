@@ -124,7 +124,7 @@ export const ServerLoadingSideNav = ({
                     {s.name}
                   </Text>
                   {active ? (
-                    <Spinner size="small" color="#C47C48" />
+                    <Spinner size="small" color="#D32F2F" />
                   ) : failed ? (
                     <HStack space="xs" className="items-center">
                       <Icon as={X} size="xs" className="text-muted-foreground" />
@@ -169,7 +169,7 @@ export const ServerLoadingSideNav = ({
                       {s.name}
                     </Text>
                     {active ? (
-                      <Spinner size="small" color="#C47C48" />
+                      <Spinner size="small" color="#D32F2F" />
                     ) : failed ? (
                       <HStack space="xs" className="items-center">
                         <Icon as={X} size="xs" className="text-muted-foreground" />

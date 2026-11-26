@@ -35,7 +35,7 @@ export const TabNavigator = () => {
       tabBar={(props) => <BottomTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#C47C48',
+        tabBarActiveTintColor: '#D32F2F',
         tabBarInactiveTintColor: '#8c8c8c',
         tabBarStyle: {
           backgroundColor: '#0C0907',

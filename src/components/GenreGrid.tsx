@@ -127,7 +127,7 @@ export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
       >
         <HStack space="sm" className="items-center">
           <LinearGradient
-            colors={['#C47C48', '#6B3D22']}
+            colors={['#D32F2F', '#7A1414']}
             style={{
               width: 32,
               height: 32,

@@ -75,7 +75,7 @@
   /* Coffee palette: espresso & latte over the dark base. Applied when the
      `coffee` class is toggled on :root (see ThemeProvider consumers). */
   :root.coffee {
-    --primary: 196 124 72;
+    --primary: 211 47 47;
     --primary-foreground: 250 245 235;
     --card: 28 22 18;
     --secondary: 52 40 32;
@@ -84,14 +84,14 @@
     --popover: 28 22 18;
     --popover-foreground: 245 235 220;
     --muted: 40 30 24;
-    --muted-foreground: 180 160 130;
+    --muted-foreground: 180 145 140;
     --destructive: 229 9 20;
     --foreground: 245 235 220;
     --border: 60 46 36;
     --input: 60 46 36;
     --accent: 52 40 32;
     --accent-foreground: 245 235 220;
-    --ring: 196 124 72;
+    --ring: 211 47 47;
   }
 
   :root.light {

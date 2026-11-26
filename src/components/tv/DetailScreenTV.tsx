@@ -335,7 +335,7 @@ export const DetailScreenTV = ({
         <Box className="mt-6" style={{ paddingBottom: insets.bottom + 40 }}>
           {loading && (
             <Center className="py-10">
-              <Spinner size="large" color="#C47C48" />
+              <Spinner size="large" color="#D32F2F" />
             </Center>
           )}
 
@@ -385,7 +385,7 @@ export const DetailScreenTV = ({
               )}
               {similarLoadingMore && (
                 <Center className="py-4">
-                  <Spinner color="#C47C48" />
+                  <Spinner color="#D32F2F" />
                 </Center>
               )}
             </VStack>

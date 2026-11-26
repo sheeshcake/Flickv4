@@ -141,7 +141,7 @@ export const bootstrapReleaseReminders = async (): Promise<boolean> => {
             name: 'Release reminders',
             description: 'Local alerts for movie and series release dates.',
             importance: Notifications.AndroidImportance.HIGH,
-            lightColor: '#C47C48',
+            lightColor: '#D32F2F',
             enableVibrate: true,
             sound: 'default',
           },

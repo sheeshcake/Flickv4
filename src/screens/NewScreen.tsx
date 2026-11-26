@@ -145,7 +145,7 @@ const SectionHeading = ({
   <HStack className="mb-3 items-center justify-between">
     <HStack space="sm" className="items-center">
       <LinearGradient
-        colors={['#C47C48', '#6B3D22']}
+        colors={['#D32F2F', '#7A1414']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={{
@@ -306,7 +306,7 @@ export const NewScreen = () => {
       >
         <HStack className="items-center px-4 py-4">
           <LinearGradient
-            colors={['#C47C48', '#6B3D22']}
+            colors={['#D32F2F', '#7A1414']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={{
@@ -477,7 +477,7 @@ export const NewScreen = () => {
                     <HStack className="items-center justify-between">
                       <HStack space="sm" className="flex-1 items-center">
                         <LinearGradient
-                          colors={['#C47C48', '#6B3D22']}
+                          colors={['#D32F2F', '#7A1414']}
                           style={{
                             width: 6,
                             height: 36,

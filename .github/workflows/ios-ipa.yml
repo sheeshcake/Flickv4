@@ -15,11 +15,11 @@ on:
       app_version:
         description: 'APP_VERSION / CFBundleShortVersionString (e.g. 1.0)'
         required: false
-        default: '1.1'
+        default: '1.2'
       build_number:
         description: 'CFBundleVersion (integer, must increase per install)'
         required: false
-        default: '20307'
+        default: '20308'
       xcode_version:
         description: 'Xcode version (26.4+ required: expo-modules-core 57 needs Swift 6.3)'
         required: false
@@ -41,8 +41,8 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 90
     env:
-      APP_VERSION: ${{ github.event.inputs.app_version || '1.1' }}
-      BUILD_NUMBER: ${{ github.event.inputs.build_number || '20307' }}
+      APP_VERSION: ${{ github.event.inputs.app_version || '1.2' }}
+      BUILD_NUMBER: ${{ github.event.inputs.build_number || '20308' }}
       XCODE_VERSION: ${{ github.event.inputs.xcode_version || '26.6' }}
 
     steps:

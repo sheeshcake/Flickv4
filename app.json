@@ -2,7 +2,7 @@
   "expo": {
     "name": "CoFFe House",
     "slug": "flick",
-    "version": "1.1",
+    "version": "1.2",
     "orientation": "default",
     "icon": "./assets/applogo/ic_launcher.jpeg",
     "userInterfaceStyle": "dark",
@@ -35,7 +35,7 @@
       ],
       "predictiveBackGestureEnabled": true,
       "package": "com.coffehouse.app",
-      "versionCode": 20307
+      "versionCode": 20308
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -51,7 +51,7 @@
       [
         "expo-notifications",
         {
-          "color": "#C47C48"
+          "color": "#D32F2F"
         }
       ],
       "@kesha-antonov/react-native-background-downloader",

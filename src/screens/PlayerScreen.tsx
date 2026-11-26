@@ -693,7 +693,7 @@ export const PlayerScreen = ({
         </Center>
       ) : (
         <Center style={StyleSheet.absoluteFill} className="bg-black">
-          <Spinner size="large" color="#C47C48" />
+          <Spinner size="large" color="#D32F2F" />
           <Text className="mt-4 text-muted-foreground">
             {tryingStreamflixSource
               ? `Trying ${tryingStreamflixSource.name}…`

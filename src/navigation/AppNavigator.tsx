@@ -47,7 +47,7 @@ const navTheme = {
     ...DarkTheme.colors,
     background: '#0C0907',
     card: '#0C0907',
-    primary: '#C47C48',
+    primary: '#D32F2F',
     text: '#FFFFFF',
     border: '#3C2E24',
   },

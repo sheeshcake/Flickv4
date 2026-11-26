@@ -173,7 +173,7 @@ export const TopTenRow = memo(function TopTenRow({
       >
         <HStack space="sm" className="items-center">
           <LinearGradient
-            colors={['#C47C48', '#6B3D22']}
+            colors={['#D32F2F', '#7A1414']}
             style={{ width: 4, height: 24, borderRadius: 999 }}
           />
           <Heading size={isTv ? '2xl' : 'lg'} className="text-foreground">

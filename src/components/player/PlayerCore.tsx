@@ -1161,7 +1161,7 @@ export const PlayerCore = ({
 
       {status === 'loading' && (
         <Center style={StyleSheet.absoluteFill} pointerEvents="none">
-          <Spinner size="large" color="#C47C48" />
+          <Spinner size="large" color="#D32F2F" />
         </Center>
       )}
 

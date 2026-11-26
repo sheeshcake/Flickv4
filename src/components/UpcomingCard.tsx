@@ -140,7 +140,7 @@ const UpcomingCardBase = ({
     >
       <HStack className="items-stretch">
         <LinearGradient
-          colors={['#C47C48', '#6B3D22']}
+          colors={['#D32F2F', '#7A1414']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={{
