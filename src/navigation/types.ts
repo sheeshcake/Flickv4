@@ -1,4 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { BrowseScope } from '@/src/config/categoriesCatalog';
 import type { CategoryQuery } from '@/src/services/categories';
 import type {
   LiveChannel,
@@ -17,6 +18,7 @@ export type RootStackParamList = {
     knownForDepartment?: string;
   };
   ViewMore: { title: string; query: CategoryQuery };
+  Category: { scope: BrowseScope; categoryId?: string };
   SubtitleSettings: undefined;
   ServerSettings: undefined;
   VideoQualitySettings: undefined;

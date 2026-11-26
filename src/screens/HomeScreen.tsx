@@ -24,6 +24,10 @@ import { useHomeData } from '@/src/hooks/useHomeData';
 import { useMyList } from '@/src/hooks/useMyList';
 import { useContinueWatching } from '@/src/hooks/useContinueWatching';
 import { useDeviceKind } from '@/src/hooks/useDeviceKind';
+import type {
+  BrowseScope,
+  CategoryDefinition,
+} from '@/src/config/categoriesCatalog';
 import { getReleaseDate, getTitle, type MediaItem } from '@/src/types';
 import { getComingSoon } from '@/src/utils/comingSoon';
 import type { RootStackParamList } from '@/src/navigation/types';
@@ -80,6 +84,9 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
   });
 
   const openDetail = (item: MediaItem) => navigation.navigate('Detail', { item });
+
+  const openCategory = (scope: BrowseScope, category?: CategoryDefinition) =>
+    navigation.navigate('Category', { scope, categoryId: category?.id });
 
   const play = (item: MediaItem, resumeFrom?: number) =>
     navigation.navigate('Player', {
@@ -184,9 +191,7 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
         onViewMore={(row) =>
           navigation.navigate('ViewMore', { title: row.title, query: row.query })
         }
-        onSelectGenre={(title, query) =>
-          navigation.navigate('ViewMore', { title, query })
-        }
+        onSelectCategory={openCategory}
         sidebarRef={sidebarRef}
       />
     );
@@ -229,12 +234,7 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
             onRegionPress={() => navigation.navigate('RegionSettings')}
           />
 
-          <GenreGrid
-            deviceKind={deviceKind}
-            onSelect={(title, query) =>
-              navigation.navigate('ViewMore', { title, query })
-            }
-          />
+          <GenreGrid deviceKind={deviceKind} onSelect={openCategory} />
 
           {continueItems.length > 0 && (
             <ContentRow

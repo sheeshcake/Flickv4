@@ -32,6 +32,11 @@ const CREDITS: Credit[] = [
     description: '3vyz — Maintainer & Developer',
     url: 'https://www.instagram.com/3vyz/',
   },
+  {
+    name: 'Contact me',
+    description: '+97366607701 — WhatsApp',
+    url: 'https://wa.me/97366607701',
+  },
 ];
 
 export const CreditsScreen = () => {

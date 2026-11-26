@@ -2,7 +2,6 @@ import { TMDB_CONFIG } from '@/src/config/env';
 import {
   ContentRatingsResponse,
   CreditsResponse,
-  DiscoverFilters,
   ExternalIdsResponse,
   Genre,
   isMovie,
@@ -22,10 +21,24 @@ import {
   VideoResponse,
 } from '@/src/types';
 
-type QueryParams = Record<string, string | number | boolean | undefined>;
+export type QueryParams = Record<string, string | number | boolean | undefined>;
 
 /** Abort a request if the network stalls, so the UI never hangs forever. */
 const REQUEST_TIMEOUT_MS = 15000;
+
+/** Local-calendar ISO date (`YYYY-MM-DD`), avoiding UTC day drift. */
+const toIsoDate = (date: Date): string =>
+  [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+
+const dateAfterDays = (days: number): Date => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date;
+};
 
 export class TMDBError extends Error {
   status?: number;
@@ -96,6 +109,34 @@ class TMDBServiceImpl {
     return this.request<TMDBResponse<TVShow>>('/trending/tv/week', { page });
   }
 
+  /** Weekly mixed trending list (movies + TV), used by "Everyone Watching". */
+  getTrendingAll(page = 1) {
+    return this.request<TMDBResponse<MediaItem>>('/trending/all/week', { page });
+  }
+
+  getUpcomingMovies(page = 1, region?: string) {
+    return this.request<TMDBResponse<Movie>>('/movie/upcoming', { page, region });
+  }
+
+  /**
+   * TV shows with a first-air date in the next 120 days. News/talk/soap/
+   * reality are excluded so the Coming Soon rail stays theatrical.
+   */
+  discoverUpcomingTV(page = 1) {
+    return this.request<TMDBResponse<TVShow>>('/discover/tv', {
+      page,
+      sort_by: 'popularity.desc',
+      include_adult: false,
+      'first_air_date.gte': toIsoDate(dateAfterDays(1)),
+      'first_air_date.lte': toIsoDate(dateAfterDays(120)),
+      without_genres: '10763,10767,10766,10764',
+    });
+  }
+
+  getOnTheAirTV(page = 1) {
+    return this.request<TMDBResponse<TVShow>>('/tv/on_the_air', { page });
+  }
+
   getPopularMovies(page = 1, region?: string) {
     return this.request<TMDBResponse<Movie>>('/movie/popular', {
       page,
@@ -112,6 +153,23 @@ class TMDBServiceImpl {
 
   getTopRatedMovies(page = 1) {
     return this.request<TMDBResponse<Movie>>('/movie/top_rated', { page });
+  }
+
+  getTopRatedTVShows(page = 1) {
+    return this.request<TMDBResponse<TVShow>>('/tv/top_rated', { page });
+  }
+
+  /**
+   * Generic `/discover` escape hatch for the Nightflix-style category recipes:
+   * popularity, vote-count bands, and release-date cutoffs are passed through
+   * exactly as TMDB expects them.
+   */
+  discoverMoviesAdvanced(params: QueryParams) {
+    return this.request<TMDBResponse<Movie>>('/discover/movie', params);
+  }
+
+  discoverTVAdvanced(params: QueryParams) {
+    return this.request<TMDBResponse<TVShow>>('/discover/tv', params);
   }
 
   discoverMoviesByGenre(genreId: number, page = 1, region?: string) {
@@ -149,39 +207,6 @@ class TMDBServiceImpl {
       sort_by: 'popularity.desc',
       page,
     });
-  }
-
-  // ── Library / Discover with filters ────────────────────────────────────
-  discoverMoviesFiltered(filters: DiscoverFilters, page = 1) {
-    const params: QueryParams = {
-      page,
-      sort_by: 'popularity.desc',
-      include_adult: false,
-    };
-    if (filters.yearFrom)
-      params['primary_release_date.gte'] = `${filters.yearFrom}-01-01`;
-    if (filters.yearTo)
-      params['primary_release_date.lte'] = `${filters.yearTo}-12-31`;
-    if (filters.language && filters.language !== 'all')
-      params.with_original_language = filters.language;
-    if (filters.originCountry)
-      params.with_origin_country = filters.originCountry.toUpperCase();
-    return this.request<TMDBResponse<Movie>>('/discover/movie', params);
-  }
-
-  discoverTVFiltered(filters: DiscoverFilters, page = 1) {
-    const params: QueryParams = {
-      page,
-      sort_by: 'popularity.desc',
-      include_adult: false,
-    };
-    if (filters.yearFrom) params['first_air_date.gte'] = `${filters.yearFrom}-01-01`;
-    if (filters.yearTo) params['first_air_date.lte'] = `${filters.yearTo}-12-31`;
-    if (filters.language && filters.language !== 'all')
-      params.with_original_language = filters.language;
-    if (filters.originCountry)
-      params.with_origin_country = filters.originCountry.toUpperCase();
-    return this.request<TMDBResponse<TVShow>>('/discover/tv', params);
   }
 
   // ── Search ───────────────────────────────────────────────────────────

@@ -7,8 +7,11 @@ import { ContentRow } from '@/src/components/ContentRow';
 import { CatalogRow } from '@/src/components/CatalogRow';
 import { GenreGrid } from '@/src/components/GenreGrid';
 import type { TVSideNavHandle } from '@/src/components/tv/TVSideNav';
+import type {
+  BrowseScope,
+  CategoryDefinition,
+} from '@/src/config/categoriesCatalog';
 import type { HomeRow } from '@/src/hooks/useHomeData';
-import type { CategoryQuery } from '@/src/services/categories';
 import type { MediaItem } from '@/src/types';
 
 interface HomeScreenTVProps {
@@ -30,7 +33,7 @@ interface HomeScreenTVProps {
   myListSelecting: boolean;
   setMyListSelecting: (value: boolean) => void;
   onViewMore: (row: HomeRow) => void;
-  onSelectGenre: (title: string, query: CategoryQuery) => void;
+  onSelectCategory: (scope: BrowseScope, category?: CategoryDefinition) => void;
   /** Sidebar handle, forwarded down to `HeroBannerTV` for its Left hand-off. */
   sidebarRef?: RefObject<TVSideNavHandle | null>;
 }
@@ -69,7 +72,7 @@ export const HomeScreenTV = ({
   myListSelecting,
   setMyListSelecting,
   onViewMore,
-  onSelectGenre,
+  onSelectCategory,
   sidebarRef,
 }: HomeScreenTVProps) => {
   const [paneSize, setPaneSize] = useState({ width: 0, height: 0 });
@@ -144,7 +147,7 @@ export const HomeScreenTV = ({
               />
             )}
 
-            <GenreGrid deviceKind="tv" onSelect={onSelectGenre} />
+            <GenreGrid deviceKind="tv" onSelect={onSelectCategory} />
 
             {rows.map((row) => (
               <CatalogRow

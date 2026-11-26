@@ -10,6 +10,7 @@ import { PersonScreen } from '@/src/screens/PersonScreen';
 import { PlayerScreen } from '@/src/screens/PlayerScreen';
 import { LivePlayerScreen } from '@/src/screens/LivePlayerScreen';
 import { ViewMoreScreen } from '@/src/screens/ViewMoreScreen';
+import { CategoryScreen } from '@/src/screens/CategoryScreen';
 import { SubtitleSettingsScreen } from '@/src/screens/SubtitleSettingsScreen';
 import { ServerSettingsScreen } from '@/src/screens/ServerSettingsScreen';
 import { VideoQualitySettingsScreen } from '@/src/screens/VideoQualitySettingsScreen';
@@ -85,6 +86,7 @@ export const AppNavigator = () => {
         />
         <Stack.Screen name="Person" component={PersonScreen} />
         <Stack.Screen name="ViewMore" component={ViewMoreScreen} />
+        <Stack.Screen name="Category" component={CategoryScreen} />
         <Stack.Screen
           name="SubtitleSettings"
           component={SubtitleSettingsScreen}
