@@ -138,7 +138,7 @@ export const DnsSettingsScreen = () => {
             <Switch
               value={fallbackEnabled}
               onValueChange={setFallbackEnabled}
-              trackColor={{ true: '#E50914', false: '#2E2E2E' }}
+              trackColor={{ true: '#C47C48', false: '#2E2E2E' }}
               thumbColor="#FFFFFF"
             />
           </HStack>

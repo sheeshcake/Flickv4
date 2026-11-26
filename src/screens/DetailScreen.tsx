@@ -1130,7 +1130,7 @@ export const DetailScreen = ({
               )}
               {similarLoadingMore && (
                 <Center className="py-4">
-                  <Spinner color="#E50914" />
+                  <Spinner color="#C47C48" />
                 </Center>
               )}
             </VStack>
@@ -1271,7 +1271,7 @@ export const MovieDownloadButton = ({
         onPress={onDownload}
       >
         {resolving ? (
-          <ButtonSpinner color="#E50914" />
+          <ButtonSpinner color="#C47C48" />
         ) : (
           <ButtonIcon as={Download} className="text-secondary-foreground" />
         )}
@@ -1285,7 +1285,7 @@ export const MovieDownloadButton = ({
   if (status === 'resolving' || status === 'queued') {
     return (
       <Button size="lg" className="w-full bg-secondary" isDisabled>
-        <ButtonSpinner color="#E50914" />
+        <ButtonSpinner color="#C47C48" />
         <ButtonText className="text-secondary-foreground">
           Preparing download…
         </ButtonText>
@@ -1345,7 +1345,7 @@ export const MovieDownloadButton = ({
       />
       <HStack space="sm" className="w-full items-center justify-center px-8">
         {isDownloading ? (
-          <ButtonSpinner color="#E50914" />
+          <ButtonSpinner color="#C47C48" />
         ) : (
           <ButtonIcon as={RefreshCw} className="text-secondary-foreground" />
         )}

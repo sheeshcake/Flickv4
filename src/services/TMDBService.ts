@@ -137,6 +137,29 @@ class TMDBServiceImpl {
     return this.request<TMDBResponse<TVShow>>('/tv/on_the_air', { page });
   }
 
+  /** Currently playing movies in the selected region — used by Recently Added. */
+  getNowPlayingMovies(page = 1, region?: string) {
+    return this.request<TMDBResponse<Movie>>('/movie/now_playing', {
+      page,
+      region,
+    });
+  }
+
+  /**
+   * Series that first aired in the last 90 days. News/talk/soap/reality are
+   * excluded so the Recently Added rail stays scripted like the rest of the app.
+   */
+  discoverRecentlyAddedTV(page = 1) {
+    return this.request<TMDBResponse<TVShow>>('/discover/tv', {
+      page,
+      sort_by: 'first_air_date.desc',
+      include_adult: false,
+      'first_air_date.gte': toIsoDate(dateAfterDays(-90)),
+      'first_air_date.lte': toIsoDate(new Date()),
+      without_genres: '10763,10767,10766,10764',
+    });
+  }
+
   getPopularMovies(page = 1, region?: string) {
     return this.request<TMDBResponse<Movie>>('/movie/popular', {
       page,

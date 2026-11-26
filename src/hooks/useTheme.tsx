@@ -25,14 +25,14 @@ const STORAGE_KEY = 'coffehouse.theme';
 const ThemeContext = createContext<ThemeSettingsValue>({
   mode: 'dark',
   setMode: () => {},
-  palette: 'classic',
+  palette: 'coffee',
   setPalette: () => {},
   loaded: false,
 });
 
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   const [mode, setModeState] = useState<ThemeMode>('dark');
-  const [palette, setPaletteState] = useState<ThemePalette>('classic');
+  const [palette, setPaletteState] = useState<ThemePalette>('coffee');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {

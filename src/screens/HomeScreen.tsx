@@ -207,7 +207,7 @@ export const HomeScreen = ({ sidebarRef }: HomeScreenProps = {}) => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={refresh}
-            tintColor="#E50914"
+            tintColor="#C47C48"
           />
         }
       >

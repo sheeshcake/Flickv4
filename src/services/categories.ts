@@ -1,5 +1,10 @@
 import { TMDBService, type QueryParams } from '@/src/services/TMDBService';
-import type { MediaItem, Movie, TVShow } from '@/src/types';
+import {
+  getReleaseDate,
+  type MediaItem,
+  type Movie,
+  type TVShow,
+} from '@/src/types';
 
 /**
  * A serializable description of a home-screen category, used to paginate the
@@ -13,6 +18,7 @@ export type CategoryQuery =
   | { kind: 'upcomingMovies'; region?: string }
   | { kind: 'upcomingTv' }
   | { kind: 'onTheAirTv' }
+  | { kind: 'recentlyAdded'; media?: 'mixed' | 'movie' | 'tv'; region?: string }
   | { kind: 'topRatedMovies' }
   | { kind: 'topRatedTv' }
   | { kind: 'popularMovies'; region: string }
@@ -49,6 +55,16 @@ export const tagMedia = <T extends Movie | TVShow>(
 
 const keyOf = (item: MediaItem) => `${item.media_type ?? ''}-${item.id}`;
 
+const dedupeByKey = (items: MediaItem[]): MediaItem[] => {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyOf(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 /** Merge movie + TV pages, highest TMDB popularity first, no duplicate ids. */
 export const interleaveByPopularity = (
   movies: MediaItem[],
@@ -64,6 +80,12 @@ export const interleaveByPopularity = (
       return true;
     });
 };
+
+/** Newest release/air date first; missing dates fall to the end. */
+export const sortByReleaseDateDesc = (items: MediaItem[]): MediaItem[] =>
+  [...items].sort((a, b) =>
+    (getReleaseDate(b) ?? '').localeCompare(getReleaseDate(a) ?? ''),
+  );
 
 const discoverParams = (
   query: Extract<CategoryQuery, { kind: 'discover' }>,
@@ -128,6 +150,28 @@ export const fetchCategoryPage = async (
     case 'onTheAirTv': {
       const res = await TMDBService.getOnTheAirTV(page);
       return tagMedia(res.results, 'tv');
+    }
+    case 'recentlyAdded': {
+      const media = query.media ?? 'mixed';
+      const jobs: Promise<MediaItem[]>[] = [];
+      if (media !== 'tv') {
+        jobs.push(
+          TMDBService.getNowPlayingMovies(page, query.region).then((res) =>
+            tagMedia(res.results, 'movie'),
+          ),
+        );
+      }
+      if (media !== 'movie') {
+        jobs.push(
+          TMDBService.discoverRecentlyAddedTV(page).then((res) =>
+            tagMedia(res.results, 'tv'),
+          ),
+        );
+      }
+      const lists = await Promise.all(jobs);
+      return sortByReleaseDateDesc(
+        dedupeByKey(lists.flat()),
+      );
     }
     case 'topRatedMovies': {
       const res = await TMDBService.getTopRatedMovies(page);

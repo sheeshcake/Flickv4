@@ -24,6 +24,7 @@ import { DownloadsProvider } from '@/src/hooks/useDownloads';
 import { DownloadResolverHost } from '@/src/components/DownloadResolverHost';
 import { lockPortrait } from '@/src/utils/orientation';
 import { bootstrapDownloadPermissions } from '@/src/utils/downloadPermissions';
+import { bootstrapReleaseReminders } from '@/src/services/ReleaseReminderService';
 import '@/global.css';
 
 // Inner component so it can read the theme context provided above.
@@ -33,6 +34,7 @@ function AppInner() {
   useEffect(() => {
     lockPortrait();
     void bootstrapDownloadPermissions();
+    void bootstrapReleaseReminders();
   }, []);
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

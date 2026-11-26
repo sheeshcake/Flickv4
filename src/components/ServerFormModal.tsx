@@ -431,7 +431,7 @@ export const ServerFormModal = ({
                   >
                     {testing ? (
                       <>
-                        <Spinner size="small" color="#E50914" />
+                        <Spinner size="small" color="#C47C48" />
                         <ButtonText className="text-foreground">
                           Cancel
                         </ButtonText>

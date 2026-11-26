@@ -8,7 +8,7 @@ export type ModeType = 'light' | 'dark' | 'system';
 
 export function GluestackUIProvider({
   mode = 'system',
-  palette = 'classic',
+  palette = 'coffee',
   ...props
 }: {
   mode?: ModeType;

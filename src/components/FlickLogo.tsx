@@ -14,7 +14,7 @@ export const FlickLogo = ({ width, height }: FlickLogoProps) =>
       viewBox="0 0 240 64"
       accessibilityLabel="CoFFe House"
     >
-      <SvgText x="0" y="46" fill="#E50914" fontSize="40" fontWeight="700">
+      <SvgText x="0" y="46" fill="#C47C48" fontSize="40" fontWeight="700">
         CoFFe
       </SvgText>
       <SvgText x="118" y="46" fill="#FFFFFF" fontSize="40" fontWeight="700">

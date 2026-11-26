@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   ScrollView,
   View,
@@ -10,12 +16,18 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
+  Bell,
+  BellRing,
   CalendarDays,
+  Clock3,
+  Coffee,
   Film,
   Flame,
   Sparkles,
   Tv,
+  X,
   type LucideIcon,
 } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
@@ -29,11 +41,17 @@ import { ErrorState } from '@/src/components/ErrorState';
 import { Focusable } from '@/src/components/Focusable';
 import { TopTenRow } from '@/src/components/TopTenRow';
 import { UpcomingCard } from '@/src/components/UpcomingCard';
+import { buildRecentlyAddedQuery } from '@/src/config/categoriesCatalog';
 import { useCatalogRegion } from '@/src/hooks/useCatalogRegion';
 import { useDeviceKind } from '@/src/hooks/useDeviceKind';
+import { useReleaseReminders } from '@/src/hooks/useReleaseReminders';
 import type { RootStackParamList } from '@/src/navigation/types';
+import {
+  removeReleaseReminder,
+  type ReleaseReminder,
+} from '@/src/services/ReleaseReminderService';
 import { TMDBService } from '@/src/services/TMDBService';
-import { tagMedia } from '@/src/services/categories';
+import { sortByReleaseDateDesc, tagMedia } from '@/src/services/categories';
 import { getReleaseDate, type MediaItem } from '@/src/types';
 import { getHorizontalPadding } from '@/src/utils/responsive';
 import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
@@ -41,7 +59,9 @@ import { TV_FOCUS_BORDER_CLASSNAME } from '@/src/utils/tv';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 const SECTIONS = [
+  { key: 'recent', label: 'Recently Added', icon: Clock3 },
   { key: 'coming', label: 'Coming Soon', icon: CalendarDays },
+  { key: 'reminders', label: 'My Reminders', icon: Bell },
   { key: 'everyone', label: 'Everyone Watching', icon: Flame },
   { key: 'series', label: 'Top 10 Series', icon: Tv },
   { key: 'films', label: 'Top 10 Films', icon: Film },
@@ -54,6 +74,7 @@ const SECTIONS = [
 type SectionKey = (typeof SECTIONS)[number]['key'];
 
 interface NewFeed {
+  recentlyAdded: MediaItem[];
   comingSoon: MediaItem[];
   everyone: MediaItem[];
   topSeries: MediaItem[];
@@ -61,6 +82,7 @@ interface NewFeed {
 }
 
 const EMPTY_FEED: NewFeed = {
+  recentlyAdded: [],
   comingSoon: [],
   everyone: [],
   topSeries: [],
@@ -87,17 +109,76 @@ const dedupe = (items: MediaItem[]): MediaItem[] => {
   });
 };
 
+const reminderDateLabel = (reminder: ReleaseReminder): string => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(reminder.releaseDate);
+  if (!match) return reminder.releaseDate;
+  const months = [
+    'JAN',
+    'FEB',
+    'MAR',
+    'APR',
+    'MAY',
+    'JUN',
+    'JUL',
+    'AUG',
+    'SEP',
+    'OCT',
+    'NOV',
+    'DEC',
+  ];
+  return `${Number(match[3])} ${months[Number(match[2]) - 1] ?? ''} ${match[1]}`;
+};
+
+interface SectionHeadingProps {
+  icon: LucideIcon;
+  title: string;
+  subtitle?: string;
+  action?: ReactNode;
+}
+
+const SectionHeading = ({
+  icon: SectionIcon,
+  title,
+  subtitle,
+  action,
+}: SectionHeadingProps) => (
+  <HStack className="mb-3 items-center justify-between">
+    <HStack space="sm" className="items-center">
+      <LinearGradient
+        colors={['#C47C48', '#6B3D22']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        className="h-8 w-8 items-center justify-center rounded-xl"
+      >
+        <Icon as={SectionIcon} size="sm" className="text-primary-foreground" />
+      </LinearGradient>
+      <VStack>
+        <Heading size="lg" bold className="text-foreground">
+          {title}
+        </Heading>
+        {subtitle ? (
+          <Text size="2xs" className="text-muted-foreground">
+            {subtitle}
+          </Text>
+        ) : null}
+      </VStack>
+    </HStack>
+    {action}
+  </HStack>
+);
+
 export const NewScreen = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const deviceKind = useDeviceKind();
   const { region } = useCatalogRegion();
+  const { reminders } = useReleaseReminders();
 
   const [feed, setFeed] = useState<NewFeed>(EMPTY_FEED);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const [activeSection, setActiveSection] = useState<SectionKey>('coming');
+  const [activeSection, setActiveSection] = useState<SectionKey>('recent');
 
   const scrollRef = useRef<ScrollView>(null);
   const offsetsRef = useRef<Partial<Record<SectionKey, number>>>({});
@@ -108,15 +189,25 @@ export const NewScreen = () => {
     const tomorrow = isoAfterDays(1);
     const horizon = isoAfterDays(120);
 
-    const [moviesPage1, moviesPage2, shows, trendingAll, trendingShows, trendingFilms] =
-      await Promise.all([
-        TMDBService.getUpcomingMovies(1, region).catch(() => null),
-        TMDBService.getUpcomingMovies(2, region).catch(() => null),
-        TMDBService.discoverUpcomingTV().catch(() => null),
-        TMDBService.getTrendingAll().catch(() => null),
-        TMDBService.getTrendingTVShows().catch(() => null),
-        TMDBService.getTrendingMovies().catch(() => null),
-      ]);
+    const [
+      moviesPage1,
+      moviesPage2,
+      shows,
+      nowPlaying,
+      recentShows,
+      trendingAll,
+      trendingShows,
+      trendingFilms,
+    ] = await Promise.all([
+      TMDBService.getUpcomingMovies(1, region).catch(() => null),
+      TMDBService.getUpcomingMovies(2, region).catch(() => null),
+      TMDBService.discoverUpcomingTV().catch(() => null),
+      TMDBService.getNowPlayingMovies(1, region).catch(() => null),
+      TMDBService.discoverRecentlyAddedTV().catch(() => null),
+      TMDBService.getTrendingAll().catch(() => null),
+      TMDBService.getTrendingTVShows().catch(() => null),
+      TMDBService.getTrendingMovies().catch(() => null),
+    ]);
 
     const upcomingPool = dedupe([
       ...tagMedia(moviesPage1?.results ?? [], 'movie'),
@@ -133,6 +224,15 @@ export const NewScreen = () => {
       .sort((a, b) => (getReleaseDate(a) ?? '').localeCompare(getReleaseDate(b) ?? ''))
       .slice(0, 24);
 
+    const recentlyAdded = sortByReleaseDateDesc(
+      dedupe([
+        ...tagMedia(nowPlaying?.results ?? [], 'movie'),
+        ...tagMedia(recentShows?.results ?? [], 'tv'),
+      ]),
+    )
+      .filter((item) => Boolean(getReleaseDate(item)))
+      .slice(0, 20);
+
     const everyone = dedupe(
       (trendingAll?.results ?? []).filter(
         (item) =>
@@ -142,6 +242,7 @@ export const NewScreen = () => {
     ).slice(0, 10);
 
     const next: NewFeed = {
+      recentlyAdded,
       comingSoon,
       everyone,
       topSeries: tagMedia(trendingShows?.results ?? [], 'tv').slice(0, 10),
@@ -174,7 +275,7 @@ export const NewScreen = () => {
 
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const y = event.nativeEvent.contentOffset.y + 96;
+      const y = event.nativeEvent.contentOffset.y + 112;
       let current: SectionKey = SECTIONS[0].key;
       for (const section of SECTIONS) {
         const offset = offsetsRef.current[section.key];
@@ -187,17 +288,41 @@ export const NewScreen = () => {
 
   const openDetail = (item: MediaItem) => navigation.navigate('Detail', { item });
   const padding = getHorizontalPadding(deviceKind);
+  const contentWidth = width - padding * 2;
 
   return (
-    <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <HStack className="items-center px-4 py-3">
-        <Icon as={Sparkles} size="xl" className="text-primary" />
-        <Heading size="xl" bold className="ml-3 text-foreground">
-          New
-        </Heading>
-      </HStack>
+    <Box className="flex-1 bg-background">
+      <LinearGradient
+        colors={['#2A1A12', '#120C08', '#0C0907']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{ paddingTop: insets.top }}
+      >
+        <HStack className="items-center px-4 py-4">
+          <LinearGradient
+            colors={['#C47C48', '#6B3D22']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            className="h-11 w-11 items-center justify-center rounded-2xl"
+          >
+            <Icon as={Coffee} size="lg" className="text-primary-foreground" />
+          </LinearGradient>
+          <VStack className="ml-3 flex-1">
+            <Text size="2xs" bold className="text-primary">
+              COFFE HOUSE
+            </Text>
+            <Heading size="2xl" bold className="text-foreground">
+              New
+            </Heading>
+            <Text size="xs" className="text-muted-foreground">
+              Fresh drops, trends & release alerts
+            </Text>
+          </VStack>
+          <Icon as={Sparkles} size="lg" className="text-primary/80" />
+        </HStack>
+      </LinearGradient>
 
-      <View className="mb-2">
+      <View className="mb-2 mt-3">
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -210,7 +335,9 @@ export const NewScreen = () => {
                 key={section.key}
                 onPress={() => scrollToSection(section.key)}
                 className={`flex-row items-center gap-1.5 rounded-full border px-3 py-1.5 ${
-                  active ? 'border-primary bg-primary/20' : 'border-border bg-card'
+                  active
+                    ? 'border-primary/60 bg-primary/20'
+                    : 'border-border bg-card/70'
                 }`}
                 focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
               >
@@ -221,10 +348,9 @@ export const NewScreen = () => {
                 />
                 <Text
                   size="sm"
+                  bold={active}
                   className={
-                    active
-                      ? 'font-semibold text-foreground'
-                      : 'text-muted-foreground'
+                    active ? 'text-foreground' : 'text-muted-foreground'
                   }
                 >
                   {section.label}
@@ -238,7 +364,7 @@ export const NewScreen = () => {
       {loading ? (
         <VStack space="sm" className="px-4 py-10">
           <Text size="sm" className="text-muted-foreground">
-            Loading new releases…
+            Brewing your new releases…
           </Text>
         </VStack>
       ) : error ? (
@@ -255,16 +381,57 @@ export const NewScreen = () => {
           onScroll={onScroll}
           scrollEventThrottle={16}
         >
+          <View onLayout={onSectionLayout('recent')}>
+            <VStack
+              space="md"
+              className="mb-8"
+              style={{ paddingHorizontal: padding }}
+            >
+              <SectionHeading
+                icon={Clock3}
+                title="Recently Added"
+                subtitle="Fresh movies and series, newest first"
+              />
+              <ContentRow
+                title=""
+                data={feed.recentlyAdded}
+                deviceKind={deviceKind}
+                screenWidth={width}
+                onItemPress={openDetail}
+                getCaption={getReleaseDate}
+                onViewMore={() =>
+                  navigation.navigate('ViewMore', {
+                    title: 'Recently Added',
+                    query: buildRecentlyAddedQuery('mixed', region),
+                  })
+                }
+              />
+              {!feed.recentlyAdded.length ? (
+                <Box className="rounded-2xl border border-dashed border-border bg-card/60 p-4">
+                  <Text size="sm" className="text-muted-foreground">
+                    No recent titles available right now.
+                  </Text>
+                </Box>
+              ) : null}
+            </VStack>
+          </View>
+
           <View onLayout={onSectionLayout('coming')}>
-            <VStack space="md" className="mb-8" style={{ paddingHorizontal: padding }}>
-              <Heading size={deviceKind === 'tv' ? '2xl' : 'lg'} className="text-foreground">
-                Coming Soon
-              </Heading>
+            <VStack
+              space="md"
+              className="mb-8"
+              style={{ paddingHorizontal: padding }}
+            >
+              <SectionHeading
+                icon={CalendarDays}
+                title="Coming Soon"
+                subtitle="Set a local reminder for release day"
+              />
               {feed.comingSoon.slice(0, 12).map((item) => (
                 <UpcomingCard
                   key={`${item.media_type ?? ''}-${item.id}`}
                   item={item}
-                  width={width}
+                  width={contentWidth}
                   onPress={openDetail}
                 />
               ))}
@@ -273,6 +440,61 @@ export const NewScreen = () => {
                   No upcoming dates available right now.
                 </Text>
               ) : null}
+            </VStack>
+          </View>
+
+          <View onLayout={onSectionLayout('reminders')}>
+            <VStack
+              space="sm"
+              className="mb-8"
+              style={{ paddingHorizontal: padding }}
+            >
+              <SectionHeading
+                icon={BellRing}
+                title="My Release Calendar"
+                subtitle={`${reminders.length} local reminder${reminders.length === 1 ? '' : 's'} on this device`}
+              />
+              {reminders.length ? (
+                reminders.map((reminder) => (
+                  <Focusable
+                    key={reminder.key}
+                    onPress={() => void removeReleaseReminder(reminder.key)}
+                    className="rounded-2xl border border-border/70 bg-card/80 px-3 py-3"
+                    focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+                  >
+                    <HStack className="items-center justify-between">
+                      <HStack space="sm" className="flex-1 items-center">
+                        <LinearGradient
+                          colors={['#C47C48', '#6B3D22']}
+                          className="h-9 w-1.5 rounded-full"
+                        />
+                        <VStack className="flex-1">
+                          <Text bold className="text-foreground" numberOfLines={1}>
+                            {reminder.title}
+                          </Text>
+                          <Text size="2xs" className="text-muted-foreground">
+                            {reminder.mediaType === 'movie' ? 'Film' : 'Series'} ·{' '}
+                            {reminderDateLabel(reminder)}
+                          </Text>
+                        </VStack>
+                      </HStack>
+                      <HStack space="xs" className="items-center">
+                        <Text size="2xs" className="text-primary">
+                          Cancel
+                        </Text>
+                        <Icon as={X} size="xs" className="text-muted-foreground" />
+                      </HStack>
+                    </HStack>
+                  </Focusable>
+                ))
+              ) : (
+                <Box className="rounded-2xl border border-dashed border-border bg-card/60 p-4">
+                  <Text size="xs" className="text-muted-foreground">
+                    Tap “Remind me on release day” on any Coming Soon title and it
+                    will appear here.
+                  </Text>
+                </Box>
+              )}
             </VStack>
           </View>
 

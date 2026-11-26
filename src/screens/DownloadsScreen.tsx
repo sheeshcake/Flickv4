@@ -421,7 +421,7 @@ const EpisodeRow = ({
             <Icon as={Play} className="text-primary-foreground" />
           </Focusable>
         ) : job.status === 'downloading' || job.status === 'resolving' || job.status === 'queued' ? (
-          <Spinner size="small" color="#E50914" />
+          <Spinner size="small" color="#C47C48" />
         ) : job.status === 'failed' ? (
           <Icon as={AlertCircle} className="text-primary" />
         ) : (
@@ -523,7 +523,7 @@ const DownloadRow = ({
               <Icon as={Play} className="text-primary-foreground" />
             </Focusable>
           ) : job.status === 'downloading' || job.status === 'resolving' || job.status === 'queued' ? (
-            <Spinner size="small" color="#E50914" />
+            <Spinner size="small" color="#C47C48" />
           ) : job.status === 'failed' ? (
             <Icon as={AlertCircle} className="text-primary" />
           ) : (

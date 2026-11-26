@@ -210,7 +210,7 @@ export const LiveTvScreen = () => {
               ) : null}
             </VStack>
             <HStack space="sm" className="items-center">
-              {resolving ? <Spinner size="small" color="#E50914" /> : null}
+              {resolving ? <Spinner size="small" color="#C47C48" /> : null}
               <Focusable
                 onPress={() => void onToggleFavorite(item.id)}
                 className="rounded-full p-2"
@@ -434,7 +434,7 @@ export const LiveTvScreen = () => {
                 setRefreshing(true);
                 void load(true);
               }}
-              tintColor="#E50914"
+              tintColor="#C47C48"
             />
           }
           ListEmptyComponent={
@@ -477,7 +477,7 @@ export const LiveTvScreen = () => {
                 setRefreshing(true);
                 void load(true);
               }}
-              tintColor="#E50914"
+              tintColor="#C47C48"
             />
           }
           ListEmptyComponent={

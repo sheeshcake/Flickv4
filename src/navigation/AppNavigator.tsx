@@ -45,11 +45,11 @@ const navTheme = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
-    background: '#000000',
-    card: '#000000',
-    primary: '#E50914',
+    background: '#0C0907',
+    card: '#0C0907',
+    primary: '#C47C48',
     text: '#FFFFFF',
-    border: '#1f1f1f',
+    border: '#3C2E24',
   },
 };
 

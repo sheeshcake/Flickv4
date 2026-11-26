@@ -142,7 +142,7 @@ export const SeasonEpisodePicker = ({
 
       {loadingEpisodes ? (
         <Center className="py-10">
-          <Spinner color="#E50914" />
+          <Spinner color="#C47C48" />
         </Center>
       ) : (
         <VStack space="lg">
@@ -241,9 +241,9 @@ const EpisodeDownloadButton = ({
   if (status === 'idle') {
     iconEl = <Icon as={Download} className="text-foreground" />;
   } else if (status === 'queued' || status === 'resolving') {
-    iconEl = <Spinner size="small" color="#E50914" />;
+    iconEl = <Spinner size="small" color="#C47C48" />;
   } else if (status === 'downloading') {
-    iconEl = <Spinner size="small" color="#E50914" />;
+    iconEl = <Spinner size="small" color="#C47C48" />;
   } else if (status === 'paused') {
     iconEl = <Icon as={Pause} className="text-muted-foreground" />;
     tint = 'text-muted-foreground';

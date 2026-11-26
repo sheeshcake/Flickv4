@@ -51,7 +51,7 @@
       [
         "expo-notifications",
         {
-          "color": "#E50914"
+          "color": "#C47C48"
         }
       ],
       "@kesha-antonov/react-native-background-downloader",

@@ -212,6 +212,12 @@ export const buildCategoryRows = (
   return rows;
 };
 
+/** Shared query for the Recently Added rail (now playing + new series). */
+export const buildRecentlyAddedQuery = (
+  media: 'mixed' | 'movie' | 'tv' = 'mixed',
+  region?: string,
+): CategoryQuery => ({ kind: 'recentlyAdded', media, region });
+
 /** A small trending rail above the recipe rows for scope-wide browsing. */
 export const buildScopeTrendingRow = (
   scope: BrowseScope,

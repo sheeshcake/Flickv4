@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { ScrollView } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   Baby,
   Clapperboard,
+  Coffee,
   Compass,
   Drama,
   Ghost,
@@ -123,9 +125,22 @@ export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
         className="mb-3 items-center justify-between"
         style={{ paddingHorizontal: padding }}
       >
-        <Heading size="md" className="text-foreground">
-          Categories
-        </Heading>
+        <HStack space="sm" className="items-center">
+          <LinearGradient
+            colors={['#C47C48', '#6B3D22']}
+            className="h-8 w-8 items-center justify-center rounded-xl"
+          >
+            <Icon as={Coffee} size="sm" className="text-primary-foreground" />
+          </LinearGradient>
+          <VStack>
+            <Heading size="md" bold className="text-foreground">
+              Categories
+            </Heading>
+            <Text size="2xs" className="text-muted-foreground">
+              Pick your mood, brewed your way
+            </Text>
+          </VStack>
+        </HStack>
         <HStack space="sm">
           {SCOPES.map((option) => {
             const active = scope === option.key;
@@ -135,17 +150,16 @@ export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
                 onPress={() => setScope(option.key)}
                 className={`rounded-full px-3 py-1 ${
                   active
-                    ? 'border border-primary/40 bg-primary/20'
-                    : 'border border-border bg-card'
+                    ? 'border border-primary/60 bg-primary/25'
+                    : 'border border-border bg-card/70'
                 }`}
                 focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
               >
                 <Text
                   size="sm"
+                  bold={active}
                   className={
-                    active
-                      ? 'font-semibold text-foreground'
-                      : 'text-muted-foreground'
+                    active ? 'text-foreground' : 'text-muted-foreground'
                   }
                 >
                   {option.label}
@@ -171,15 +185,30 @@ export const GenreGrid = ({ deviceKind, onSelect }: GenreGridProps) => {
               <Focusable
                 key={`${scope}-${entry.id}`}
                 onPress={() => onSelect(scope, entry.category)}
-                className="rounded-xl border border-border bg-card px-3 py-3"
+                className="rounded-2xl border border-border/70 bg-card/80 px-3 py-3"
                 focusedClassName={`bg-primary/20 ${TV_FOCUS_BORDER_CLASSNAME}`}
+                style={{
+                  shadowColor: '#000',
+                  shadowOpacity: 0.22,
+                  shadowRadius: 8,
+                  shadowOffset: { width: 0, height: 4 },
+                  elevation: 3,
+                }}
               >
                 <HStack space="sm" className="items-center">
-                  <Box className="h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
-                    <Icon as={entry.icon} size="sm" className="text-primary" />
-                  </Box>
+                  <LinearGradient
+                    colors={['rgba(196,124,72,0.38)', 'rgba(196,124,72,0.08)']}
+                    className="h-9 w-9 items-center justify-center rounded-xl"
+                  >
+                    <Icon
+                      as={entry.icon}
+                      size="sm"
+                      className="text-primary-foreground"
+                    />
+                  </LinearGradient>
                   <Text
                     size="sm"
+                    bold
                     className="flex-1 text-foreground"
                     numberOfLines={1}
                   >

@@ -237,7 +237,7 @@ export const SplashScreen = ({ navigation }: RootStackScreenProps<'Splash'>) => 
           entering={FadeIn.delay(150).duration(200)}
           style={{ opacity: showCopy ? 1 : 0 }}
         >
-          <ActivityIndicator size="large" color="#E50914" />
+          <ActivityIndicator size="large" color="#C47C48" />
         </Animated.View>
 
         <Box className="min-h-10 px-8" style={{ opacity: showCopy ? 1 : 0 }}>

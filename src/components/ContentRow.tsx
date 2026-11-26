@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { FlatList } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronRight } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { HStack } from '@/components/ui/hstack';
@@ -72,7 +73,10 @@ export const ContentRow = ({
           style={{ paddingHorizontal: padding }}
         >
           <HStack space="sm" className="items-center">
-            <Box className="h-6 w-1 rounded-full bg-primary" />
+            <LinearGradient
+              colors={['#C47C48', '#6B3D22']}
+              className="h-6 w-1 rounded-full"
+            />
             <Heading size={isTv ? '2xl' : 'lg'} className="text-foreground">
               {title}
             </Heading>

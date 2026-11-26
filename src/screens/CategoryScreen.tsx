@@ -3,7 +3,8 @@ import { ScrollView, useWindowDimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { ArrowLeft, Coffee, Sparkles } from 'lucide-react-native';
 import { Box } from '@/components/ui/box';
 import { HStack } from '@/components/ui/hstack';
 import { VStack } from '@/components/ui/vstack';
@@ -97,25 +98,48 @@ export const CategoryScreen = ({
     navigation.navigate('ViewMore', { title: row.title, query: row.query });
 
   return (
-    <Box className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <HStack space="md" className="items-center px-4 py-3">
-        <Focusable
-          onPress={() => navigation.goBack()}
-          hitSlop={12}
-          className="rounded-full"
-          focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
-        >
-          <Icon as={ArrowLeft} size="xl" className="text-foreground" />
-        </Focusable>
-        <VStack className="flex-1">
-          <Heading size="xl" bold className="text-foreground" numberOfLines={1}>
-            {headerTitle}
-          </Heading>
-          <Text size="xs" className="text-muted-foreground">
-            {category ? `${titleForScope(scope)} · ${region}` : region}
-          </Text>
-        </VStack>
-      </HStack>
+    <Box className="flex-1 bg-background">
+      <LinearGradient
+        colors={['#2A1A12', '#120C08', '#0C0907']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{ paddingTop: insets.top }}
+      >
+        <HStack space="md" className="items-center px-4 py-3">
+          <Focusable
+            onPress={() => navigation.goBack()}
+            hitSlop={12}
+            className="rounded-full border border-border/70 bg-card/70 p-1.5"
+            focusedClassName={TV_FOCUS_BORDER_CLASSNAME}
+          >
+            <Icon as={ArrowLeft} size="lg" className="text-foreground" />
+          </Focusable>
+          <LinearGradient
+            colors={['#C47C48', '#6B3D22']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            className="h-10 w-10 items-center justify-center rounded-2xl"
+          >
+            <Icon as={Coffee} size="sm" className="text-primary-foreground" />
+          </LinearGradient>
+          <VStack className="flex-1">
+            <Text size="2xs" bold className="text-primary">
+              COFFE HOUSE PICKS
+            </Text>
+            <Heading size="xl" bold className="text-foreground" numberOfLines={1}>
+              {headerTitle}
+            </Heading>
+          </VStack>
+          <Icon as={Sparkles} size="lg" className="text-primary/80" />
+        </HStack>
+        <HStack className="px-4 pb-3">
+          <Box className="rounded-full border border-border/70 bg-card/70 px-3 py-1">
+            <Text size="2xs" className="text-muted-foreground">
+              {category ? `${titleForScope(scope)} · ${region}` : region}
+            </Text>
+          </Box>
+        </HStack>
+      </LinearGradient>
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {rows.map((row) => {
